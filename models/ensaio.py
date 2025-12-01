@@ -1,7 +1,7 @@
 from models.massa import Massa
 
 class Ensaio:
-    def __init__(self, id_ensaio, massa_objeto: Massa, valores_medidos, lote, batch, origem_viscosidade="N/A"):
+    def __init__(self, id_ensaio, massa_objeto: Massa, valores_medidos, lote, batch, data_hora=None, origem_viscosidade="N/A"):
         """
         Inicializa um objeto Ensaio.
         
@@ -17,44 +17,46 @@ class Ensaio:
         self.valores_medidos = valores_medidos
         self.lote = lote
         self.batch = batch
+        self.data_hora = data_hora  # <--- Novo campo
         self.origem_viscosidade = origem_viscosidade
         
         self.score_final = 0
         self.detalhes_score = []
-        self.acao_recomendada = "" 
-
-    def calcular_score(self):
-        """
-        Calcula o score ponderado baseado nos parâmetros da Massa.
-        Define flags (ts2_fora, t90_fora) para o frontend usar cores.
-        Define a ação recomendada ao final.
-        """
-        soma_pesos = 0
-        soma_score_ponderado = 0
+        self.acao_recomendada = ""
         
-        # Limpa detalhes anteriores caso recalcule
-        self.detalhes_score = []
-
-        # --- INICIALIZAÇÃO DAS FLAGS DE STATUS ---
-        # Definimos como False (não está fora/está ok) por padrão
-        # Isso evita erro no HTML caso o parâmetro não exista no teste
+        # Flags para o frontend
         self.ts2_fora = False
         self.t90_fora = False
-        self.viscosidade_fora = False # Caso queira usar para viscosidade também
+        self.viscosidade_fora = False
 
-        print(f"--- Calculando Score para Ensaio {self.id_ensaio} ({self.massa.descricao}) ---")
+    def calcular_score(self):
+        soma_pesos = 0
+        soma_score_ponderado = 0
+        self.detalhes_score = []
 
-        # Itera sobre cada parâmetro definido na Massa (Receita)
+        # Inicializa flags como False (Verde/Ok)
+        self.ts2_fora = False
+        self.t90_fora = False
+        self.viscosidade_fora = False
+
+        # Itera sobre cada parâmetro definido na Massa
         for nome_param, param in self.massa.parametros.items():
             
-            # Verifica se temos o valor medido para este parâmetro
             if nome_param in self.valores_medidos:
                 valor_medido = self.valores_medidos[nome_param]
                 
-                # --- LÓGICA MATEMÁTICA DO SCORE ---
-                score_item = 0
+                # --- 1. LÓGICA DE COR (Fora dos Limites) ---
+                # Se for menor que o mínimo OU maior que o máximo -> VERMELHO
+                estourou_limite = (valor_medido < param.minimo) or (valor_medido > param.maximo)
                 
-                # Define a diferença e o intervalo baseados se o valor está acima ou abaixo do alvo
+                if nome_param == "Ts2":
+                    self.ts2_fora = estourou_limite
+                elif nome_param == "T90":
+                    self.t90_fora = estourou_limite
+                elif nome_param == "Viscosidade":
+                    self.viscosidade_fora = estourou_limite
+
+                # --- 2. CÁLCULO DO SCORE (Mantido igual) ---
                 if valor_medido >= param.alvo:
                     diferenca = valor_medido - param.alvo
                     intervalo = param.maximo - param.alvo
@@ -62,43 +64,25 @@ class Ensaio:
                     diferenca = param.alvo - valor_medido
                     intervalo = param.alvo - param.minimo
                 
-                # Cálculo do percentual de desvio e penalização
+                score_item = 0
                 if intervalo > 0:
                     percentual_desvio = diferenca / intervalo
-                    # A fórmula penaliza 30 pontos se atingir o limite (Min ou Max)
                     score_item = 100 - (percentual_desvio * 30)
-                else:
-                    score_item = 0 # Evita divisão por zero
                 
-                # Garante limites entre 0 e 100
                 score_item = max(0, min(100, score_item))
                 
-                # --- DEFINIÇÃO DAS FLAGS PARA O FRONTEND (NOVO) ---
-                # Se o score for menor que 100 (ou seja, tem desvio), marcamos como "fora"
-                # O HTML vai ler isso: se True = 'danger' (Vermelho), se False = 'success' (Verde)
-                if nome_param == "Ts2":
-                    self.ts2_fora = score_item < 100
-                elif nome_param == "T90":
-                    self.t90_fora = score_item < 100
-                elif nome_param == "Viscosidade":
-                    self.viscosidade_fora = score_item < 100
-
-                # Acumula para média ponderada
                 soma_score_ponderado += (score_item * param.peso)
                 soma_pesos += param.peso
                 
-                # Guarda o detalhe para o relatório
+                # Detalhes para o modal (formatação de string)
                 self.detalhes_score.append(f"{nome_param}: Medido={valor_medido} | Alvo={param.alvo} | Score={score_item:.2f}")
 
-        # Cálculo final da média ponderada
         if soma_pesos > 0:
             self.score_final = soma_score_ponderado / soma_pesos
         else:
             self.score_final = 0
             
-        # --- APÓS O CÁLCULO, DETERMINAR A AÇÃO AUTOMATICAMENTE ---
         self.determinar_acao()
-            
         return self.score_final
 
 

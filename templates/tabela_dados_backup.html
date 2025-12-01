@@ -1,0 +1,166 @@
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle text-nowrap mb-0">
+        <thead class="bg-light sticky-top"> <tr>
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='id', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">ID <i class="fas fa-sort small"></i></a>
+                </th>
+                
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='data', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">Data <i class="fas fa-sort small"></i></a>
+                </th>
+
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='lote', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">Lote/Batch <i class="fas fa-sort small"></i></a>
+                </th>
+
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='ts2', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">Ts2 <i class="fas fa-sort small"></i></a>
+                </th>
+
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='t90', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">T90 <i class="fas fa-sort small"></i></a>
+                </th>
+
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='visc', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">Visc. <i class="fas fa-sort small"></i></a>
+                </th>
+
+                <th class="resizable-col">
+                    <a href="#" hx-get="{{ url_for('dashboard', sort='score', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block">Score <i class="fas fa-sort small"></i></a>
+                </th>
+                
+                <th class="resizable-col" style="min-width: 180px;">
+                    <a href="#" 
+                       hx-get="{{ url_for('dashboard', sort='acao', order='asc' if order=='desc' else 'desc', page=pagina_atual) }}"
+                       hx-target="#tabela-container"
+                       hx-push-url="true"
+                       class="text-decoration-none text-secondary d-block">
+                       Ação Recomendada <i class="fas fa-sort small"></i>
+                    </a>
+                </th>
+                <th class="text-center">Ver</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ensaio in ensaios %}
+            <tr>
+                <td>{{ ensaio.id_ensaio }}</td>
+                <td>
+                    {% if ensaio.data_hora %}
+                        {{ ensaio.data_hora.strftime('%d/%m/%y') }}
+                        <div class="text-muted small" style="font-size: 0.7em;">{{ ensaio.data_hora.strftime('%H:%M') }}</div>
+                    {% else %}-{% endif %}
+                </td>
+                <td>
+                    <div class="fw-bold">{{ ensaio.lote }}</div>
+                    {% if ensaio.batch %} <div class="text-muted small">Batch: {{ ensaio.batch }}</div> {% endif %}
+                </td>
+                
+                <td class="{{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">
+                    {{ "%.2f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}
+                </td>
+                
+                <td class="{{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">
+                    {{ "%.2f"|format(ensaio.valores_medidos.get('T90', 0)) }}
+                </td>
+                
+                <td>
+                    {{ "%.1f"|format(ensaio.valores_medidos.get('Viscosidade', 0)) }}
+                    {% if 'Média' in ensaio.origem_viscosidade %}
+                        <span class="badge bg-light text-dark border ms-1" title="Média do Lote" style="font-size: 0.6em;">M</span>
+                    {% endif %}
+                </td>
+
+                <td>
+                    <div class="progress" style="height: 15px; width: 80px;">
+                        <div class="progress-bar 
+                            {% if ensaio.score_final >= 85 %}bg-success
+                            {% elif ensaio.score_final >= 70 %}bg-warning
+                            {% else %}bg-danger{% endif %}" 
+                            role="progressbar" 
+                            style="width: {{ ensaio.score_final }}%;">
+                            {{ "%.0f"|format(ensaio.score_final) }}%
+                        </div>
+                    </div>
+                </td>
+
+                <td>
+                    <span class="badge 
+                        {% if 'PRIME' in ensaio.acao_recomendada %}bg-success
+                        {% elif 'LIBERAR' == ensaio.acao_recomendada %}bg-success
+                        {% elif 'RESSALVA' in ensaio.acao_recomendada %}bg-warning text-dark
+                        {% elif 'CORTAR' in ensaio.acao_recomendada %}bg-dark
+                        {% else %}bg-danger{% endif %}" style="font-size: 0.7em;">
+                        {{ ensaio.acao_recomendada }}
+                    </span>
+                </td>
+
+                <td class="text-center">
+                    <button class="btn btn-sm btn-outline-primary py-0 px-1" 
+                            data-bs-toggle="modal" 
+                            data-bs-target="#detailsModal"
+                            
+                            data-id="{{ ensaio.id_ensaio }}"
+                            data-batch="{{ ensaio.batch }}"
+                            data-lote="{{ ensaio.lote }}"
+                            data-material="{{ ensaio.massa.descricao }}"
+                            data-score="{{ '%.1f'|format(ensaio.score_final) }}"
+                            
+                            data-ts2-target="{{ ensaio.massa.parametros.Ts2.alvo }}"
+                            data-ts2-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('Ts2', 0)) }}"
+                            data-ts2-status="{{ 'danger' if ensaio.ts2_fora else 'success' }}"
+
+                            data-t90-target="{{ ensaio.massa.parametros.T90.alvo }}"
+                            data-t90-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('T90', 0)) }}"
+                            data-t90-status="{{ 'danger' if ensaio.t90_fora else 'success' }}"
+
+                            data-ml-target="{{ ensaio.massa.parametros.Viscosidade.alvo }}"
+                            data-ml-measured="{{ '%.1f'|format(ensaio.valores_medidos.get('Viscosidade', 0)) }}"
+                            data-ml-status="{{ 'danger' if ensaio.viscosidade_fora else 'success' }}">
+                        <i class="fas fa-eye small"></i>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="pagination-container d-flex justify-content-between align-items-center">
+    <div class="small text-muted">
+        Exibindo {{ ensaios|length }} registros
+    </div>
+
+    <nav aria-label="Navegação">
+        <ul class="pagination pagination-sm mb-0 align-items-center">
+            
+            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
+                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=1, sort=sort_by, order=order) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-left"></i></a>
+            </li>
+
+            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
+                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual-1, sort=sort_by, order=order) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-left"></i></a>
+            </li>
+
+            <li class="page-item d-flex align-items-center mx-2">
+                <span class="small text-muted me-2">Pág.</span>
+                <input type="number" class="form-control form-control-sm page-input" 
+                       value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" 
+                       hx-get="{{ url_for('dashboard', sort=sort_by, order=order) }}" 
+                       hx-target="#tabela-container" 
+                       hx-push-url="true" 
+                       hx-trigger="change, keyup delay:800ms changed"
+                       name="page">
+                <span class="small text-muted ms-2">de {{ total_paginas }}</span>
+            </li>
+
+            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
+                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual+1, sort=sort_by, order=order) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-right"></i></a>
+            </li>
+
+            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
+                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=total_paginas, sort=sort_by, order=order) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-right"></i></a>
+            </li>
+        </ul>
+    </nav>
+</div>

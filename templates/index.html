@@ -12,15 +12,16 @@
     <!-- Google Fonts (Roboto para ar industrial/técnico) -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
 
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <!-- CSS Personalizado -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </head>
 <body>
-
-<div class="d-flex" id="wrapper">
-    <!-- Sidebar -->
-    <div id="sidebar-wrapper">
+    <div class="d-flex" id="wrapper">
+        
+        <div id="sidebar-wrapper">
         <div class="sidebar-heading">
             <i class="fas fa-industry"></i> INDUSOFT
         </div>
@@ -107,7 +108,7 @@
                     <div class="card p-3 border-start border-4 border-warning">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <div class="kpi-label">Com Ressalva/Cortar e Misturar</div>
+                                <div class="kpi-label">Ressalva/Cortar e Misturar</div>
                                 <div class="kpi-value text-warning">{{ kpi.ressalvas }}</div>
                             </div>
                             <i class="fas fa-exclamation-circle fa-2x text-warning opacity-50"></i>
@@ -127,124 +128,119 @@
                 </div>
             </div>
 
-            <!-- Filtros -->
-            <div class="card mb-4 p-3">
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-3">
-                        <label class="form-label small fw-bold">Data Início</label>
-                        <input type="date" class="form-control">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label small fw-bold">Data Fim</label>
-                        <input type="date" class="form-control">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-bold">Material / Família</label>
-                        <select class="form-select">
-                            <option selected>Todos os Materiais</option>
-                            <option>NBR-70 (Nitrílica)</option>
-                            <option>EPDM-40</option>
-                            <option>FKM-Viton</option>
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-primary w-100"><i class="fas fa-filter me-1"></i> Filtrar</button>
+            <hr class="my-4 text-muted opacity-25">
+            
+
+            <!-- Filtros e Opções de Coluna -->
+            <div class="d-flex justify-content-between align-items-center mb-3 mt-4">
+                <h5 class="text-secondary fw-bold mb-0">
+                    <i class="fas fa-table me-2"></i>Análise Detalhada
+                </h5>
+                
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterCollapse" aria-expanded="false" aria-controls="filterCollapse">
+                        <i class="fas fa-filter me-1"></i> Filtros Avançados
+                    </button>
+
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="columnToggleBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-columns me-1"></i> Colunas
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow p-3" aria-labelledby="columnToggleBtn" style="min-width: 200px;">
+                            <li class="fw-bold small text-muted mb-2">EXIBIR / OCULTAR</li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-id" checked> ID Ensaio</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-data" checked> Data/Hora</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-material" checked> Material</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-lote" checked> Lote/Batch</label></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-ts2" checked> Ts2 (Scorch)</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-t90" checked> T90 (Cura)</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-visc" checked> Viscosidade</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-score" checked> Score Final</label></li>
+                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-acao" checked> Ação</label></li>
+                        </ul>
                     </div>
                 </div>
             </div>
 
-            <!-- Tabela de Dados -->
-            <div class="table-responsive">
-                <table class="table table-striped table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>ID Ensaio</th>
-                            <th>Material</th>
-                            <th>Lote / Batch</th>
-                            <th>Viscosidade (ML 1+4)</th>
-                            <th style="width: 20%;">Quality Score</th>
-                            <th>Ação Recomendada</th>
-                            <th class="text-center">Detalhes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for ensaio in ensaios %}
-                        <tr>
-                            <td>{{ ensaio.id_ensaio }}</td>
-                            <td>{{ ensaio.massa.descricao }}</td>
-                            <td>{{ ensaio.lote }} / {{ ensaio.batch if ensaio.batch else 'N/A' }}</td>
-                            <td>
-                                {{ "%.1f"|format(ensaio.valores_medidos.get('Viscosidade', 0)) }}
-                                <span class="badge bg-secondary" style="font-size: 0.7em;">{{ ensaio.origem_viscosidade }}</span>
-                            </td>
-                            <td>
-                                <div class="progress" style="height: 20px;">
-                                    <div class="progress-bar 
-                                        {% if ensaio.score_final >= 85 %}bg-success
-                                        {% elif ensaio.score_final >= 70 %}bg-warning
-                                        {% else %}bg-danger{% endif %}" 
-                                        role="progressbar" 
-                                        style="width: {{ ensaio.score_final }}%;" 
-                                        aria-valuenow="{{ ensaio.score_final }}" 
-                                        aria-valuemin="0" 
-                                        aria-valuemax="100">
-                                        {{ "%.1f"|format(ensaio.score_final) }}%
-                                    </div>
+            <div class="collapse mb-4" id="filterCollapse">
+                <div class="card card-body bg-light border-0 shadow-sm">
+                    <form hx-get="{{ url_for('dashboard') }}" 
+                          hx-target="#tabela-container" 
+                          hx-push-url="true"
+                          hx-trigger="submit, change from:.filtro-auto">
+                          
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label small fw-bold text-muted">Busca (ID, Lote...)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                                    <input type="text" name="search" class="form-control border-start-0 ps-0" 
+                                           placeholder="Digite para buscar..." 
+                                           value="{{ search_term }}">
                                 </div>
-                            </td>
-                            <td>
-                                <span class="badge 
-                                    {% if 'PRIME' in ensaio.acao_recomendada %}bg-success
-                                    {% elif 'LIBERAR' == ensaio.acao_recomendada %}bg-success
-                                    {% elif 'RESSALVA' in ensaio.acao_recomendada %}bg-warning text-dark
-                                    {% elif 'CORTAR' in ensaio.acao_recomendada %}bg-dark
-                                    {% else %}bg-danger{% endif %}">
-                                    {{ ensaio.acao_recomendada }}
-                                </span>
-                            </td>
-                            <td>
-                                <button class="btn btn-sm btn-primary btn-detalhes" 
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#detailsModal"
-                                        data-id="{{ ensaio.id_ensaio }}"
-                                        data-lote="{{ ensaio.lote }}"
-                                        data-batch="{{ ensaio.batch }}"
-                                        data-material="{{ ensaio.massa.descricao }}"
-                                        data-score="{{ '%.1f'|format(ensaio.score_final) }}"
+                            </div>
 
-                                        data-ts2-target=" {{ ensaio.massa.parametros.Ts2.alvo }} seg"
-                                        data-ts2-measured="{{ ensaio.valores_medidos.Ts2 }} seg"
-                                        data-ts2-status="{{ 'danger' if ensaio.ts2_fora else 'success' }}"
+                            <div class="col-md-3">
+                                <label class="form-label small fw-bold text-muted">Material</label>
+                                <select name="material_filter" class="form-select filtro-auto">
+                                    <option value="">Todas as Massas</option>
+                                    {% for cod, massa in catalogo_massas.items() %}
+                                        <option value="{{ massa.descricao }}" {% if material_filter == massa.descricao %}selected{% endif %}>
+                                            {{ massa.descricao }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
 
-                                        data-t90-target="{{ ensaio.massa.parametros.T90.alvo }} seg"
-                                        data-t90-measured="{{ ensaio.valores_medidos.T90 }} seg"
-                                        data-t90-status="{{ 'danger' if ensaio.t90_fora else 'success' }}"
+                            <div class="col-md-1">
+                                <label class="form-label small fw-bold text-muted">Cód.</label>
+                                <input type="text" name="codigo_filter" class="form-control" placeholder="26791" value="{{ codigo_filter }}">
+                            </div>
 
-                                        data-ml-target=" {{ ensaio.massa.parametros.Viscosidade.alvo }} dNm"
-                                        data-ml-measured="{{ ensaio.valores_medidos.Viscosidade }} dNm"
-                                        data-ml-status="dark"
+                            <div class="col-md-2">
+                                <label class="form-label small fw-bold text-muted">Status</label>
+                                <select name="acao_filter" class="form-select filtro-auto">
+                                    <option value="">Todos</option>
+                                    <option value="APROVADOS" {% if acao_filter == 'APROVADOS' %}selected{% endif %}>Aprovados</option>
+                                    <option value="RESSALVA" {% if acao_filter == 'RESSALVA' %}selected{% endif %}>Ressalva</option>
+                                    <option value="REPROVADO" {% if acao_filter == 'REPROVADO' %}selected{% endif %}>Reprovados</option>
+                                </select>
+                            </div>
 
-                                        data-detalhes="{{ ' || '.join(ensaio.detalhes_score) }}">
-                                    <i class="fas fa-eye"></i>
-                                </button>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-bold text-muted">Período</label>
+                                <div class="input-group">
+                                    <input type="date" name="date_start" class="form-control filtro-auto" value="{{ date_start }}" style="font-size: 0.85rem;">
+                                    <span class="input-group-text bg-light px-1">-</span>
+                                    <input type="date" name="date_end" class="form-control filtro-auto" value="{{ date_end }}" style="font-size: 0.85rem;">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-end gap-2 mt-3 pt-2 border-top">
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-link btn-sm text-decoration-none text-muted">Limpar Filtros</a>
+                            <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold">Aplicar Filtros</button>
+                        </div>
 
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                        <input type="hidden" name="sort" value="{{ sort_by }}">
+                        <input type="hidden" name="order" value="{{ order }}">
+                    </form>
+                </div>
             </div>
 
-             <!-- Paginação -->
-             <nav aria-label="Navegação" class="mt-3">
-                <ul class="pagination justify-content-end">
-                    <li class="page-item disabled"><a class="page-link" href="#">Anterior</a></li>
-                    <li class="page-item active"><a class="page-link" href="#">1</a></li>
-                    <li class="page-item"><a class="page-link" href="#">2</a></li>
-                    <li class="page-item"><a class="page-link" href="#">3</a></li>
-                    <li class="page-item"><a class="page-link" href="#">Próximo</a></li>
-                </ul>
-            </nav>
+
+            <!-- Tabela de Dados -->
+            <div id="tabela-container">
+                {% include 'tabela_dados.html' %}
+            </div>
+
+            
+            
+            
+            <div class="text-end text-muted small">
+                Página {{ pagina_atual }} de {{ total_paginas }}
+            </div>
 
         </div> <!-- /Container -->
     </div> <!-- /Page Content -->
@@ -261,44 +257,61 @@
             
             <div class="modal-body">
                 <div class="mb-3 text-center">
-                    <h4 id="modalBatchDisplay" class="fw-bold">--</h4>
+                    <h4 id="modalBatchDisplay" class="fw-bold">Carregando...</h4>
                     <p class="text-muted mb-0" id="modalMaterialDisplay">--</p>
                 </div>
                 
                 <hr>
                 <h6 class="text-secondary small fw-bold mb-3">PARÂMETROS MEDIDOS</h6>
                 
-                <div class="row mb-2 border-bottom pb-1">
-                    <div class="col-4 fw-bold text-secondary">Ts2 (Scorch):</div>
-                    <div class="col-8">
-                        <div class="d-flex justify-content-between">
-                            <span class="text-muted small">Alvo: <span id="ts2Target">--</span></span>
-                            <span id="ts2Measured" class="fw-bold">--</span>
+                <div class="d-flex justify-content-between text-muted x-small mb-2 px-1" style="font-size: 0.7em;">
+                    <span>ESPECIFICAÇÃO (Min | Alvo | Max)</span>
+                    <span>RESULTADO</span>
+                </div>
+
+                <div class="row mb-2 border-bottom pb-2 align-items-center">
+                    <div class="col-3 fw-bold text-secondary">Ts2:</div>
+                    <div class="col-9">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                <div>Min: <span id="ts2Min" class="fw-bold">--</span></div>
+                                <div>Alvo: <span id="ts2Target" class="text-primary">--</span></div>
+                                <div>Max: <span id="ts2Max" class="fw-bold">--</span></div>
+                            </div>
+                            <span id="ts2Measured" class="fw-bold fs-5">--</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="row mb-2 border-bottom pb-1">
-                    <div class="col-4 fw-bold text-secondary">T90 (Cura):</div>
-                    <div class="col-8">
-                        <div class="d-flex justify-content-between">
-                            <span class="text-muted small">Alvo: <span id="t90Target">--</span></span>
-                            <span id="t90Measured" class="fw-bold">--</span>
+                <div class="row mb-2 border-bottom pb-2 align-items-center">
+                    <div class="col-3 fw-bold text-secondary">T90:</div>
+                    <div class="col-9">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                <div>Min: <span id="t90Min" class="fw-bold">--</span></div>
+                                <div>Alvo: <span id="t90Target" class="text-primary">--</span></div>
+                                <div>Max: <span id="t90Max" class="fw-bold">--</span></div>
+                            </div>
+                            <span id="t90Measured" class="fw-bold fs-5">--</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="row mb-2 border-bottom pb-1">
-                    <div class="col-4 fw-bold text-secondary">Viscosidade:</div>
-                    <div class="col-8">
-                        <div class="d-flex justify-content-between">
-                            <span class="text-muted small">Alvo: <span id="mlTarget">--</span></span>
-                            <span id="mlMeasured" class="fw-bold">--</span>
+                <div class="row mb-2 border-bottom pb-2 align-items-center">
+                    <div class="col-3 fw-bold text-secondary">Visc:</div>
+                    <div class="col-9">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                <div>Min: <span id="mlMin" class="fw-bold">--</span></div>
+                                <div>Alvo: <span id="mlTarget" class="text-primary">--</span></div>
+                                <div>Max: <span id="mlMax" class="fw-bold">--</span></div>
+                            </div>
+                            <span id="mlMeasured" class="fw-bold fs-5">--</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="alert alert-light border mt-4 mb-0 small text-center">
+                <div class="alert alert-light border mt-3 mb-0 small text-center">
                     Quality Score Final: <strong id="modalScoreDisplay">--</strong>%
                 </div>
             </div>

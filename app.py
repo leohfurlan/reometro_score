@@ -1,5 +1,7 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request, redirect, url_for
 import pandas as pd
+import math
+from datetime import datetime
 from models.massa import Massa
 from models.ensaio import Ensaio
 
@@ -13,103 +15,213 @@ massa_std.adicionar_parametro("T90", peso=6, alvo=100, minimo=80, maximo=120)
 massa_std.adicionar_parametro("Viscosidade", peso=10, alvo=63, minimo=56, maximo=70)
 catalogo_massas[26791] = massa_std
 
+CACHE_ENSAIOS = None
 
-def processar_dados():
-    """Função que encapsula toda a lógica de leitura e cálculo"""
+def carregar_dados_do_excel():
+    print("--- INICIANDO LEITURA DO EXCEL ---")
     try:
         df_geral = pd.read_excel('exemplo.xlsx', engine='openpyxl')
-    except:
-        return [] # Retorna lista vazia se der erro
+    except Exception as e:
+        print(f"Erro: {e}")
+        return []
 
     # Limpeza
     df_geral['NUMERO_LOTE'] = df_geral['NUMERO_LOTE'].astype(str).str.upper().str.replace(" ", "")
     df_geral['CODIGO'] = pd.to_numeric(df_geral['CODIGO'], errors='coerce')
+    
+    # --- NOVO: Tratamento de Data ---
+    # Tenta converter a coluna DATA para datetime. Se falhar, vira NaT (Not a Time)
+    if 'DATA' in df_geral.columns:
+        df_geral['DATA'] = pd.to_datetime(df_geral['DATA'], errors='coerce')
 
-    # Separação
-    df_reometria = df_geral.dropna(subset=['T2TEMPO', 'T90TEMPO']).copy()
-    df_reometria = df_reometria.dropna(subset=['CODIGO'])
+    df_reometria = df_geral.dropna(subset=['T2TEMPO', 'T90TEMPO', 'CODIGO']).copy()
     df_reometria['CODIGO'] = df_reometria['CODIGO'].astype(int)
-
     df_viscosidade = df_geral.dropna(subset=['VISCOSIDADEFINALTORQUE']).copy()
     
-    # Mapa de Médias
     medias_por_lote = df_viscosidade.groupby('NUMERO_LOTE')['VISCOSIDADEFINALTORQUE'].mean().to_dict()
 
-    lista_ensaios = []
+    lista_temporaria = []
 
     for index, linha_reo in df_reometria.iterrows():
         cod_material = linha_reo['CODIGO']
-        lote_atual = linha_reo['NUMERO_LOTE']
-        batch_atual = linha_reo['BATCH']
         
         if cod_material in catalogo_massas:
             massa_selecionada = catalogo_massas[cod_material]
+            lote_atual = linha_reo['NUMERO_LOTE']
+            batch_atual = linha_reo['BATCH']
             
-            valor_visc = None
-            origem = "N/A"
-
-            # Busca Exata
+            # Busca Viscosidade
             match_exato = df_viscosidade[
                 (df_viscosidade['NUMERO_LOTE'] == lote_atual) & 
                 (df_viscosidade['BATCH'] == batch_atual)
             ]
             
+            valor_visc = None
+            origem = "N/A"
+            
             if not match_exato.empty:
                 valor_visc = match_exato.iloc[0]['VISCOSIDADEFINALTORQUE']
-                origem = "Real" # Encurtei para caber melhor na tela
+                origem = "Real (Batch)"
             elif lote_atual in medias_por_lote:
                 valor_visc = medias_por_lote[lote_atual]
-                origem = "Média"
+                origem = "Média (Lote)"
             
             valores_medidos = {
                 "Ts2": linha_reo['T2TEMPO'],
                 "T90": linha_reo['T90TEMPO']
             }
             if valor_visc is not None:
-                valores_medidos["Viscosidade"] = round(valor_visc,1)
+                valores_medidos["Viscosidade"] = valor_visc
 
-
+            # --- NOVO: Captura da Data ---
+            data_obj = linha_reo.get('DATA')
+            
             novo_ensaio = Ensaio(
                 id_ensaio=linha_reo['COD_ENSAIO'],
                 massa_objeto=massa_selecionada,
                 valores_medidos=valores_medidos,
                 lote=lote_atual,
                 batch=batch_atual,
+                data_hora=data_obj, # Passando a data
                 origem_viscosidade=origem
             )
-            # --- CORREÇÃO DO BATCH (INT vs FLOAT vs NAN) ---
-            # Verifica se é um número válido (não é NaN/Vazio)
-            if pd.notna(batch_atual):
-                try:
-                    # Tenta converter para inteiro
-                    novo_ensaio.batch = int(batch_atual)
-                except ValueError:
-                    # Se for um texto (ex: "315A"), mantém como texto
-                    novo_ensaio.batch = str(batch_atual)
-            else:
-                # Se for vazio (NaN), define como None ou "N/A" para o HTML tratar
-                novo_ensaio.batch = None
-            novo_ensaio.calcular_score()
-            lista_ensaios.append(novo_ensaio)
             
-    return lista_ensaios
+            if pd.notna(batch_atual):
+                try: novo_ensaio.batch = int(batch_atual)
+                except: novo_ensaio.batch = str(batch_atual)
+            else:
+                novo_ensaio.batch = None
 
-# --- ROTA DO SITE ---
+            novo_ensaio.calcular_score()
+            lista_temporaria.append(novo_ensaio)
+            
+    print(f"--- PROCESSADO: {len(lista_temporaria)} itens. ---")
+    return lista_temporaria
+
+def obter_dados():
+    global CACHE_ENSAIOS
+    if CACHE_ENSAIOS is None:
+        CACHE_ENSAIOS = carregar_dados_do_excel()
+    return CACHE_ENSAIOS
+
 @app.route('/')
 def dashboard():
-    # 1. Processa os dados
-    ensaios = processar_dados()
+    # 1. DADOS E KPIS GLOBAIS
+    todos_ensaios = obter_dados()
     
-    # 2. Calcula KPIs para os Cards do topo
-    total = len(ensaios)
-    aprovados = sum(1 for e in ensaios if "PRIME" in e.acao_recomendada or e.acao_recomendada == "LIBERAR")
-    ressalvas = sum(1 for e in ensaios if "RESSALVA" in e.acao_recomendada)
-    reprovados = sum(1 for e in ensaios if "REPROVAR" in e.acao_recomendada or "CORTAR" in e.acao_recomendada)
+    kpi_global = {
+        'total': len(todos_ensaios),
+        'aprovados': sum(1 for e in todos_ensaios if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada),
+        'ressalvas': sum(1 for e in todos_ensaios if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada),
+        'reprovados': sum(1 for e in todos_ensaios if "REPROVAR" in e.acao_recomendada)
+    }
 
-    # 3. Envia tudo para o HTML
-    return render_template('index.html', 
-                           ensaios=ensaios,
-                           kpi={'total': total, 'aprovados': aprovados, 'ressalvas': ressalvas, 'reprovados': reprovados})
+    # --- 2. FILTRAGEM ---
+    ensaios_filtrados = todos_ensaios 
+    
+    # Parâmetros da URL
+    page = request.args.get('page', 1, type=int)
+    sort_by = request.args.get('sort', 'data')
+    order = request.args.get('order', 'desc')
+    
+    search_term = request.args.get('search', '').strip().upper()
+    filter_acao = request.args.get('acao_filter', '')
+    date_start = request.args.get('date_start', '')
+    date_end = request.args.get('date_end', '')
+    
+    # NOVOS FILTROS
+    filter_material = request.args.get('material_filter', '') # Nome da Massa
+    filter_codigo = request.args.get('codigo_filter', '').strip() # Código Sankhya
+
+    # Aplica Filtros
+    if search_term:
+        ensaios_filtrados = [
+            e for e in ensaios_filtrados 
+            if search_term in str(e.lote).upper() 
+            or (e.batch and search_term in str(e.batch).upper())
+            or search_term in str(e.id_ensaio)
+        ]
+
+    if filter_acao:
+        if filter_acao == "APROVADOS":
+            ensaios_filtrados = [e for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada]
+        elif filter_acao == "RESSALVA":
+            ensaios_filtrados = [e for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada]
+        elif filter_acao == "REPROVADO":
+            ensaios_filtrados = [e for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada]
+
+    if date_start:
+        dt_start = datetime.strptime(date_start, '%Y-%m-%d')
+        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora and e.data_hora >= dt_start]
+        
+    if date_end:
+        dt_end = datetime.strptime(date_end, '%Y-%m-%d')
+        dt_end = dt_end.replace(hour=23, minute=59, second=59)
+        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora and e.data_hora <= dt_end]
+
+    # NOVOS FILTROS LÓGICA
+    if filter_material:
+        # Filtra pela descrição exata da massa
+        ensaios_filtrados = [e for e in ensaios_filtrados if e.massa.descricao == filter_material]
+    
+    if filter_codigo:
+        # Filtra pelo código sankhya (converte para string para comparar)
+        ensaios_filtrados = [e for e in ensaios_filtrados if str(e.massa.cod_sankhya) == filter_codigo]
+
+    # --- 3. ORDENAÇÃO ---
+    reverse_order = (order == 'desc')
+    key_funcs = {
+        'id': lambda x: x.id_ensaio,
+        'data': lambda x: x.data_hora if x.data_hora else datetime.min,
+        'lote': lambda x: x.lote,
+        'score': lambda x: x.score_final,
+        'ts2': lambda x: x.valores_medidos.get('Ts2', -1),
+        't90': lambda x: x.valores_medidos.get('T90', -1),
+        'visc': lambda x: x.valores_medidos.get('Viscosidade', -1),
+        'acao': lambda x: x.acao_recomendada,
+        # NOVA ORDENAÇÃO
+        'material': lambda x: x.massa.descricao
+    }
+
+    if sort_by in key_funcs:
+        ensaios_filtrados.sort(key=key_funcs[sort_by], reverse=reverse_order)
+    
+    # --- 4. PAGINAÇÃO ---
+    LIMITE_POR_PAGINA = 20
+    total_itens_filtrados = len(ensaios_filtrados)
+    total_pages = math.ceil(total_itens_filtrados / LIMITE_POR_PAGINA)
+    
+    if page > total_pages: page = 1
+    if page < 1: page = 1
+
+    start = (page - 1) * LIMITE_POR_PAGINA
+    end = start + LIMITE_POR_PAGINA
+    ensaios_paginados = ensaios_filtrados[start:end]
+
+    # Contexto
+    context = {
+        'ensaios': ensaios_paginados,
+        'kpi': kpi_global,
+        'total_registros_filtrados': total_itens_filtrados,
+        'pagina_atual': page,
+        'total_paginas': total_pages,
+        'sort_by': sort_by,
+        'order': order,
+        # Filtros para manter estado
+        'search_term': search_term,
+        'acao_filter': filter_acao,
+        'date_start': date_start,
+        'date_end': date_end,
+        'material_filter': filter_material, # Novo
+        'codigo_filter': filter_codigo,     # Novo
+        # Catálogo para o Dropdown
+        'catalogo_massas': catalogo_massas 
+    }
+
+    if request.headers.get('HX-Request'):
+        return render_template('tabela_dados.html', **context)
+    
+    return render_template('index.html', **context)
 
 if __name__ == '__main__':
     app.run(debug=True)
