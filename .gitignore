@@ -1,0 +1,12 @@
+templates/GEMINI.html
+exemplo.xlsx
+Relatorio_Score_Hibrido_Com_Acao.xlsx
+SCORE - CAMEL_AGR_STD.xlsx
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/

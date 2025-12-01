@@ -1,0 +1,142 @@
+:root {
+    --sidebar-width: 260px;
+    --primary-color: #0d6efd;
+    --bg-light: #f4f6f9; /* Cinza industrial claro */
+    --text-muted: #6c757d;
+}
+
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: var(--bg-light);
+    overflow-x: hidden;
+}
+
+/* --- Sidebar --- */
+#sidebar-wrapper {
+    min-height: 100vh;
+    width: var(--sidebar-width);
+    margin-left: 0;
+    background: #212529; /* Dark Sidebar */
+    color: #fff;
+    position: fixed;
+    transition: all 0.3s;
+    z-index: 1000;
+}
+
+#sidebar-wrapper .sidebar-heading {
+    padding: 1.5rem;
+    font-size: 1.25rem;
+    font-weight: bold;
+    background: #1a1d20;
+    border-bottom: 1px solid #495057;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.list-group-item {
+    background-color: transparent;
+    color: #adb5bd;
+    border: none;
+    padding: 1rem 1.5rem;
+    transition: all 0.2s;
+}
+
+.list-group-item:hover {
+    background-color: #343a40;
+    color: #fff;
+    cursor: pointer;
+}
+
+.list-group-item.active {
+    background-color: var(--primary-color);
+    color: #fff;
+    font-weight: 500;
+    border-left: 4px solid #fff;
+}
+
+/* --- Page Content --- */
+#page-content-wrapper {
+    width: 100%;
+    margin-left: var(--sidebar-width);
+    transition: all 0.3s;
+}
+
+/* --- Navbar --- */
+.navbar-light {
+    background-color: #fff !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* --- Cards & KPIs --- */
+.card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.kpi-value {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.kpi-label {
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+/* --- Table Styling --- */
+.table-responsive {
+    background: #fff;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+}
+
+.table thead th {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    color: #495057;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}
+
+.viscosity-tag {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: #e9ecef;
+    color: #495057;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+/* --- Badges Customizados para Regra de Negócio --- */
+.badge-mix {
+    background-color: #fd7e14; /* Laranja */
+    color: white;
+}
+
+/* Responsive Toggles */
+@media (max-width: 768px) {
+    #sidebar-wrapper {
+        margin-left: calc(-1 * var(--sidebar-width));
+    }
+    #page-content-wrapper {
+        margin-left: 0;
+    }
+    body.sb-sidenav-toggled #sidebar-wrapper {
+        margin-left: 0;
+    }
+    body.sb-sidenav-toggled #page-content-wrapper {
+        margin-left: 0; /* Overlay effect or push logic */
+    }
+}
