@@ -51,6 +51,15 @@ body {
     z-index: 1000;
 }
 
+/* Oculta a sidebar quando o wrapper estiver com a classe "toggled" */
+#wrapper.toggled #sidebar-wrapper {
+    margin-left: -250px;
+}
+
+#wrapper.toggled #page-content-wrapper {
+    margin-left: 0;
+}
+
 #sidebar-wrapper .sidebar-heading {
     padding: 1.2rem;
     font-size: 1.2rem;
