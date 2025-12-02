@@ -212,3 +212,15 @@ table.table {
 
 /* Esconde setas do input number */
 input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* --- CORREÇÃO DO Z-INDEX DO DROPDOWN --- */
+/* Garante que o menu de colunas fique acima do cabeçalho fixo da tabela */
+.dropdown-menu {
+    z-index: 1050 !important; /* Valor maior que o sticky-top (1020) */
+}
+
+/* Opcional: Se ainda assim cortar, aumente o z-index do botão também */
+.dropdown {
+    position: relative;
+    z-index: 1051;
+}
