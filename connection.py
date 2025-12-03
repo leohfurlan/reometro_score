@@ -1,11 +1,13 @@
-import pyodbc
+import pyodbc, os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-username = 'qualidade'
-password = 'qua@2019'  # Codifica a senha com caracteres especiais
-server = 'SERVER01\\SQLEXPRESS'  # Alterado para usar a porta
-database = 'teamsolutions'
-dsn = "ODBC Driver 18 for SQL Server"
+username = os.getenv('USERNAME_DB')
+password = os.getenv('PASSWORD_DB')
+server = os.getenv('SERVER')  
+database = os.getenv('DATABASE')  
+dsn = os.getenv('DSN')  
 
 
 def connect_to_database():
