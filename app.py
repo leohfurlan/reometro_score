@@ -50,26 +50,117 @@ CACHE_ENSAIOS = None
 # 2. LÓGICA DE NEGÓCIO
 # ==========================================
 
-def carregar_dados_do_banco():
+def carregar_dados_do_banco(page=1, limit=20, filtros=None):
     print("--- Atualizando dados do SQL Server (Com Médias)... ---")
+    filtros = filtros or {}
+    page = max(1, page)
+    limit = max(1, limit)
+
+    search_term = filtros.get('search_term', '').strip().upper()
+    filter_material = filtros.get('filter_material', '')
+    filter_codigo = filtros.get('filter_codigo', '').strip()
+    sort_by = filtros.get('sort_by', 'data')
+    order = filtros.get('order', 'desc')
+    date_start = filtros.get('date_start', '')
+    date_end = filtros.get('date_end', '')
+
+    where_clauses = []
+    params = []
+
+    data_inicial_padrao = datetime(2024, 1, 1)
+    if date_start:
+        try:
+            dt_start = datetime.strptime(date_start, '%Y-%m-%d')
+            where_clauses.append("DATA >= ?")
+            params.append(dt_start)
+        except:
+            where_clauses.append("DATA >= ?")
+            params.append(data_inicial_padrao)
+    else:
+        where_clauses.append("DATA >= ?")
+        params.append(data_inicial_padrao)
+
+    if date_end:
+        try:
+            dt_end = datetime.strptime(date_end, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            where_clauses.append("DATA <= ?")
+            params.append(dt_end)
+        except:
+            pass
+
+    if search_term:
+        like_pattern = f"%{search_term}%"
+        where_clauses.append("(UPPER(NUMERO_LOTE) LIKE ? OR CAST(BATCH AS NVARCHAR(50)) LIKE ? OR CAST(COD_ENSAIO AS NVARCHAR(50)) LIKE ?)")
+        params.extend([like_pattern, like_pattern, like_pattern])
+
+    if filter_codigo:
+        codigo_param = filter_codigo
+        try:
+            codigo_param = int(filter_codigo)
+        except:
+            pass
+        where_clauses.append("CODIGO = ?")
+        params.append(codigo_param)
+    elif filter_material:
+        codigo_encontrado = None
+        for cod, massa in CATALOGO_POR_CODIGO.items():
+            if massa.descricao == filter_material:
+                codigo_encontrado = cod
+                break
+        if codigo_encontrado:
+            where_clauses.append("CODIGO = ?")
+            params.append(codigo_encontrado)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    sort_column_map = {
+        'id': 'COD_ENSAIO',
+        'data': 'DATA',
+        'lote': 'NUMERO_LOTE',
+        'ts2': 'T2TEMPO',
+        't90': 'T90TEMPO',
+        'visc': 'VISCOSIDADEFINALTORQUE'
+    }
+    order_column = sort_column_map.get(sort_by, 'DATA')
+    order_direction = 'DESC' if order == 'desc' else 'ASC'
+
+    total_registros = 0
+    pagina_real = page
+
+    resultados = []
+    conn = None
     try:
         conn = connect_to_database()
         cursor = conn.cursor()
-        query = '''
-        SELECT TOP 3000 
+
+        count_query = f"SELECT COUNT(*) FROM dbo.ENSAIO {where_sql}"
+        cursor.execute(count_query, params)
+        total_registros = cursor.fetchone()[0] or 0
+
+        total_paginas = max(1, math.ceil(total_registros / limit)) if total_registros else 1
+        pagina_real = min(page, total_paginas)
+        offset = (pagina_real - 1) * limit
+
+        query = f'''
+        SELECT 
             COD_ENSAIO, NUMERO_LOTE, BATCH, DATA, 
             T2TEMPO as Ts2, T90TEMPO as T90, VISCOSIDADEFINALTORQUE as Viscosidade, CODIGO,
             TEMP_PLATO_INF, COD_GRUPO, MAXIMO_TEMPO
         FROM dbo.ENSAIO 
-        WHERE DATA >= '2024-01-01' ORDER BY DATA DESC
+        {where_sql}
+        ORDER BY {order_column} {order_direction}
+        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
         '''
-        cursor.execute(query)
+        cursor.execute(query, params + [offset, limit])
         colunas = [c[0] for c in cursor.description]
         resultados = [dict(zip(colunas, row)) for row in cursor.fetchall()]
-        conn.close()
     except Exception as e:
         print(f"❌ Erro SQL: {e}")
-        return []
+        if conn: conn.close()
+        return [], 0, pagina_real
+    finally:
+        if conn:
+            conn.close()
 
     # --- 1. ETAPA DE AGRUPAMENTO (MERGE LOTE+BATCH) ---
     dados_agrupados = {}
@@ -220,34 +311,15 @@ def carregar_dados_do_banco():
             
     lista_ensaios.sort(key=lambda x: x.data_hora if x.data_hora else datetime.min, reverse=True)
     print(f"--- Processamento Concluído: {len(lista_ensaios)} ensaios finais. ---")
-    return lista_ensaios
-
-def obter_dados():
-    global CACHE_ENSAIOS
-    if CACHE_ENSAIOS is None:
-        CACHE_ENSAIOS = carregar_dados_do_banco()
-    return CACHE_ENSAIOS
+    return lista_ensaios, total_registros, pagina_real
 
 # ==========================================
 # 3. INTERFACE WEB
 # ==========================================
 @app.route('/')
 def dashboard():
-    # 1. Carrega dados (Cacheado e Processado)
-    todos_ensaios = obter_dados()
+    LIMITE_POR_PAGINA = 20
     
-    # --- KPIs GLOBAIS (Calculados antes de filtrar) ---
-    kpi_global = {
-        'total': len(todos_ensaios),
-        'aprovados': sum(1 for e in todos_ensaios if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada),
-        'ressalvas': sum(1 for e in todos_ensaios if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada),
-        'reprovados': sum(1 for e in todos_ensaios if "REPROVAR" in e.acao_recomendada)
-    }
-
-    # --- FILTRAGEM ---
-    ensaios_filtrados = todos_ensaios 
-    
-    # Parâmetros da URL
     page = request.args.get('page', 1, type=int)
     sort_by = request.args.get('sort', 'data')
     order = request.args.get('order', 'desc')
@@ -259,14 +331,23 @@ def dashboard():
     filter_material = request.args.get('material_filter', '')
     filter_codigo = request.args.get('codigo_filter', '').strip()
 
-    # Aplica Filtros
-    if search_term:
-        ensaios_filtrados = [
-            e for e in ensaios_filtrados 
-            if search_term in str(e.lote).upper() 
-            or (e.batch and search_term in str(e.batch).upper())
-            or search_term in str(e.id_ensaio)
-        ]
+    filtros_sql = {
+        'search_term': search_term,
+        'filter_material': filter_material,
+        'filter_codigo': filter_codigo,
+        'sort_by': sort_by,
+        'order': order,
+        'date_start': date_start,
+        'date_end': date_end
+    }
+
+    ensaios_paginados, total_registros, pagina_real = carregar_dados_do_banco(
+        page=page,
+        limit=LIMITE_POR_PAGINA,
+        filtros=filtros_sql
+    )
+
+    ensaios_filtrados = ensaios_paginados
 
     if filter_acao:
         if filter_acao == "APROVADOS":
@@ -276,26 +357,6 @@ def dashboard():
         elif filter_acao == "REPROVADO":
             ensaios_filtrados = [e for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada]
 
-    if date_start:
-        try:
-            dt_start = datetime.strptime(date_start, '%Y-%m-%d')
-            ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora and e.data_hora >= dt_start]
-        except: pass
-        
-    if date_end:
-        try:
-            dt_end = datetime.strptime(date_end, '%Y-%m-%d')
-            dt_end = dt_end.replace(hour=23, minute=59, second=59)
-            ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora and e.data_hora <= dt_end]
-        except: pass
-
-    if filter_material:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.massa.descricao == filter_material]
-    
-    if filter_codigo:
-        ensaios_filtrados = [e for e in ensaios_filtrados if str(e.massa.cod_sankhya) == filter_codigo]
-
-    # --- ORDENAÇÃO ---
     reverse_order = (order == 'desc')
     key_funcs = {
         'id': lambda x: x.id_ensaio,
@@ -309,44 +370,36 @@ def dashboard():
         'material': lambda x: x.massa.descricao
     }
 
-    if sort_by in key_funcs:
+    campos_ordenados_no_sql = {'id', 'data', 'lote', 'ts2', 't90', 'visc'}
+    if sort_by not in campos_ordenados_no_sql and sort_by in key_funcs:
         ensaios_filtrados.sort(key=key_funcs[sort_by], reverse=reverse_order)
-    
-    # --- PAGINAÇÃO ---
-    LIMITE_POR_PAGINA = 20
-    total_itens_filtrados = len(ensaios_filtrados)
-    total_pages = math.ceil(total_itens_filtrados / LIMITE_POR_PAGINA)
-    
-    if page > total_pages: page = 1
-    if page < 1: page = 1
 
-    start = (page - 1) * LIMITE_POR_PAGINA
-    end = start + LIMITE_POR_PAGINA
-    ensaios_paginados = ensaios_filtrados[start:end]
+    kpi_global = {
+        'total': total_registros,
+        'aprovados': sum(1 for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada),
+        'ressalvas': sum(1 for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada),
+        'reprovados': sum(1 for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada)
+    }
 
-    # Contexto para o Template
+    total_paginas = math.ceil(total_registros / LIMITE_POR_PAGINA) if total_registros else 1
+
     context = {
-        'ensaios': ensaios_paginados,
+        'ensaios': ensaios_filtrados,
         'kpi': kpi_global,
-        'total_registros_filtrados': total_itens_filtrados,
-        'pagina_atual': page,
-        'total_paginas': total_pages,
+        'total_registros_filtrados': total_registros,
+        'pagina_atual': pagina_real,
+        'total_paginas': total_paginas,
         'sort_by': sort_by,
         'order': order,
-        # Filtros para manter estado na URL
         'search_term': search_term,
         'acao_filter': filter_acao,
         'date_start': date_start,
         'date_end': date_end,
         'material_filter': filter_material,
         'codigo_filter': filter_codigo,
-        # Catálogo para o Dropdown (Usamos o catálogo por código ou nome, o que preferir exibir)
         'catalogo_massas': CATALOGO_POR_CODIGO 
     }
 
-    # [CORREÇÃO DO LAYOUT] 
-    # Se a requisição vier do HTMX (clique na tabela/filtro), retorna SÓ a tabela.
-    # Se for acesso direto no navegador, retorna a página inteira (Index).
     if request.headers.get('HX-Request'):
         return render_template('tabela_dados.html', **context)
     
