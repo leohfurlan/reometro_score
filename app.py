@@ -355,19 +355,20 @@ def dashboard():
 @app.route('/config')
 def pagina_config():
     query = request.args.get('q', '').upper()
-    
-    # Filtra produtos para exibir na lista
     produtos_exibir = []
     
-    # Se não tiver busca, mostra só os que já tem configuração (para não travar a tela com 9000 itens)
+    # CORREÇÃO: Se não tiver busca, mostra os 50 primeiros itens do catálogo
+    # (Antes estava filtrando e escondendo tudo)
     if not query:
-        produtos_exibir = [p for p in CATALOGO_POR_CODIGO.values() if hasattr(p, 'parametros') and p.parametros]
+        # Converte values() para lista e pega os 50 primeiros
+        todos_prods = list(CATALOGO_POR_CODIGO.values())
+        produtos_exibir = todos_prods[:50]
     else:
         # Busca por nome ou código
         for p in CATALOGO_POR_CODIGO.values():
             if query in str(p.cod_sankhya) or query in p.descricao.upper():
                 produtos_exibir.append(p)
-                if len(produtos_exibir) > 50: break # Limite para não pesar
+                if len(produtos_exibir) > 50: break # Limite de segurança
                 
     return render_template('config.html', produtos=produtos_exibir, query=query)
 
@@ -375,44 +376,56 @@ def pagina_config():
 def salvar_config():
     cod = request.form.get('cod_sankhya')
     
-    # Helper para converter vazio em 0.0
+    # Helpers de conversão
     def f(val): 
-        try:
-            return float(val.replace(',', '.')) if val else 0.0
-        except ValueError:
-            return 0.0
+        try: return float(val.replace(',', '.')) if val else 0.0
+        except: return 0.0
+    
+    def i(val):
+        try: return int(val) if val else 0
+        except: return 0
 
+    # 1. Começa com a Temp Padrão
     specs = {
-        # --- CAMPO NOVO: Temperatura Padrão ---
-        "temp_padrao": f(request.form.get('temp_padrao')),
-        
-        "Ts2": {
-            "min": f(request.form.get('ts2_min')),
-            "alvo": f(request.form.get('ts2_alvo')),
-            "max": f(request.form.get('ts2_max')),
-            "peso": 8
-        },
-        "T90": {
-            "min": f(request.form.get('t90_min')),
-            "alvo": f(request.form.get('t90_alvo')),
-            "max": f(request.form.get('t90_max')),
-            "peso": 6
-        },
-        "Viscosidade": {
-            "min": f(request.form.get('visc_min')),
-            "alvo": f(request.form.get('visc_alvo')),
-            "max": f(request.form.get('visc_max')),
-            "peso": 10
-        }
+        "temp_padrao": f(request.form.get('temp_padrao'))
     }
+
+    # 2. Captura os Parâmetros Fixos (Ts2, T90, Viscosidade)
+    for param in ["Ts2", "T90", "Viscosidade"]:
+        min_v = request.form.get(f"{param}_min")
+        alvo_v = request.form.get(f"{param}_alvo")
+        max_v = request.form.get(f"{param}_max")
+        peso_v = request.form.get(f"{param}_peso") # <--- NOVO
+        
+        # Só salva se tiver preenchido algo relevante
+        if min_v or alvo_v or max_v:
+            specs[param] = {
+                "min": f(min_v),
+                "alvo": f(alvo_v),
+                "max": f(max_v),
+                "peso": i(peso_v) # Salva como inteiro
+            }
+
+    # 3. Captura Parâmetros Dinâmicos
+    novos_nomes = request.form.getlist('din_nome[]')
+    novos_pesos = request.form.getlist('din_peso[]') # <--- NOVO
+    novos_mins = request.form.getlist('din_min[]')
+    novos_alvos = request.form.getlist('din_alvo[]')
+    novos_maxs = request.form.getlist('din_max[]')
     
-    # 1. Salva no JSON (Persistência)
+    for idx, nome in enumerate(novos_nomes):
+        if nome.strip():
+            specs[nome] = {
+                "min": f(novos_mins[idx]),
+                "alvo": f(novos_alvos[idx]),
+                "max": f(novos_maxs[idx]),
+                "peso": i(novos_pesos[idx])
+            }
+    
+    # 4. Salva e Aplica
     salvar_configuracao(cod, specs)
-    
-    # 2. Atualiza em Memória (Imediato) para não precisar reiniciar o app
     aplicar_configuracoes_no_catalogo(CATALOGO_POR_CODIGO)
     
-    # 3. Limpa o cache de ensaios para recalcular com as novas specs na próxima carga
     global CACHE_ENSAIOS
     CACHE_ENSAIOS = None
     

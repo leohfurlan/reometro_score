@@ -1,339 +1,242 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ReoScore Vulcaflex - Controle de Qualidade</title>
-    
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- FontAwesome Icons -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <!-- Google Fonts (Roboto para ar industrial/técnico) -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+{% extends "base.html" %}
 
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <!-- CSS Personalizado -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-</head>
-<body>
-    <div class="d-flex" id="wrapper">
+{% block title %}Dashboard - ReoScore{% endblock %}
+
+{% block content %}
+    <div class="row mb-3">
+        <div class="col-12">
+            <h2 class="fs-4 mb-0 text-secondary">Dashboard de Análise de Lotes</h2>
+            <p class="text-muted small">Visão geral dos ensaios reométricos e decisões de qualidade.</p>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-primary">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="kpi-label">Total Ensaios</div>
+                        <div class="kpi-value text-dark">{{ kpi.total }}</div>
+                    </div>
+                    <i class="fas fa-clipboard-list fa-2x text-black-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-success">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="kpi-label">Aprovados (Prime)</div>
+                        <div class="kpi-value text-success">{{ kpi.aprovados }}</div>
+                    </div>
+                    <i class="fas fa-check-circle fa-2x text-success opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-warning">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="kpi-label">Ressalva/Misto</div>
+                        <div class="kpi-value text-warning">{{ kpi.ressalvas }}</div>
+                    </div>
+                    <i class="fas fa-exclamation-circle fa-2x text-warning opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-danger">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="kpi-label">Reprovados</div>
+                        <div class="kpi-value text-danger">{{ kpi.reprovados }}</div>
+                    </div>
+                    <i class="fas fa-times-circle fa-2x text-danger opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-4 text-muted opacity-25">
+
+    <div class="d-flex justify-content-between align-items-center mb-3 mt-4">
+        <h5 class="text-secondary fw-bold mb-0">
+            <i class="fas fa-table me-2"></i>Análise Detalhada
+        </h5>
         
-        <div id="sidebar-wrapper">
-        <div class="sidebar-heading">
-            <i class="fas fa-industry"></i> ReoScore Vulcaflex
-        </div>
-        <div class="list-group list-group-flush">
-            <a href="#" class="list-group-item list-group-item-action active">
-                <i class="fas fa-vial me-2"></i> Controle de Qualidade
-            </a>
-            <!-- Placeholder para módulos futuros -->
-            <a href="#" class="list-group-item list-group-item-action">
-                <i class="fas fa-boxes me-2"></i> Estoque de MP
-            </a>
-            <a href="#" class="list-group-item list-group-item-action">
-                <i class="fas fa-cogs me-2"></i> Configurações
-            </a>
-        </div>
-    </div>
-    <!-- /#sidebar-wrapper -->
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterCollapse">
+                <i class="fas fa-filter me-1"></i> Filtros Avançados
+            </button>
 
-    <!-- Page Content -->
-    <div id="page-content-wrapper">
-        <!-- Top Navbar -->
-        <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
-            <div class="container-fluid">
-                <button class="btn btn-outline-secondary" id="sidebarToggle" type="button">
-                    <i class="fas fa-bars"></i>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="columnToggleBtn" data-bs-toggle="dropdown">
+                    <i class="fas fa-columns me-1"></i> Colunas
                 </button>
-
-                <div class="collapse navbar-collapse" id="navbarSupportedContent">
-                    <form class="d-flex ms-auto me-3">
-                        <input class="form-control me-2" type="search" placeholder="Buscar lote ou material..." aria-label="Search">
-                        <button class="btn btn-outline-primary" type="submit">Buscar</button>
-                    </form>
-                    <ul class="navbar-nav mt-2 mt-lg-0">
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-user-circle fa-lg me-1"></i> Eng. Responsável
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                                <a class="dropdown-item" href="#">Perfil</a>
-                                <div class="dropdown-divider"></div>
-                                <a class="dropdown-item text-danger" href="#">Sair</a>
-                            </div>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-        </nav>
-
-        <!-- Main Content -->
-        <div class="container-fluid px-4 py-4">
-            
-            <div class="row mb-3">
-                <div class="col-12">
-                    <h2 class="fs-4 mb-0 text-secondary">Dashboard de Análise de Lotes</h2>
-                    <p class="text-muted small">Visão geral dos ensaios reométricos e decisões de qualidade.</p>
-                </div>
-            </div>
-
-            <!-- KPI Cards -->
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div class="card p-3 border-start border-4 border-primary">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <div class="kpi-label">Total Ensaios</div>
-                                <div class="kpi-value text-dark">{{ kpi.total }}</div>
-                            </div>
-                            <i class="fas fa-clipboard-list fa-2x text-black-50"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card p-3 border-start border-4 border-success">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <div class="kpi-label">Aprovados (Prime)</div>
-                                <div class="kpi-value text-success">{{ kpi.aprovados }}</div>
-                            </div>
-                            <i class="fas fa-check-circle fa-2x text-success opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card p-3 border-start border-4 border-warning">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <div class="kpi-label">Ressalva/Cortar e Misturar</div>
-                                <div class="kpi-value text-warning">{{ kpi.ressalvas }}</div>
-                            </div>
-                            <i class="fas fa-exclamation-circle fa-2x text-warning opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card p-3 border-start border-4 border-danger">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <div class="kpi-label">Reprovados</div>
-                                <div class="kpi-value text-danger">{{ kpi.reprovados }}</div>
-                            </div>
-                            <i class="fas fa-times-circle fa-2x text-danger opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <hr class="my-4 text-muted opacity-25">
-            
-
-            <!-- Filtros e Opções de Coluna -->
-            <div class="d-flex justify-content-between align-items-center mb-3 mt-4">
-                <h5 class="text-secondary fw-bold mb-0">
-                    <i class="fas fa-table me-2"></i>Análise Detalhada
-                </h5>
-                
-                <div class="d-flex gap-2">
-                    <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterCollapse" aria-expanded="false" aria-controls="filterCollapse">
-                        <i class="fas fa-filter me-1"></i> Filtros Avançados
-                    </button>
-
-                    <div class="dropdown">
-                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="columnToggleBtn" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-columns me-1"></i> Colunas
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-end shadow p-3" aria-labelledby="columnToggleBtn" style="min-width: 200px;">
-                            <li class="fw-bold small text-muted mb-2">EXIBIR / OCULTAR</li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-id" checked> ID Ensaio</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-data" checked> Data/Hora</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-material" checked> Material</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-lote" checked> Lote/Batch</label></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-ts2" checked> Ts2 (Scorch)</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-t90" checked> T90 (Cura)</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-visc" checked> Viscosidade</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-score" checked> Score Final</label></li>
-                            <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-acao" checked> Ação</label></li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-
-            <div class="collapse mb-4" id="filterCollapse">
-                <div class="card card-body bg-light border-0 shadow-sm">
-                    <form hx-get="{{ url_for('dashboard') }}" 
-                          hx-target="#tabela-container" 
-                          hx-push-url="true"
-                          hx-trigger="submit, change from:.filtro-auto">
-                          
-                        <div class="row g-2 align-items-end">
-                            <div class="col-md-3">
-                                <label class="form-label small fw-bold text-muted">Busca (ID, Lote...)</label>
-                                <div class="input-group">
-                                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
-                                    <input type="text" name="search" class="form-control border-start-0 ps-0" 
-                                           placeholder="Digite para buscar..." 
-                                           value="{{ search_term }}">
-                                </div>
-                            </div>
-
-                            <div class="col-md-3">
-                                <label class="form-label small fw-bold text-muted">Material</label>
-                                <select name="material_filter" class="form-select filtro-auto">
-                                    <option value="">Todas as Massas</option>
-                                    {% for cod, massa in catalogo_massas.items() %}
-                                        <option value="{{ massa.descricao }}" {% if material_filter == massa.descricao %}selected{% endif %}>
-                                            {{ massa.descricao }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-
-                            <div class="col-md-1">
-                                <label class="form-label small fw-bold text-muted">Cód.</label>
-                                <input type="text" name="codigo_filter" class="form-control" placeholder="26791" value="{{ codigo_filter }}">
-                            </div>
-
-                            <div class="col-md-2">
-                                <label class="form-label small fw-bold text-muted">Status</label>
-                                <select name="acao_filter" class="form-select filtro-auto">
-                                    <option value="">Todos</option>
-                                    <option value="APROVADOS" {% if acao_filter == 'APROVADOS' %}selected{% endif %}>Aprovados</option>
-                                    <option value="RESSALVA" {% if acao_filter == 'RESSALVA' %}selected{% endif %}>Ressalva</option>
-                                    <option value="REPROVADO" {% if acao_filter == 'REPROVADO' %}selected{% endif %}>Reprovados</option>
-                                </select>
-                            </div>
-
-                            <div class="col-md-3">
-                                <label class="form-label small fw-bold text-muted">Período</label>
-                                <div class="input-group">
-                                    <input type="date" name="date_start" class="form-control filtro-auto" value="{{ date_start }}" style="font-size: 0.85rem;">
-                                    <span class="input-group-text bg-light px-1">-</span>
-                                    <input type="date" name="date_end" class="form-control filtro-auto" value="{{ date_end }}" style="font-size: 0.85rem;">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="d-flex justify-content-end gap-2 mt-3 pt-2 border-top">
-                            <a href="{{ url_for('dashboard') }}" class="btn btn-link btn-sm text-decoration-none text-muted">Limpar Filtros</a>
-                            <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold">Aplicar Filtros</button>
-                        </div>
-
-                        <input type="hidden" name="sort" value="{{ sort_by }}">
-                        <input type="hidden" name="order" value="{{ order }}">
-                    </form>
-                </div>
-            </div>
-
-
-            <!-- Tabela de Dados -->
-            <div id="tabela-container">
-                {% include 'tabela_dados.html' %}
-            </div>
-
-            
-            
-            
-            <div class="text-end text-muted small">
-                Página {{ pagina_atual }} de {{ total_paginas }}
-            </div>
-
-        </div> <!-- /Container -->
-    </div> <!-- /Page Content -->
-</div> <!-- /Wrapper -->
-
-<!-- Modal de Detalhes -->
-<div class="modal fade" id="detailsModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header bg-light">
-                <h5 class="modal-title"><i class="fas fa-microscope me-2"></i> Detalhes do Ensaio</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            
-            <div class="modal-body">
-                <div class="mb-3 text-center">
-                    <h4 id="modalBatchDisplay" class="fw-bold">...</h4>
-                    <p class="text-muted mb-1" id="modalMaterialDisplay">--</p>
-                    
-                    <div class="d-flex justify-content-center gap-3 text-muted small mt-2">
-                        <span title="Grupo de Ensaio"><i class="fas fa-layer-group"></i> Grp: <strong id="modalGrupo">--</strong></span>
-                        <span title="Temperatura Real / Padrão"><i class="fas fa-temperature-high"></i> <strong id="modalTemp">--</strong>°C</span>
-                        <span title="Tempo de Análise"><i class="fas fa-stopwatch"></i> <strong id="modalTempo">--</strong> seg</span>
-                    </div>
-                </div>
-                
-                <hr>
-                <h6 class="text-secondary small fw-bold mb-3">PARÂMETROS MEDIDOS</h6>
-                
-                <div class="d-flex justify-content-between text-muted x-small mb-2 px-1" style="font-size: 0.7em;">
-                    <span>ESPECIFICAÇÃO (Min | Alvo | Max)</span>
-                    <span>RESULTADO</span>
-                </div>
-
-                <div class="row mb-2 border-bottom pb-2 align-items-center">
-                    <div class="col-3 fw-bold text-secondary">Ts2:</div>
-                    <div class="col-9">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
-                                <div>Min: <span id="ts2Min" class="fw-bold">--</span></div>
-                                <div>Alvo: <span id="ts2Target" class="text-primary">--</span></div>
-                                <div>Max: <span id="ts2Max" class="fw-bold">--</span></div>
-                            </div>
-                            <span id="ts2Measured" class="fw-bold fs-5">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row mb-2 border-bottom pb-2 align-items-center">
-                    <div class="col-3 fw-bold text-secondary">T90:</div>
-                    <div class="col-9">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
-                                <div>Min: <span id="t90Min" class="fw-bold">--</span></div>
-                                <div>Alvo: <span id="t90Target" class="text-primary">--</span></div>
-                                <div>Max: <span id="t90Max" class="fw-bold">--</span></div>
-                            </div>
-                            <span id="t90Measured" class="fw-bold fs-5">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row mb-2 border-bottom pb-2 align-items-center">
-                    <div class="col-3 fw-bold text-secondary">Visc:</div>
-                    <div class="col-9">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="text-muted small lh-1" style="font-size: 0.8em;">
-                                <div>Min: <span id="mlMin" class="fw-bold">--</span></div>
-                                <div>Alvo: <span id="mlTarget" class="text-primary">--</span></div>
-                                <div>Max: <span id="mlMax" class="fw-bold">--</span></div>
-                            </div>
-                            <span id="mlMeasured" class="fw-bold fs-5">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="alert alert-light border mt-3 mb-0 small text-center">
-                    Quality Score Final: <strong id="modalScoreDisplay">--</strong>%
-                </div>
-            </div>
-            
-            <div class="modal-footer bg-light">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                <ul class="dropdown-menu dropdown-menu-end shadow p-3" aria-labelledby="columnToggleBtn" style="min-width: 200px;">
+                    <li class="fw-bold small text-muted mb-2">EXIBIR / OCULTAR</li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-id" checked> ID Ensaio</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-data" checked> Data/Hora</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-material" checked> Material</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-lote" checked> Lote/Batch</label></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-ts2" checked> Ts2 (Scorch)</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-t90" checked> T90 (Cura)</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-visc" checked> Viscosidade</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-score" checked> Score Final</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-acao" checked> Ação</label></li>
+                </ul>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Bootstrap JS Bundle -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <div class="collapse mb-4" id="filterCollapse">
+        <div class="card card-body bg-light border-0 shadow-sm">
+            <form hx-get="{{ url_for('dashboard') }}" 
+                  hx-target="#tabela-container" 
+                  hx-push-url="true"
+                  hx-trigger="submit, change from:.filtro-auto">
+                  
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Busca (ID, Lote...)</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" name="search" class="form-control border-start-0 ps-0" placeholder="Digite para buscar..." value="{{ search_term }}">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Material</label>
+                        <select name="material_filter" class="form-select filtro-auto">
+                            <option value="">Todas as Massas</option>
+                            {% for cod, massa in catalogo_massas.items() %}
+                                <option value="{{ massa.descricao }}" {% if material_filter == massa.descricao %}selected{% endif %}>{{ massa.descricao }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label small fw-bold text-muted">Cód.</label>
+                        <input type="text" name="codigo_filter" class="form-control" placeholder="26791" value="{{ codigo_filter }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold text-muted">Status</label>
+                        <select name="acao_filter" class="form-select filtro-auto">
+                            <option value="">Todos</option>
+                            <option value="APROVADOS" {% if acao_filter == 'APROVADOS' %}selected{% endif %}>Aprovados</option>
+                            <option value="RESSALVA" {% if acao_filter == 'RESSALVA' %}selected{% endif %}>Ressalva</option>
+                            <option value="REPROVADO" {% if acao_filter == 'REPROVADO' %}selected{% endif %}>Reprovados</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Período</label>
+                        <div class="input-group">
+                            <input type="date" name="date_start" class="form-control filtro-auto" value="{{ date_start }}">
+                            <span class="input-group-text bg-light px-1">-</span>
+                            <input type="date" name="date_end" class="form-control filtro-auto" value="{{ date_end }}">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-end gap-2 mt-3 pt-2 border-top">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-link btn-sm text-decoration-none text-muted">Limpar Filtros</a>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold">Aplicar Filtros</button>
+                </div>
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="order" value="{{ order }}">
+            </form>
+        </div>
+    </div>
 
-<!-- Script Personalizado -->
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+    <div id="tabela-container">
+        {% include 'tabela_dados.html' %}
+    </div>
 
-</body>
-</html>
+    <div class="text-end text-muted small mt-2">
+        Página {{ pagina_atual }} de {{ total_paginas }}
+    </div>
+
+{% endblock %}
+
+{% block modais %}
+    <div class="modal fade" id="detailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title"><i class="fas fa-microscope me-2"></i> Detalhes do Ensaio</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body">
+                    <div class="mb-3 text-center">
+                        <h4 id="modalBatchDisplay" class="fw-bold">...</h4>
+                        <p class="text-muted mb-1" id="modalMaterialDisplay">--</p>
+                        
+                        <div class="d-flex justify-content-center gap-3 text-muted small mt-2">
+                            <span title="Grupo de Ensaio"><i class="fas fa-layer-group"></i> Grp: <strong id="modalGrupo">--</strong></span>
+                            <span title="Temperatura Real / Padrão"><i class="fas fa-temperature-high"></i> <strong id="modalTemp">--</strong>°C</span>
+                            <span title="Tempo de Análise"><i class="fas fa-stopwatch"></i> <strong id="modalTempo">--</strong>min</span>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    <h6 class="text-secondary small fw-bold mb-3">PARÂMETROS MEDIDOS</h6>
+                    
+                    <div class="d-flex justify-content-between text-muted x-small mb-2 px-1" style="font-size: 0.7em;">
+                        <span>ESPECIFICAÇÃO (Min | Alvo | Max)</span>
+                        <span>RESULTADO</span>
+                    </div>
+
+                    <div class="row mb-2 border-bottom pb-2 align-items-center">
+                        <div class="col-3 fw-bold text-secondary">Ts2:</div>
+                        <div class="col-9">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                    <div>Min: <span id="ts2Min" class="fw-bold">--</span></div>
+                                    <div>Alvo: <span id="ts2Target" class="text-primary">--</span></div>
+                                    <div>Max: <span id="ts2Max" class="fw-bold">--</span></div>
+                                </div>
+                                <span id="ts2Measured" class="fw-bold fs-5">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-2 border-bottom pb-2 align-items-center">
+                        <div class="col-3 fw-bold text-secondary">T90:</div>
+                        <div class="col-9">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                    <div>Min: <span id="t90Min" class="fw-bold">--</span></div>
+                                    <div>Alvo: <span id="t90Target" class="text-primary">--</span></div>
+                                    <div>Max: <span id="t90Max" class="fw-bold">--</span></div>
+                                </div>
+                                <span id="t90Measured" class="fw-bold fs-5">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-2 border-bottom pb-2 align-items-center">
+                        <div class="col-3 fw-bold text-secondary">Visc:</div>
+                        <div class="col-9">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="text-muted small lh-1" style="font-size: 0.8em;">
+                                    <div>Min: <span id="mlMin" class="fw-bold">--</span></div>
+                                    <div>Alvo: <span id="mlTarget" class="text-primary">--</span></div>
+                                    <div>Max: <span id="mlMax" class="fw-bold">--</span></div>
+                                </div>
+                                <span id="mlMeasured" class="fw-bold fs-5">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-light border mt-3 mb-0 small text-center">
+                        Quality Score Final: <strong id="modalScoreDisplay">--</strong>%
+                    </div>
+                </div>
+                
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

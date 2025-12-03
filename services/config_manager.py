@@ -17,7 +17,6 @@ def carregar_configuracoes():
 def salvar_configuracao(cod_sankhya, specs):
     """
     Salva/Atualiza as specs de um produto.
-    specs ex: {'Ts2': {'min': 10, 'alvo': 12, 'max': 14}, ...}
     """
     dados = carregar_configuracoes()
     dados[str(cod_sankhya)] = specs # Chave sempre string
@@ -38,19 +37,30 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
         if cod_int in catalogo_objetos:
             produto = catalogo_objetos[cod_int]
             
-            # Limpa parâmetros antigos e aplica os do JSON
+            # 1. Reseta parâmetros antigos para aplicar os novos limpos
             if hasattr(produto, 'parametros'):
-                produto.parametros = {} # Reseta
+                produto.parametros = {} 
                 
-                for param, valores in specs.items():
-                    # Adiciona dinamicamente usando o método da classe Massa
+            for param_nome, valores in specs.items():
+                # --- CORREÇÃO DO ERRO ---
+                
+                # Caso A: É a Temperatura Padrão (Dado simples)
+                if param_nome == "temp_padrao":
+                    if hasattr(produto, 'temp_padrao'):
+                        produto.temp_padrao = valores
+                    continue # Pula para o próximo item, não tenta ler 'min/max'
+                
+                # Caso B: É um Parâmetro de Qualidade (Dicionário)
+                # Proteção extra: só processa se for dicionário
+                if isinstance(valores, dict):
                     produto.adicionar_parametro(
-                        nome=param,
+                        nome=param_nome,
                         peso=valores.get('peso', 10),
                         alvo=valores.get('alvo', 0),
                         minimo=valores.get('min', 0),
                         maximo=valores.get('max', 0)
                     )
-                count += 1
+            
+            count += 1
     
     print(f"✅ Configurações aplicadas em {count} produtos.")
