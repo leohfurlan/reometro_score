@@ -1,11 +1,14 @@
 import pyodbc
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
-username = 'qualidade'
-password = 'qua@2019'  # Codifica a senha com caracteres especiais
-server = 'SERVER01\\SQLEXPRESS'  # Alterado para usar a porta
-database = 'teamsolutions'
-dsn = "ODBC Driver 18 for SQL Server"
+username = os.getenv('USERNAME_DB')
+password = os.getenv('PASSWORD_DB')  # Codifica a senha com caracteres especiais
+server = os.getenv('SERVER')  # Alterado para usar a porta
+database = os.getenv('DATABASE')
+dsn = os.getenv('DSN')
 
 
 def connect_to_database():
@@ -14,11 +17,7 @@ def connect_to_database():
         f"SERVER={server};DATABASE={database};UID={username};PWD={password};"
         "Encrypt=no;TrustServerCertificate=yes;"
     )
-    #connection = pyodbc.connect(connection_string)
 
-
-    #query = "SELECT * FROM dbo_ENSAIO"
-    #engine = create_engine(f"mssql+pyodbc://{username}:%s@{server}/{database}?TrustServerCertificate=yes&driver={dsn}" % password)
 
     connection = pyodbc.connect(connection_string)
 

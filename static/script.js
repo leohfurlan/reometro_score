@@ -29,9 +29,17 @@ const initUI = () => {
             const button = event.relatedTarget;
             if (!button) return;
 
+            // Atributos básicos
             const batch = button.getAttribute('data-batch');
             const material = button.getAttribute('data-material');
             const score = button.getAttribute('data-score');
+            
+            // --- NOVOS ATRIBUTOS (Temperatura, Grupo, Tempo) ---
+            const tempReal = button.getAttribute('data-temp-real');
+            const tempPadrao = button.getAttribute('data-temp-padrao');
+            const grupo = button.getAttribute('data-grupo');
+            const tempoMax = button.getAttribute('data-tempo-max');
+
             const displayBatch = batch && batch !== 'None' ? batch : 'N/A';
 
             const setSafeText = (selector, val) => {
@@ -39,15 +47,28 @@ const initUI = () => {
                 if (el) el.textContent = val;
             };
 
+            // Preenche Cabeçalho
             setSafeText('#modalBatchDisplay', 'BATCH: ' + displayBatch);
             setSafeText('#modalMaterialDisplay', 'Material: ' + material);
 
+            // --- PREENCHE NOVOS DETALHES ---
+            setSafeText('#modalGrupo', grupo);
+            setSafeText('#modalTempo', tempoMax);
+            
+            // Lógica visual para temperatura (Mostra "Real / Alvo" se tiver alvo, senão só "Real")
+            const tempDisplay = parseFloat(tempPadrao) > 0 
+                ? `${tempReal} / ${tempPadrao}` 
+                : `${tempReal}`;
+            setSafeText('#modalTemp', tempDisplay);
+
+            // Preenche Score
             const scoreElem = detailsModal.querySelector('#modalScoreDisplay');
             if (scoreElem) {
                 scoreElem.textContent = score;
                 scoreElem.className = parseFloat(score) >= 85 ? 'text-success fw-bold fs-5' : 'text-danger fw-bold fs-5';
             }
 
+            // Função auxiliar para preencher os cards de parâmetros (Ts2, T90, Visc)
             function updateParam(prefix, minId, targetId, maxId, measuredId) {
                 const minVal = button.getAttribute(`data-${prefix}-min`);
                 const targetVal = button.getAttribute(`data-${prefix}-target`);
@@ -207,6 +228,7 @@ const initUI = () => {
     captureSortFromTable();
     ensureSortPreferenceApplied();
 
+    // Re-bind eventos após swap do HTMX (paginação/filtro)
     document.body.addEventListener('htmx:afterSwap', evt => {
         if (evt.detail.target.id === 'tabela-container') {
             loadColumnPreferences();
@@ -217,6 +239,7 @@ const initUI = () => {
     });
 };
 
+// Inicialização segura
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initUI);
 } else {

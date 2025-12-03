@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Configuração de Massas</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-cogs"></i> Catálogo de Massas</h2>
+        <a href="/" class="btn btn-outline-secondary">Voltar ao Dashboard</a>
+    </div>
+
+    <div class="card p-3 mb-4 shadow-sm">
+        <form method="GET" action="/config">
+            <div class="input-group">
+                <input type="text" name="q" class="form-control" placeholder="Buscar por nome ou código..." value="{{ query }}">
+                <button class="btn btn-primary" type="submit">Buscar</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Cód.</th>
+                        <th>Descrição</th>
+                        <th>Status</th>
+                        <th class="text-end">Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for prod in produtos %}
+                    <tr>
+                        <td>{{ prod.cod_sankhya }}</td>
+                        <td>{{ prod.descricao }}</td>
+                        <td>
+                            {% if prod.parametros %}
+                                <span class="badge bg-success">Configurado</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Sem Specs</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
+                                Editar
+                            </button>
+                        </td>
+                    </tr>
+
+                    <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <form action="/salvar_config" method="POST">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Configurar: {{ prod.descricao }}</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <input type="hidden" name="cod_sankhya" value="{{ prod.cod_sankhya }}">
+                                        
+                                        <div class="alert alert-light border mb-3">
+                                            <label class="fw-bold mb-1"><i class="fas fa-temperature-high me-1"></i> Temperatura de Análise Padrão (°C)</label>
+                                            <input type="number" step="0.1" class="form-control" name="temp_padrao" 
+                                                   value="{{ prod.temp_padrao if prod.temp_padrao else '' }}" 
+                                                   placeholder="Ex: 180">
+                                            <div class="form-text small">Define a temperatura esperada para este ensaio.</div>
+                                        </div>
+
+                                        <hr>
+
+                                        <div class="row mb-3 align-items-center">
+                                            <div class="col-3">Ts2 (Scorch)</div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="ts2_min" value="{{ prod.parametros.get('Ts2').minimo if prod.parametros.get('Ts2') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="ts2_alvo" value="{{ prod.parametros.get('Ts2').alvo if prod.parametros.get('Ts2') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="ts2_max" value="{{ prod.parametros.get('Ts2').maximo if prod.parametros.get('Ts2') else '' }}"></div>
+                                        </div>
+
+                                        <div class="row mb-3 align-items-center">
+                                            <div class="col-3">T90 (Cura)</div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="t90_min" value="{{ prod.parametros.get('T90').minimo if prod.parametros.get('T90') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="t90_alvo" value="{{ prod.parametros.get('T90').alvo if prod.parametros.get('T90') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.01" class="form-control" name="t90_max" value="{{ prod.parametros.get('T90').maximo if prod.parametros.get('T90') else '' }}"></div>
+                                        </div>
+                                        
+                                        <div class="row mb-3 align-items-center">
+                                            <div class="col-3">Viscosidade</div>
+                                            <div class="col-3"><input type="number" step="0.1" class="form-control" name="visc_min" value="{{ prod.parametros.get('Viscosidade').minimo if prod.parametros.get('Viscosidade') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.1" class="form-control" name="visc_alvo" value="{{ prod.parametros.get('Viscosidade').alvo if prod.parametros.get('Viscosidade') else '' }}"></div>
+                                            <div class="col-3"><input type="number" step="0.1" class="form-control" name="visc_max" value="{{ prod.parametros.get('Viscosidade').maximo if prod.parametros.get('Viscosidade') else '' }}"></div>
+                                        </div>
+
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="submit" class="btn btn-primary">Salvar Configuração</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
