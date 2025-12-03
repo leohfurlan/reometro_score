@@ -51,14 +51,12 @@ CACHE_ENSAIOS = None
 # ==========================================
 
 def carregar_dados_do_banco():
-    print("--- Atualizando dados do SQL Server... ---")
+    print("--- Atualizando dados do SQL Server (Com Médias)... ---")
     try:
         conn = connect_to_database()
         cursor = conn.cursor()
-        
-        # --- QUERY ATUALIZADA COM AS NOVAS COLUNAS ---
         query = '''
-        SELECT TOP 2000 
+        SELECT TOP 3000 
             COD_ENSAIO, NUMERO_LOTE, BATCH, DATA, 
             T2TEMPO as Ts2, T90TEMPO as T90, VISCOSIDADEFINALTORQUE as Viscosidade, CODIGO,
             TEMP_PLATO_INF, COD_GRUPO, MAXIMO_TEMPO
@@ -73,142 +71,156 @@ def carregar_dados_do_banco():
         print(f"❌ Erro SQL: {e}")
         return []
 
-    lista_ensaios = []
-    
-    # Caches para performance (evita reprocessar strings repetidas)
+    # --- 1. ETAPA DE AGRUPAMENTO (MERGE LOTE+BATCH) ---
+    dados_agrupados = {}
     cache_limpeza_lote = {}
-    cache_resolucao_nomes = {}
     
-    # Contadores para Diagnóstico (Opcional, mas útil)
-    diag_matches_exatos = 0
-    diag_matches_prefixo = 0
-    diag_matches_contem = 0
-    diag_sem_match = 0
+    def safe_float(val):
+        if val is None: return 0.0
+        try: return float(val)
+        except: return 0.0
 
-    print(f"   > Processando {len(resultados)} registros com limpeza avançada e novos dados...")
+    print(f"   > Processando {len(resultados)} linhas brutas...")
 
     for row in resultados:
+        # A. Limpeza do Lote
         lote_sujo = str(row['NUMERO_LOTE']).strip().upper()
-        
-        # ====================================================
-        # ETAPA 1: LIMPEZA AVANÇADA DE LOTE (REGEX + PADDING)
-        # ====================================================
         lote_final_match = None
         
         if lote_sujo in cache_limpeza_lote:
             lote_final_match = cache_limpeza_lote[lote_sujo]
         else:
-            # Extrai grupos numéricos (ex: "OTR1801*9459..." -> ["1801", "94590000"])
             grupos_numericos = re.findall(r'\d+', lote_sujo)
-            
-            # Itera de trás para frente (Lote geralmente está no final)
             for grupo in reversed(grupos_numericos):
-                # Remove zeros à esquerda
                 candidato_base = grupo.lstrip('0')
                 if not candidato_base: continue 
                 
-                # Tenta dar Match na Planilha reduzindo zeros à direita
                 temp = candidato_base
                 achou = False
-                
                 while len(temp) >= 2:
                     if temp in MAPA_LOTES_PLANILHA:
                         lote_final_match = temp
                         achou = True
                         break
                     temp = temp[:-1]
-                
                 if achou: break 
-            
             cache_limpeza_lote[lote_sujo] = lote_final_match
 
-        # ====================================================
-        # ETAPA 2: IDENTIFICAÇÃO DO PRODUTO (SANKHYA)
-        # ====================================================
-        produto_identificado = None
-        origem_id = "N/A"
+        chave_lote = lote_final_match if lote_final_match else lote_sujo
+        try: chave_batch = int(row['BATCH']) if row['BATCH'] is not None else 0
+        except: chave_batch = str(row['BATCH'])
         
-        # A) Se achamos o lote na planilha, pegamos o nome "sujo" de lá
-        nome_planilha = None
-        if lote_final_match:
-            nome_planilha = MAPA_LOTES_PLANILHA.get(lote_final_match)
+        chave_unica = (chave_lote, chave_batch)
+
+        # B. Merge de Dados
+        if chave_unica not in dados_agrupados:
+            dados_agrupados[chave_unica] = {
+                'row_base': row,
+                'lote_real': chave_lote,
+                'Ts2': safe_float(row['Ts2']),
+                'T90': safe_float(row['T90']),
+                'Viscosidade': safe_float(row['Viscosidade']),
+                'Temp': safe_float(row['TEMP_PLATO_INF']),
+                'Grupo': safe_float(row['COD_GRUPO']),
+                'TempoMax': safe_float(row['MAXIMO_TEMPO']),
+                'OrigemVisc': "Real" if safe_float(row['Viscosidade']) > 0 else "N/A"
+            }
+        else:
+            registro = dados_agrupados[chave_unica]
+            visc_atual = safe_float(row['Viscosidade'])
+            if registro['Viscosidade'] == 0 and visc_atual > 0:
+                registro['Viscosidade'] = visc_atual
+                registro['OrigemVisc'] = "Real (Merge)"
+            
+            ts2_atual = safe_float(row['Ts2'])
+            if registro['Ts2'] == 0 and ts2_atual > 0:
+                registro['Ts2'] = ts2_atual
+                registro['T90'] = safe_float(row['T90'])
+                if registro['Temp'] == 0: registro['Temp'] = safe_float(row['TEMP_PLATO_INF'])
+                if registro['Grupo'] == 0: registro['Grupo'] = safe_float(row['COD_GRUPO'])
+                if registro['TempoMax'] == 0: registro['TempoMax'] = safe_float(row['MAXIMO_TEMPO'])
+                registro['row_base'] = row 
+
+    # --- 1.5 CÁLCULO DAS MÉDIAS POR LOTE ---
+    # Agora que agrupamos, vamos calcular a média de cada lote
+    mapa_medias_visc = {} # { 'LOTE_XYZ': 65.5 }
+    acumulador_medias = {} # { 'LOTE_XYZ': [65, 66, 64] }
+    
+    for dados in dados_agrupados.values():
+        lote = dados['lote_real']
+        v = dados['Viscosidade']
+        if v > 0:
+            if lote not in acumulador_medias: acumulador_medias[lote] = []
+            acumulador_medias[lote].append(v)
+            
+    for lote, valores in acumulador_medias.items():
+        mapa_medias_visc[lote] = sum(valores) / len(valores)
+
+    print(f"   > Médias calculadas para {len(mapa_medias_visc)} lotes.")
+
+    # --- 2. CRIAÇÃO DE OBJETOS ---
+    lista_ensaios = []
+    cache_resolucao_nomes = {}
+    
+    for (lote_chave, batch_chave), dados in dados_agrupados.items():
+        row = dados['row_base']
+        
+        # Identificação (Igual ao anterior)
+        produto_identificado = None
+        nome_planilha = MAPA_LOTES_PLANILHA.get(lote_chave)
 
         if nome_planilha:
             nome_sujo = nome_planilha.strip().upper()
-            
-            # Verifica cache de nomes
             if nome_sujo in cache_resolucao_nomes:
                 produto_identificado = cache_resolucao_nomes[nome_sujo]
             else:
-                # Match Inteligente
-                # 1. Exato
                 produto_identificado = CATALOGO_POR_NOME.get(nome_sujo)
-                
-                # 2. Prefixo "MASSA "
+                if not produto_identificado: produto_identificado = CATALOGO_POR_NOME.get("MASSA " + nome_sujo)
                 if not produto_identificado:
-                    produto_identificado = CATALOGO_POR_NOME.get("MASSA " + nome_sujo)
-                    if produto_identificado: diag_matches_prefixo += 1
-
-                # 3. Contém (Wildcard) - Mais lento, porém poderoso
-                if not produto_identificado:
-                    for nome_sankhya, obj_prod in CATALOGO_POR_NOME.items():
-                        if (nome_sujo in nome_sankhya) or (nome_sankhya in nome_sujo):
-                            produto_identificado = obj_prod
-                            diag_matches_contem += 1
-                            break
-                else:
-                     diag_matches_exatos += 1
-                
-                # Salva no cache
+                    for ns, obj in CATALOGO_POR_NOME.items():
+                        if (nome_sujo in ns) or (ns in nome_sujo):
+                            produto_identificado = obj; break
                 cache_resolucao_nomes[nome_sujo] = produto_identificado
-                if produto_identificado: origem_id = "Planilha+Match"
 
-        # B) Fallback: Código Legado do Banco SQL
         if not produto_identificado:
-            cod_antigo = row['CODIGO']
-            produto_identificado = CATALOGO_POR_CODIGO.get(cod_antigo)
-            if produto_identificado: origem_id = "CodigoSQL"
-        
-        if not produto_identificado:
-            diag_sem_match += 1
+            produto_identificado = CATALOGO_POR_CODIGO.get(row['CODIGO'])
 
-        # ====================================================
-        # ETAPA 3: CRIAÇÃO DO ENSAIO COM NOVOS DADOS
-        # ====================================================
         if produto_identificado and isinstance(produto_identificado, Massa):
             
-            valores = {"Ts2": row['Ts2'], "T90": row['T90']}
-            origem_visc = "N/A"
-            if row['Viscosidade'] and row['Viscosidade'] > 0:
-                valores["Viscosidade"] = row['Viscosidade']
-                origem_visc = "Real"
+            # --- 3. APLICAÇÃO INTELIGENTE DA VISCOSIDADE ---
+            visc_final = dados['Viscosidade']
+            origem_final = dados['OrigemVisc']
+            
+            # Se não tem valor real, tenta usar a média do lote
+            if visc_final == 0 and lote_chave in mapa_medias_visc:
+                visc_final = mapa_medias_visc[lote_chave]
+                origem_final = "Média (Lote)"
+            
+            valores = {"Ts2": dados['Ts2'], "T90": dados['T90']}
+            
+            # Só adiciona no dicionário se tiver valor > 0
+            if visc_final > 0:
+                valores["Viscosidade"] = visc_final
 
             novo_ensaio = Ensaio(
                 id_ensaio=row['COD_ENSAIO'],
                 massa_objeto=produto_identificado,
                 valores_medidos=valores,
-                # Usa lote limpo se achou, senão usa o original sujo
-                lote=lote_final_match if lote_final_match else lote_sujo, 
-                batch=row['BATCH'],
+                lote=lote_chave, 
+                batch=batch_chave,
                 data_hora=row['DATA'],
-                origem_viscosidade=origem_visc,
-                
-                # --- NOVOS CAMPOS DO SQL ---
-                temp_plato=row['TEMP_PLATO_INF'] if row['TEMP_PLATO_INF'] else 0,
-                cod_grupo=row['COD_GRUPO'] if row['COD_GRUPO'] else 0,
-                tempo_maximo=row['MAXIMO_TEMPO'] if row['MAXIMO_TEMPO'] else 0
+                origem_viscosidade=origem_final, # Passa a origem correta
+                temp_plato=dados['Temp'],
+                cod_grupo=int(dados['Grupo']),
+                tempo_maximo=dados['TempoMax']
             )
             
-            if row['BATCH']:
-                try: novo_ensaio.batch = int(row['BATCH'])
-                except: pass
-
             novo_ensaio.calcular_score()
             lista_ensaios.append(novo_ensaio)
             
-    print(f"--- Processamento Concluído: {len(lista_ensaios)} ensaios. ---")
+    lista_ensaios.sort(key=lambda x: x.data_hora if x.data_hora else datetime.min, reverse=True)
+    print(f"--- Processamento Concluído: {len(lista_ensaios)} ensaios finais. ---")
     return lista_ensaios
-
 
 def obter_dados():
     global CACHE_ENSAIOS

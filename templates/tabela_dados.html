@@ -52,8 +52,22 @@
                 
                 <td class="col-ts2 {{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">{{ "%.2f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}</td>
                 <td class="col-t90 {{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">{{ "%.2f"|format(ensaio.valores_medidos.get('T90', 0)) }}</td>
-                <td class="col-visc">{{ "%.1f"|format(ensaio.valores_medidos.get('Viscosidade', 0)) }}{% if 'Média' in ensaio.origem_viscosidade %}<span class="badge bg-light text-dark border ms-1" title="Média do Lote" style="font-size: 0.6em;">M</span>{% endif %}</td>
-                
+                <td class="col-visc">
+                    {# --- Lógica de Exibição: Valor Real ou Traço --- #}
+                    {% set val_visc = ensaio.valores_medidos.get('Viscosidade') %}
+                    
+                    {% if val_visc and val_visc > 0 %}
+                        {{ "%.1f"|format(val_visc) }}
+                        
+                        {# Badge se for Média #}
+                        {% if 'Média' in ensaio.origem_viscosidade %}
+                            <span class="badge bg-light text-dark border ms-1" title="Média do Lote (Dado calculado)" style="font-size: 0.6em;">M</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">--</span>
+                    {% endif %}
+                </td>
+
                 <td class="col-score">
                     <div class="progress progress-responsive">
                         <div class="progress-bar 
@@ -91,8 +105,26 @@
                             data-grupo="{{ ensaio.cod_grupo }}"
                             data-tempo-max="{{ ensaio.tempo_maximo }}"
 
-                            {# --- Blocos Ts2, T90, Visc mantidos iguais --- #}
-                            {# ... #}
+                            {# --- Ts2 --- #}
+                            data-ts2-min="{{ '%.2f'|format(p_ts2.minimo) if p_ts2 else '--' }}"
+                            data-ts2-target="{{ '%.2f'|format(p_ts2.alvo) if p_ts2 else '--' }}"
+                            data-ts2-max="{{ '%.2f'|format(p_ts2.maximo) if p_ts2 else '--' }}"
+                            data-ts2-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('Ts2')) if ensaio.valores_medidos.get('Ts2') is not none else '--' }}"
+                            data-ts2-status="{% if ensaio.valores_medidos.get('Ts2') is none %}{% elif ensaio.ts2_fora %}danger{% else %}success{% endif %}"
+
+                            {# --- T90 --- #}
+                            data-t90-min="{{ '%.2f'|format(p_t90.minimo) if p_t90 else '--' }}"
+                            data-t90-target="{{ '%.2f'|format(p_t90.alvo) if p_t90 else '--' }}"
+                            data-t90-max="{{ '%.2f'|format(p_t90.maximo) if p_t90 else '--' }}"
+                            data-t90-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('T90')) if ensaio.valores_medidos.get('T90') is not none else '--' }}"
+                            data-t90-status="{% if ensaio.valores_medidos.get('T90') is none %}{% elif ensaio.t90_fora %}danger{% else %}success{% endif %}"
+
+                            {# --- Viscosidade --- #}
+                            data-ml-min="{{ '%.1f'|format(p_visc.minimo) if p_visc else '--' }}"
+                            data-ml-target="{{ '%.1f'|format(p_visc.alvo) if p_visc else '--' }}"
+                            data-ml-max="{{ '%.1f'|format(p_visc.maximo) if p_visc else '--' }}"
+                            data-ml-measured="{{ '%.1f'|format(ensaio.valores_medidos.get('Viscosidade')) if ensaio.valores_medidos.get('Viscosidade') is not none else '--' }}"
+                            data-ml-status="{% if ensaio.valores_medidos.get('Viscosidade') is none %}{% elif ensaio.viscosidade_fora %}danger{% else %}success{% endif %}"
                     >
                         <i class="fas fa-eye small"></i>
                     </button>
