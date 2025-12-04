@@ -2,12 +2,16 @@ import oracledb
 from models.massa import Massa
 from models.materia_prima import MateriaPrima
 from models.produto import Produto
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # Configurações Oracle (do seu script de teste)
-LIB_DIR = r"C:\Oracle\instantclient_23_9"
-DB_USER = "ENGENHARIA"
-DB_PASSWORD = "!eng@vul18"
-DB_DSN = "sankhya"
+LIB_DIR = os.getenv("ORACLE_LIB_DIR")
+DB_USER = os.getenv("ORACLE_DB_USER")
+DB_PASSWORD = os.getenv("ORACLE_DB_PASSWORD")
+DB_DSN = os.getenv("ORACLE_DB_DSN")
 
 def get_connection():
     try:
