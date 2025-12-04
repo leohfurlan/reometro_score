@@ -3,10 +3,41 @@
 {% block title %}Dashboard - ReoScore{% endblock %}
 
 {% block content %}
-    <div class="row mb-3">
-        <div class="col-12">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="row mb-3">
+            <div class="col-12">
+                {% for category, message in messages %}
+                  <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                  </div>
+                {% endfor %}
+            </div>
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="row mb-3 align-items-center">
+        <div class="col-md-8">
             <h2 class="fs-4 mb-0 text-secondary">Dashboard de Análise de Lotes</h2>
-            <p class="text-muted small">Visão geral dos ensaios reométricos e decisões de qualidade.</p>
+            <p class="text-muted small mb-0">
+                Última atualização: 
+                <strong>
+                    {% if ultimo_update %}
+                        {{ ultimo_update.strftime('%d/%m/%Y às %H:%M:%S') }}
+                    {% else %}
+                        Nunca
+                    {% endif %}
+                </strong>
+            </p>
+        </div>
+        <div class="col-md-4 text-end">
+            <a href="{{ url_for('rota_atualizar') }}" 
+               class="btn btn-primary shadow-sm"
+               onclick="ativarModalCarregamento()">
+                <i class="fas fa-sync-alt me-2"></i> Atualizar Dados Agora
+            </a>
         </div>
     </div>
 
@@ -79,6 +110,7 @@
                     <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-data" checked> Data/Hora</label></li>
                     <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-material" checked> Material</label></li>
                     <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-lote" checked> Lote/Batch</label></li>
+                    <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-temp" checked> Temperatura</label></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-ts2" checked> Ts2 (Scorch)</label></li>
                     <li><label class="dropdown-item checkbox-stop"><input type="checkbox" class="form-check-input col-toggle me-2" data-target="col-t90" checked> T90 (Cura)</label></li>
@@ -105,18 +137,20 @@
                             <input type="text" name="search" class="form-control border-start-0 ps-0" placeholder="Digite para buscar..." value="{{ search_term }}">
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label small fw-bold text-muted">Material</label>
-                        <select name="material_filter" class="form-select filtro-auto">
-                            <option value="">Todas as Massas</option>
-                            {% for cod, massa in catalogo_massas.items() %}
-                                <option value="{{ massa.descricao }}" {% if material_filter == massa.descricao %}selected{% endif %}>{{ massa.descricao }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
                     <div class="col-md-1">
                         <label class="form-label small fw-bold text-muted">Cód.</label>
                         <input type="text" name="codigo_filter" class="form-control" placeholder="26791" value="{{ codigo_filter }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Material</label>
+                        <select name="material_filter" class="form-select filtro-auto">
+                            <option value="">Todas as Massas ({{ materiais_filtro|length }})</option>
+                            {% for massa in materiais_filtro %}
+                                <option value="{{ massa.descricao }}" {% if material_filter == massa.descricao %}selected{% endif %}>
+                                    {{ massa.descricao }}
+                                </option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small fw-bold text-muted">Status</label>
@@ -154,6 +188,29 @@
     <div class="text-end text-muted small mt-2">
         Página {{ pagina_atual }} de {{ total_paginas }}
     </div>
+
+    <div class="modal fade" id="modalCarregamento" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-body text-center p-5">
+                    <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                    <h4 class="text-secondary fw-bold">Atualizando Base de Dados...</h4>
+                    <p class="text-muted small mb-4">Isso pode levar alguns segundos enquanto processamos o ETL.</p>
+                    
+                    <div class="progress" style="height: 10px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function ativarModalCarregamento() {
+            var myModal = new bootstrap.Modal(document.getElementById('modalCarregamento'));
+            myModal.show();
+        }
+    </script>
 
 {% endblock %}
 

@@ -13,15 +13,12 @@
                 {% set filter_params = {'search': search_term, 'acao_filter': acao_filter, 'date_start': date_start, 'date_end': date_end, 'material_filter': material_filter, 'codigo_filter': codigo_filter} %}
                 
                 <th class="resizable-col col-id"><a href="#" hx-get="{{ url_for('dashboard', sort='id', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="id" data-order="{{ 'asc' if order=='desc' else 'desc' }}">ID <i class="fas fa-sort small"></i></a></th>
-                
                 <th class="resizable-col col-data"><a href="#" hx-get="{{ url_for('dashboard', sort='data', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="data" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Data <i class="fas fa-sort small"></i></a></th>
-
                 <th class="resizable-col col-material"><a href="#" hx-get="{{ url_for('dashboard', sort='material', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="material" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Material <i class="fas fa-sort small"></i></a></th>
-
                 <th class="resizable-col col-lote"><a href="#" hx-get="{{ url_for('dashboard', sort='lote', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="lote" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Lote/Batch <i class="fas fa-sort small"></i></a></th>
-
-                <th class="resizable-col col-ts2"><a href="#" hx-get="{{ url_for('dashboard', sort='ts2', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="ts2" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Ts2 <i class="fas fa-sort small"></i></a></th>
-                <th class="resizable-col col-t90"><a href="#" hx-get="{{ url_for('dashboard', sort='t90', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="t90" data-order="{{ 'asc' if order=='desc' else 'desc' }}">T90 <i class="fas fa-sort small"></i></a></th>
+                <th class="resizable-col col-temp"><a href="#" hx-get="{{ url_for('dashboard', sort='temp', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="temp" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Temp. (°C)<i class="fas fa-sort small"></i></a></th>
+                <th class="resizable-col col-ts2"><a href="#" hx-get="{{ url_for('dashboard', sort='ts2', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="ts2" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Ts2 (s)<i class="fas fa-sort small"></i></a></th>
+                <th class="resizable-col col-t90"><a href="#" hx-get="{{ url_for('dashboard', sort='t90', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="t90" data-order="{{ 'asc' if order=='desc' else 'desc' }}">T90 (s)<i class="fas fa-sort small"></i></a></th>
                 <th class="resizable-col col-visc"><a href="#" hx-get="{{ url_for('dashboard', sort='visc', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="visc" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Visc. <i class="fas fa-sort small"></i></a></th>
                 <th class="resizable-col col-score"><a href="#" hx-get="{{ url_for('dashboard', sort='score', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="score" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Score <i class="fas fa-sort small"></i></a></th>
                 <th class="resizable-col col-acao"><a href="#" hx-get="{{ url_for('dashboard', sort='acao', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="acao" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Ação <i class="fas fa-sort small"></i></a></th>
@@ -38,30 +35,29 @@
                     <div class="fw-bold truncate-responsive" title="{{ ensaio.massa.descricao }}">
                         {{ ensaio.massa.descricao }}
                     </div>
-                    <div class="text-muted small">Cód: {{ ensaio.massa.cod_sankhya }}</div>
+                    <div class="text-muted small" style="font-size: 0.75em;">
+                        Cód: {{ ensaio.massa.cod_sankhya }}
+                    </div>
                 </td>
 
                 <td class="col-lote">
                     <div class="fw-bold truncate-responsive" title="{{ ensaio.lote }}">
                         {{ ensaio.lote }}
                     </div>
-                    {% if ensaio.batch %} 
-                        <div class="text-muted small">Batch: {{ ensaio.batch }}</div> 
-                    {% endif %}
+                    {% if ensaio.batch %} <div class="text-muted small">Batch: {{ ensaio.batch }}</div> {% endif %}
                 </td>
+                <td class="col-temp">
+                    {% if ensaio.temp_plato > 0 %}{{ "%.0f"|format(ensaio.temp_plato) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                </td>
+                <td class="col-ts2 {{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}</td>
+                <td class="col-t90 {{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('T90', 0)) }}</td>
                 
-                <td class="col-ts2 {{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">{{ "%.2f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}</td>
-                <td class="col-t90 {{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">{{ "%.2f"|format(ensaio.valores_medidos.get('T90', 0)) }}</td>
                 <td class="col-visc">
-                    {# --- Lógica de Exibição: Valor Real ou Traço --- #}
                     {% set val_visc = ensaio.valores_medidos.get('Viscosidade') %}
-                    
                     {% if val_visc and val_visc > 0 %}
                         {{ "%.1f"|format(val_visc) }}
-                        
-                        {# Badge se for Média #}
                         {% if 'Média' in ensaio.origem_viscosidade %}
-                            <span class="badge bg-light text-dark border ms-1" title="Média do Lote (Dado calculado)" style="font-size: 0.6em;">M</span>
+                            <span class="badge bg-light text-dark border ms-1" title="Média do Lote" style="font-size: 0.6em;">M</span>
                         {% endif %}
                     {% else %}
                         <span class="text-muted">--</span>
@@ -70,62 +66,34 @@
 
                 <td class="col-score">
                     <div class="progress progress-responsive">
-                        <div class="progress-bar 
-                            {% if ensaio.score_final >= 85 %}bg-success
-                            {% elif ensaio.score_final >= 70 %}bg-warning
-                            {% else %}bg-danger{% endif %}" 
-                            role="progressbar" 
-                            style="width: {{ ensaio.score_final }}%;">
-                            {{ "%.0f"|format(ensaio.score_final) }}%
-                        </div>
+                        <div class="progress-bar {% if ensaio.score_final >= 85 %}bg-success{% elif ensaio.score_final >= 70 %}bg-warning{% else %}bg-danger{% endif %}" role="progressbar" style="width: {{ ensaio.score_final }}%;">{{ "%.0f"|format(ensaio.score_final) }}%</div>
                     </div>
                 </td>
-                
                 <td class="col-acao"><span class="badge {% if 'PRIME' in ensaio.acao_recomendada %}bg-success{% elif 'LIBERAR' == ensaio.acao_recomendada %}bg-success{% elif 'RESSALVA' in ensaio.acao_recomendada %}bg-warning text-dark{% elif 'CORTAR' in ensaio.acao_recomendada %}bg-dark{% else %}bg-danger{% endif %}" style="font-size: 0.7em;">{{ ensaio.acao_recomendada }}</span></td>
-                
                 <td class="text-center col-ver">
-                    {# --- LÓGICA SEGURA PARA PARÂMETROS --- #}
                     {% set p_ts2 = ensaio.massa.parametros.get('Ts2') %}
                     {% set p_t90 = ensaio.massa.parametros.get('T90') %}
                     {% set p_visc = ensaio.massa.parametros.get('Viscosidade') %}
-
-                    <button class="btn btn-sm btn-outline-primary py-0 px-1" 
-                            data-bs-toggle="modal" 
-                            data-bs-target="#detailsModal"
-                            
-                            data-id="{{ ensaio.id_ensaio }}"
-                            data-batch="{{ ensaio.batch }}"
-                            data-lote="{{ ensaio.lote }}"
-                            data-material="{{ ensaio.massa.descricao }}"
-                            data-score="{{ '%.1f'|format(ensaio.score_final) }}"
-
-                            {# --- NOVOS DADOS --- #}
-                            data-temp-real="{{ ensaio.temp_plato }}"
-                            data-temp-padrao="{{ ensaio.massa.temp_padrao }}"
-                            data-grupo="{{ ensaio.cod_grupo }}"
-                            data-tempo-max="{{ ensaio.tempo_maximo }}"
-
-                            {# --- Ts2 --- #}
+                    <button class="btn btn-sm btn-outline-primary py-0 px-1" data-bs-toggle="modal" data-bs-target="#detailsModal"
+                            data-id="{{ ensaio.id_ensaio }}" data-batch="{{ ensaio.batch }}" data-lote="{{ ensaio.lote }}"
+                            data-material="{{ ensaio.massa.descricao }}" data-score="{{ '%.1f'|format(ensaio.score_final) }}"
+                            data-temp-real="{{ ensaio.temp_plato }}" data-temp-padrao="{{ ensaio.massa.temp_padrao }}"
+                            data-grupo="{{ ensaio.cod_grupo }}" data-tempo-max="{{ ensaio.tempo_maximo }}"
                             data-ts2-min="{{ '%.2f'|format(p_ts2.minimo) if p_ts2 else '--' }}"
                             data-ts2-target="{{ '%.2f'|format(p_ts2.alvo) if p_ts2 else '--' }}"
                             data-ts2-max="{{ '%.2f'|format(p_ts2.maximo) if p_ts2 else '--' }}"
                             data-ts2-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('Ts2')) if ensaio.valores_medidos.get('Ts2') is not none else '--' }}"
                             data-ts2-status="{% if ensaio.valores_medidos.get('Ts2') is none %}{% elif ensaio.ts2_fora %}danger{% else %}success{% endif %}"
-
-                            {# --- T90 --- #}
                             data-t90-min="{{ '%.2f'|format(p_t90.minimo) if p_t90 else '--' }}"
                             data-t90-target="{{ '%.2f'|format(p_t90.alvo) if p_t90 else '--' }}"
                             data-t90-max="{{ '%.2f'|format(p_t90.maximo) if p_t90 else '--' }}"
                             data-t90-measured="{{ '%.2f'|format(ensaio.valores_medidos.get('T90')) if ensaio.valores_medidos.get('T90') is not none else '--' }}"
                             data-t90-status="{% if ensaio.valores_medidos.get('T90') is none %}{% elif ensaio.t90_fora %}danger{% else %}success{% endif %}"
-
-                            {# --- Viscosidade --- #}
                             data-ml-min="{{ '%.1f'|format(p_visc.minimo) if p_visc else '--' }}"
                             data-ml-target="{{ '%.1f'|format(p_visc.alvo) if p_visc else '--' }}"
                             data-ml-max="{{ '%.1f'|format(p_visc.maximo) if p_visc else '--' }}"
                             data-ml-measured="{{ '%.1f'|format(ensaio.valores_medidos.get('Viscosidade')) if ensaio.valores_medidos.get('Viscosidade') is not none else '--' }}"
-                            data-ml-status="{% if ensaio.valores_medidos.get('Viscosidade') is none %}{% elif ensaio.viscosidade_fora %}danger{% else %}success{% endif %}"
-                    >
+                            data-ml-status="{% if ensaio.valores_medidos.get('Viscosidade') is none %}{% elif ensaio.viscosidade_fora %}danger{% else %}success{% endif %}">
                         <i class="fas fa-eye small"></i>
                     </button>
                 </td>
@@ -138,36 +106,20 @@
 <div class="pagination-container d-flex justify-content-between align-items-center bg-white border-top p-2">
     <div class="small text-muted">
         {% if search_term or acao_filter or date_start or material_filter or codigo_filter %}
-            <span class="fw-bold text-primary"><i class="fas fa-filter me-1"></i>Filtrado:</span> {{ total_registros_filtrados }} registros <span class="text-secondary ms-1">(de {{ kpi.total }} total)</span>
+            <span class="fw-bold text-primary"><i class="fas fa-filter me-1"></i>Filtrado:</span> {{ total_registros_filtrados }} registros <span class="text-secondary ms-1">(de {{ total_geral }} total)</span>
         {% else %}
-            Total: <strong>{{ kpi.total }}</strong> registros
+            Total: <strong>{{ total_registros_filtrados }}</strong> registros
         {% endif %}
     </div>
 
     <nav aria-label="Navegação">
         <ul class="pagination pagination-sm mb-0 align-items-center">
             {% set filter_params = {'search': search_term, 'acao_filter': acao_filter, 'date_start': date_start, 'date_end': date_end, 'material_filter': material_filter, 'codigo_filter': codigo_filter, 'sort': sort_by, 'order': order} %}
-
-            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
-                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-left"></i></a>
-            </li>
-            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
-                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual-1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-left"></i></a>
-            </li>
-            
-            <li class="page-item d-flex align-items-center mx-2">
-                <span class="small text-muted me-2">Pág.</span>
-                <input type="number" class="form-control form-control-sm page-input" value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" 
-                       hx-get="{{ url_for('dashboard', **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" hx-trigger="change, keyup delay:800ms changed" name="page">
-                <span class="small text-muted ms-2">de {{ total_paginas }}</span>
-            </li>
-
-            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
-                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual+1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-right"></i></a>
-            </li>
-            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
-                <a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=total_paginas, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-right"></i></a>
-            </li>
+            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}"><a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-left"></i></a></li>
+            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}"><a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual-1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-left"></i></a></li>
+            <li class="page-item d-flex align-items-center mx-2"><span class="small text-muted me-2">Pág.</span><input type="number" class="form-control form-control-sm page-input" value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" hx-get="{{ url_for('dashboard', **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" hx-trigger="change, keyup delay:800ms changed" name="page"><span class="small text-muted ms-2">de {{ total_paginas }}</span></li>
+            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}"><a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=pagina_atual+1, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-right"></i></a></li>
+            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}"><a class="page-link" href="#" hx-get="{{ url_for('dashboard', page=total_paginas, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true"><i class="fas fa-angle-double-right"></i></a></li>
         </ul>
     </nav>
 </div>
