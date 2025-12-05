@@ -35,6 +35,28 @@ class Ensaio:
         self.t90_fora = False
         self.viscosidade_fora = False
 
+
+    def identificar_perfil(self):
+        """Retorna o dicionário de parâmetros correto baseado na temperatura."""
+        temp = self.temp_plato
+        
+        # Se o objeto massa não tiver 'perfis' (ex: erro de migração), usa fallback
+        if not hasattr(self.massa, 'perfis'):
+            return self.massa.parametros, "Padrão (Legacy)"
+
+        # Regra de Negócio: Definição dos ranges
+        # Alta: Geralmente > 175°C (Batch individual)
+        if temp >= 175: 
+            return self.massa.perfis.get('alta', {}), "Alta Temperatura"
+        
+        # Baixa: Geralmente entre 120°C e 175°C (Mistura final)
+        elif 120 <= temp < 175:
+            return self.massa.perfis.get('baixa', {}), "Baixa Temperatura"
+            
+        else:
+            # Se não cair em nenhum range, tenta usar o legacy ou retorna vazio
+            return self.massa.parametros, "Indefinido (Fallback)"
+        
     def calcular_score(self):
         soma_pesos = 0
         soma_score_ponderado = 0
@@ -44,7 +66,20 @@ class Ensaio:
         self.t90_fora = False
         self.viscosidade_fora = False
 
-        # Itera sobre os parametros esperados (receita)
+        # 1. Seleciona os parâmetros corretos dinamicamente
+        parametros_ativos, nome_perfil = self.identificar_perfil()
+        self.parametros_usados = parametros_ativos # <--- SALVAR AQUI
+        self.nome_perfil_usado = nome_perfil
+        
+        # Adiciona info visual sobre qual perfil foi usado
+        self.detalhes_score.append(f"ℹ️ Perfil Aplicado: {nome_perfil} ({self.temp_plato}°C)")
+
+        if not parametros_ativos:
+            self.score_final = 0
+            self.detalhes_score.append("⚠️ Sem parâmetros configurados para esta temperatura.")
+            return 0
+
+        # 2. Itera sobre os parametros (Lógica igual a antes, mas usando a var 'parametros_ativos')
         for nome_param, param in self.massa.parametros.items():
             if nome_param in self.valores_medidos:
                 valor_medido = self.valores_medidos[nome_param]

@@ -1,19 +1,38 @@
 {
     "26791": {
-        "temp_padrao": 195.0,
-        "Ts2": {
+        "alta_temp_padrao": 195.0,
+        "baixa_temp_padrao": 150.0,
+        "alta_Ts2": {
             "min": 40.0,
             "alvo": 60.0,
             "max": 80.0,
             "peso": 8
         },
-        "T90": {
+        "alta_T90": {
             "min": 80.0,
             "alvo": 100.0,
             "max": 120.0,
             "peso": 6
         },
-        "Viscosidade": {
+        "alta_Viscosidade": {
+            "min": 56.0,
+            "alvo": 63.0,
+            "max": 70.0,
+            "peso": 10
+        },
+        "baixa_Ts2": {
+            "min": 540.0,
+            "alvo": 645.0,
+            "max": 780.0,
+            "peso": 8
+        },
+        "baixa_T90": {
+            "min": 1080.0,
+            "alvo": 1170.0,
+            "max": 1260.0,
+            "peso": 6
+        },
+        "baixa_Viscosidade": {
             "min": 56.0,
             "alvo": 63.0,
             "max": 70.0,

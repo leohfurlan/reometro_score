@@ -4,5 +4,11 @@ class MateriaPrima(Produto):
     def __init__(self, cod_sankhya, descricao):
         super().__init__(cod_sankhya, descricao, tipo="MATERIA_PRIMA")
         self.parametros_mp = {}
-        # CORREÇÃO: Adiciona atributo vazio para compatibilidade com Ensaio
+        
+        # --- CORREÇÃO DE COMPATIBILIDADE ---
+        self.perfis = {
+            'alta': {},
+            'baixa': {}
+        }
+        
         self.parametros = {}

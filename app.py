@@ -430,22 +430,62 @@ def pagina_config():
 @app.route('/salvar_config', methods=['POST'])
 def salvar_config():
     cod = request.form.get('cod_sankhya')
-    def f(val): return float(val.replace(',', '.')) if val else 0.0
-    def i(val): return int(val) if val else 0
-    specs = {"temp_padrao": f(request.form.get('temp_padrao'))}
-    for param in ["Ts2", "T90", "Viscosidade"]:
-        min_v, alvo_v, max_v, peso_v = request.form.get(f"{param}_min"), request.form.get(f"{param}_alvo"), request.form.get(f"{param}_max"), request.form.get(f"{param}_peso")
-        if min_v or alvo_v or max_v: specs[param] = {"min": f(min_v), "alvo": f(alvo_v), "max": f(max_v), "peso": i(peso_v)}
+    
+    # Funções auxiliares de conversão
+    def f(val): return float(val.replace(',', '.')) if val and val.strip() else 0.0
+    def i(val): return int(val) if val and val.strip() else 0
+    
+    specs = {}
+    
+    # 1. Captura as Temperaturas Padrão dos Perfis
+    t_alta = request.form.get('alta_temp_padrao')
+    t_baixa = request.form.get('baixa_temp_padrao')
+    
+    if t_alta and t_alta.strip(): specs['alta_temp_padrao'] = f(t_alta)
+    if t_baixa and t_baixa.strip(): specs['baixa_temp_padrao'] = f(t_baixa)
+
+    # 2. Captura os Parâmetros Fixos (Ts2, T90, Viscosidade) por Perfil
+    perfis = ['alta', 'baixa']
+    params = ['Ts2', 'T90', 'Viscosidade']
+    
+    for perfil in perfis:
+        for p in params:
+            prefix = f"{perfil}_{p}" # Ex: alta_Ts2
+            
+            min_v = request.form.get(f"{prefix}_min")
+            alvo_v = request.form.get(f"{prefix}_alvo")
+            max_v = request.form.get(f"{prefix}_max")
+            peso_v = request.form.get(f"{prefix}_peso")
+            
+            # Só salva se houver algum valor relevante preenchido
+            if min_v or alvo_v or max_v:
+                specs[prefix] = {
+                    "min": f(min_v),
+                    "alvo": f(alvo_v),
+                    "max": f(max_v),
+                    "peso": i(peso_v)
+                }
+
+    # 3. Mantém compatibilidade com Parâmetros Dinâmicos (Legacy)
     novos_nomes = request.form.getlist('din_nome[]')
     novos_pesos = request.form.getlist('din_peso[]')
     novos_mins = request.form.getlist('din_min[]')
     novos_alvos = request.form.getlist('din_alvo[]')
     novos_maxs = request.form.getlist('din_max[]')
+    
     for idx, nome in enumerate(novos_nomes):
-        if nome.strip(): specs[nome] = {"min": f(novos_mins[idx]), "alvo": f(novos_alvos[idx]), "max": f(novos_maxs[idx]), "peso": i(novos_pesos[idx])}
+        if nome.strip():
+            specs[nome] = {
+                "min": f(novos_mins[idx]),
+                "alvo": f(novos_alvos[idx]),
+                "max": f(novos_maxs[idx]),
+                "peso": i(novos_pesos[idx])
+            }
+            
+    # Salva no arquivo JSON e recarrega na memória
     salvar_configuracao(cod, specs)
     aplicar_configuracoes_no_catalogo(CATALOGO_POR_CODIGO)
-    # Não limpa cache, usuário atualiza manual
+    
     return redirect(url_for('pagina_config', q=cod))
 
 if __name__ == '__main__':

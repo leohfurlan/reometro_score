@@ -26,9 +26,6 @@ def salvar_configuracao(cod_sankhya, specs):
     print(f"💾 Configuração salva para o produto {cod_sankhya}")
 
 def aplicar_configuracoes_no_catalogo(catalogo_objetos):
-    """
-    Recebe o dicionário de objetos (do Sankhya) e injeta os parâmetros salvos no JSON.
-    """
     configs = carregar_configuracoes()
     count = 0
     
@@ -37,29 +34,42 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
         if cod_int in catalogo_objetos:
             produto = catalogo_objetos[cod_int]
             
-            # 1. Reseta parâmetros antigos para aplicar os novos limpos
+            # Limpa configurações anteriores
+            if hasattr(produto, 'perfis'):
+                produto.perfis = {'alta': {}, 'baixa': {}}
             if hasattr(produto, 'parametros'):
                 produto.parametros = {} 
                 
-            for param_nome, valores in specs.items():
-                # --- CORREÇÃO DO ERRO ---
+            for chave_param, valores in specs.items():
                 
-                # Caso A: É a Temperatura Padrão (Dado simples)
-                if param_nome == "temp_padrao":
-                    if hasattr(produto, 'temp_padrao'):
-                        produto.temp_padrao = valores
-                    continue # Pula para o próximo item, não tenta ler 'min/max'
+                # Detecta se pertence a um perfil (alta_ ou baixa_)
+                perfil = 'alta' if chave_param.startswith('alta_') else 'baixa' if chave_param.startswith('baixa_') else None
                 
-                # Caso B: É um Parâmetro de Qualidade (Dicionário)
-                # Proteção extra: só processa se for dicionário
-                if isinstance(valores, dict):
-                    produto.adicionar_parametro(
-                        nome=param_nome,
-                        peso=valores.get('peso', 10),
-                        alvo=valores.get('alvo', 0),
-                        minimo=valores.get('min', 0),
-                        maximo=valores.get('max', 0)
-                    )
+                if perfil:
+                    # Remove o prefixo para obter o nome real (ex: "alta_Ts2" -> "Ts2")
+                    nome_real = chave_param.replace(f"{perfil}_", "")
+                    
+                    # Caso Especial: É a temperatura padrão do perfil (valor float)
+                    if nome_real == "temp_padrao":
+                        produto.perfis[perfil]['temp_padrao'] = valores
+                        continue
+
+                    # Caso Padrão: É um objeto Parametro (dict)
+                    if isinstance(valores, dict):
+                        produto.adicionar_parametro(
+                            perfil_chave=perfil,
+                            nome=nome_real,
+                            peso=valores.get('peso', 10),
+                            alvo=valores.get('alvo', 0),
+                            minimo=valores.get('min', 0),
+                            maximo=valores.get('max', 0)
+                        )
+                else:
+                    # Compatibilidade Legacy (sem prefixo vai para 'parametros' genérico)
+                    if isinstance(valores, dict) and hasattr(produto, 'parametros'):
+                        # Aqui você pode instanciar o Parametro manualmente ou criar um método helper
+                        # Assumindo uso de dicionário direto ou lógica antiga:
+                         pass # (Seus parâmetros dinâmicos antigos entrariam aqui)
             
             count += 1
     

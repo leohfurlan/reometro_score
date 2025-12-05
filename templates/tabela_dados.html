@@ -72,10 +72,17 @@
                 </td>
                 <td class="col-acao"><span class="badge {% if 'PRIME' in ensaio.acao_recomendada %}bg-success{% elif 'LIBERAR' == ensaio.acao_recomendada %}bg-success{% elif 'RESSALVA' in ensaio.acao_recomendada %}bg-warning text-dark{% elif 'CORTAR' in ensaio.acao_recomendada %}bg-dark{% else %}bg-danger{% endif %}" style="font-size: 0.7em;">{{ ensaio.acao_recomendada }}</span></td>
                 <td class="text-center col-ver">
-                    {% set p_ts2 = ensaio.massa.parametros.get('Ts2') %}
-                    {% set p_t90 = ensaio.massa.parametros.get('T90') %}
-                    {% set p_visc = ensaio.massa.parametros.get('Viscosidade') %}
+                    {# Usa os parâmetros que foram efetivamente usados no cálculo #}
+                    {% set params_reais = ensaio.parametros_usados if ensaio.parametros_usados is defined else ensaio.massa.parametros %}
+                    {% set perfil_nome = ensaio.nome_perfil_usado if ensaio.nome_perfil_usado is defined else 'Padrão' %}
+                    
+                    {% set p_ts2 = params_reais.get('Ts2') %}
+                    {% set p_t90 = params_reais.get('T90') %}
+                    {% set p_visc = params_reais.get('Viscosidade') %}
+                    
                     <button class="btn btn-sm btn-outline-primary py-0 px-1" data-bs-toggle="modal" data-bs-target="#detailsModal"
+                            data-id="{{ ensaio.id_ensaio }}" 
+                            data-perfil="{{ perfil_nome }}"  data-batch="{{ ensaio.batch }}"
                             data-id="{{ ensaio.id_ensaio }}" data-batch="{{ ensaio.batch }}" data-lote="{{ ensaio.lote }}"
                             data-material="{{ ensaio.massa.descricao }}" data-score="{{ '%.1f'|format(ensaio.score_final) }}"
                             data-temp-real="{{ ensaio.temp_plato_display }}" data-temp-padrao="{{ ensaio.massa.temp_padrao }}"

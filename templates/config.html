@@ -33,7 +33,7 @@
                     <tr>
                         <th class="ps-3">Cód.</th>
                         <th>Descrição</th>
-                        <th>Temp. Padrão</th>
+                        <th>Perfis Ativos</th>
                         <th>Status</th>
                         <th class="text-end pe-3">Ação</th>
                     </tr>
@@ -44,33 +44,31 @@
                         <td class="ps-3 fw-bold text-muted">{{ prod.cod_sankhya }}</td>
                         <td>{{ prod.descricao }}</td>
                         <td>
-                            {% if prod.temp_padrao is defined and prod.temp_padrao and prod.temp_padrao > 0 %}
-                                {{ prod.temp_padrao }}°C
+                            {% if prod.perfis is defined %}
+                                {% if prod.perfis.get('alta') %}
+                                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger me-1">Alta</span>
+                                {% endif %}
+                                {% if prod.perfis.get('baixa') %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary">Baixa</span>
+                                {% endif %}
+                                {% if not prod.perfis.get('alta') and not prod.perfis.get('baixa') %}
+                                    <span class="text-muted small">-</span>
+                                {% endif %}
                             {% else %}
                                 <span class="text-muted small">-</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if prod.parametros is defined %}
-                                {% if prod.parametros %}
-                                    <span class="badge bg-success bg-opacity-10 text-success border border-success">Configurado</span>
-                                {% else %}
-                                    <span class="badge bg-secondary bg-opacity-10 text-secondary border">Sem Specs</span>
-                                {% endif %}
+                            {% if prod.parametros is defined or prod.perfis is defined %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success">Configurado</span>
                             {% else %}
-                                <span class="badge bg-light text-dark border">Matéria Prima</span>
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary border">Sem Specs</span>
                             {% endif %}
                         </td>
                         <td class="text-end pe-3">
-                            {% if prod.parametros is defined %}
-                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
-                                    <i class="fas fa-edit me-1"></i> Editar
-                                </button>
-                            {% else %}
-                                <button class="btn btn-sm btn-outline-secondary" disabled title="Edição de MP em breve">
-                                    <i class="fas fa-lock me-1"></i> MP
-                                </button>
-                            {% endif %}
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
+                                <i class="fas fa-edit me-1"></i> Editar
+                            </button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -92,10 +90,8 @@
 
 {% block modais %}
     {% for prod in produtos %}
-        {% if prod.parametros is defined %}
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <form action="/salvar_config" method="POST">
+            <div class="modal-dialog modal-xl"> <form action="/salvar_config" method="POST">
                     <div class="modal-content">
                         <div class="modal-header bg-light">
                             <h5 class="modal-title fw-bold">Configurar: {{ prod.descricao }}</h5>
@@ -104,59 +100,126 @@
                         <div class="modal-body">
                             <input type="hidden" name="cod_sankhya" value="{{ prod.cod_sankhya }}">
                             
-                            <div class="alert alert-light border mb-4">
-                                <label class="fw-bold mb-1 text-secondary"><i class="fas fa-temperature-high me-1"></i> Temperatura de Análise Padrão (°C)</label>
-                                <input type="number" step="0.1" class="form-control w-25" name="temp_padrao" 
-                                       value="{{ prod.temp_padrao if prod.temp_padrao is defined and prod.temp_padrao else '' }}" 
-                                       placeholder="Ex: 180">
-                            </div>
+                            <h6 class="text-secondary fw-bold mb-3 border-bottom pb-2">PERFIS DE TEMPERATURA</h6>
 
-                            <h6 class="text-secondary fw-bold mb-3 border-bottom pb-2">PARÂMETROS PADRÃO</h6>
-                            
-                            <div class="row mb-2 fw-bold text-center small text-muted text-uppercase">
-                                <div class="col-3 text-start">Parâmetro</div>
-                                <div class="col-2">Peso (0-10)</div> <div class="col-2">Mínimo</div>
-                                <div class="col-2">Alvo</div>
-                                <div class="col-3">Máximo</div>
-                            </div>
+                            <div class="row g-4">
+                                {% set perfis = prod.perfis if prod.perfis is defined else {} %}
+                                {% set perfis_alta = perfis.get('alta', {}) %}
+                                {% set perfis_baixa = perfis.get('baixa', {}) %}
 
-                            {% for param in ['Ts2', 'T90', 'Viscosidade'] %}
-                            {% set p_val = prod.parametros.get(param) %}
-                            <div class="row mb-3 align-items-center">
-                                <div class="col-3 fw-bold text-secondary">{{ param }}</div>
-                                
-                                <div class="col-2">
-                                    <input type="number" min="0" max="10" step="1" class="form-control text-center fw-bold text-primary" 
-                                           name="{{ param }}_peso" 
-                                           value="{{ p_val.peso if p_val else 10 }}" 
-                                           required>
+                                <div class="col-md-6 border-end">
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-danger bg-opacity-10 rounded">
+                                        <h6 class="text-danger fw-bold mb-0"><i class="fas fa-fire me-2"></i>Alta Temp. (Batch)</h6>
+                                        <div class="input-group input-group-sm" style="width: 160px;">
+                                            <span class="input-group-text border-0 bg-transparent text-muted small">Padrão:</span>
+                                            <input type="number" step="0.1" name="alta_temp_padrao" class="form-control fw-bold text-center" 
+                                                   value="{{ perfis_alta.get('temp_padrao', '') }}" placeholder="Ex: 190">
+                                            <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 text-center text-muted x-small fw-bold" style="font-size: 0.75rem;">
+                                        <div class="col-3 text-start ps-2">Parâmetro</div>
+                                        <div class="col-2">Min</div>
+                                        <div class="col-2">Alvo</div>
+                                        <div class="col-2">Max</div>
+                                        <div class="col-3">Peso Score</div>
+                                    </div>
+
+                                    {% for param in ['Ts2', 'T90', 'Viscosidade'] %}
+                                    {% set p_val = perfis_alta.get(param) if perfis_alta else None %}
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-3">
+                                            <label class="form-label mb-0 fw-bold text-secondary small ps-1">{{ param }}</label>
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="alta_{{ param }}_min" class="form-control form-control-sm text-center" 
+                                                   value="{{ p_val.minimo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="alta_{{ param }}_alvo" class="form-control form-control-sm text-center fw-bold bg-light" 
+                                                   value="{{ p_val.alvo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="alta_{{ param }}_max" class="form-control form-control-sm text-center" 
+                                                   value="{{ p_val.maximo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-3">
+                                            <input type="number" min="0" max="10" step="1" name="alta_{{ param }}_peso" class="form-control form-control-sm text-center text-primary fw-bold" 
+                                                   value="{{ p_val.peso if p_val else 10 }}">
+                                        </div>
+                                    </div>
+                                    {% endfor %}
                                 </div>
 
-                                <div class="col-2"><input type="number" step="0.01" class="form-control text-center" name="{{ param }}_min" value="{{ p_val.minimo if p_val else '' }}"></div>
-                                <div class="col-2"><input type="number" step="0.01" class="form-control text-center bg-light" name="{{ param }}_alvo" value="{{ p_val.alvo if p_val else '' }}"></div>
-                                <div class="col-3"><input type="number" step="0.01" class="form-control text-center" name="{{ param }}_max" value="{{ p_val.maximo if p_val else '' }}"></div>
+                                <div class="col-md-6">
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-primary bg-opacity-10 rounded">
+                                        <h6 class="text-primary fw-bold mb-0"><i class="fas fa-snowflake me-2"></i>Baixa Temp. (Mistura)</h6>
+                                        <div class="input-group input-group-sm" style="width: 160px;">
+                                            <span class="input-group-text border-0 bg-transparent text-muted small">Padrão:</span>
+                                            <input type="number" step="0.1" name="baixa_temp_padrao" class="form-control fw-bold text-center" 
+                                                   value="{{ perfis_baixa.get('temp_padrao', '') }}" placeholder="Ex: 150">
+                                            <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 text-center text-muted x-small fw-bold" style="font-size: 0.75rem;">
+                                        <div class="col-3 text-start ps-2">Parâmetro</div>
+                                        <div class="col-2">Min</div>
+                                        <div class="col-2">Alvo</div>
+                                        <div class="col-2">Max</div>
+                                        <div class="col-3">Peso Score (0 a 10)</div>
+                                    </div>
+
+                                    {% for param in ['Ts2', 'T90', 'Viscosidade'] %}
+                                    {% set p_val = perfis_baixa.get(param) if perfis_baixa else None %}
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-3">
+                                            <label class="form-label mb-0 fw-bold text-secondary small ps-1">{{ param }}</label>
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="baixa_{{ param }}_min" class="form-control form-control-sm text-center" 
+                                                   value="{{ p_val.minimo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="baixa_{{ param }}_alvo" class="form-control form-control-sm text-center fw-bold bg-light" 
+                                                   value="{{ p_val.alvo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" step="0.01" name="baixa_{{ param }}_max" class="form-control form-control-sm text-center" 
+                                                   value="{{ p_val.maximo if p_val else '' }}">
+                                        </div>
+                                        <div class="col-3">
+                                            <input type="number" min="0" max="10" step="1" name="baixa_{{ param }}_peso" class="form-control form-control-sm text-center text-primary fw-bold" 
+                                                   value="{{ p_val.peso if p_val else 10 }}">
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
                             </div>
-                            {% endfor %}
 
                             <div class="mt-4">
                                 <h6 class="text-secondary fw-bold mb-3 border-bottom pb-2 d-flex justify-content-between align-items-center">
-                                    OUTROS PARÂMETROS
+                                    <span><i class="fas fa-list me-2"></i>PARÂMETROS DINÂMICOS (LEGACY)</span>
                                     <button type="button" class="btn btn-sm btn-outline-success" onclick="addParamRow('containerParams{{ prod.cod_sankhya }}')">
-                                        <i class="fas fa-plus"></i> Novo Parâmetro
+                                        <i class="fas fa-plus"></i> Novo
                                     </button>
                                 </h6>
                                 
                                 <div id="containerParams{{ prod.cod_sankhya }}">
+                                    <div class="row g-1 mb-2 text-center text-muted x-small fw-bold" style="font-size: 0.75rem;">
+                                        <div class="col-3 text-start">Nome</div>
+                                        <div class="col-2">Peso</div>
+                                        <div class="col-2">Min</div>
+                                        <div class="col-2">Alvo</div>
+                                        <div class="col-3">Max</div>
+                                    </div>
+
                                     {% for nome, p in prod.parametros.items() %}
                                         {% if nome not in ['Ts2', 'T90', 'Viscosidade'] %}
                                         <div class="row mb-2 align-items-center param-row">
                                             <div class="col-3"><input type="text" class="form-control form-control-sm fw-bold" name="din_nome[]" value="{{ nome }}"></div>
-                                            
-                                            <div class="col-2">
-                                                <input type="number" min="0" max="10" step="1" class="form-control form-control-sm text-center fw-bold text-primary" 
-                                                       name="din_peso[]" value="{{ p.peso }}">
-                                            </div>
-
+                                            <div class="col-2"><input type="number" min="0" max="10" step="1" class="form-control form-control-sm text-center fw-bold text-primary" name="din_peso[]" value="{{ p.peso }}"></div>
                                             <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="din_min[]" value="{{ p.minimo }}"></div>
                                             <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center bg-light" name="din_alvo[]" value="{{ p.alvo }}"></div>
                                             <div class="col-3 d-flex gap-1">
@@ -178,7 +241,6 @@
                 </form>
             </div>
         </div>
-        {% endif %}
     {% endfor %}
 
     <script>

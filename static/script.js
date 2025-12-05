@@ -26,6 +26,7 @@ const initUI = () => {
 
     if (detailsModal) {
         detailsModal.addEventListener('show.bs.modal', event => {
+            const perfil = button.getAttribute('data-perfil');
             const button = event.relatedTarget;
             if (!button) return;
 
@@ -51,7 +52,7 @@ const initUI = () => {
             setSafeText('#modalMaterialDisplay', 'Material: ' + material);
             setSafeText('#modalIdsDisplay', idsAgrupados && idsAgrupados.trim() ? `Ensaios: ${idsAgrupados}` : 'Ensaios: --');
 
-            setSafeText('#modalGrupo', grupo);
+            setSafeText('#modalGrupo', grupo + (perfil ? ` (${perfil})` : ''));
             setSafeText('#modalTempo', tempoMax);
 
             const baseTemp = tempReal || '--';
