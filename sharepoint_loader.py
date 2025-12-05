@@ -13,7 +13,7 @@ URL_SITE = os.getenv("URL_SITE_SHAREPOINT")
 
 # 2. Caminho Relativo do Arquivo (Onde ele mora dentro do servidor)
 # Copiei exatamente a estrutura do seu link
-CAMINHO_ARQUIVO = "/sites/Vulcaflex/laboratorio/Documentos Compartilhados/LABORATÓRIO/REG 403 - 38 ACOMPANHAMENTO ANÁLISES DE MASSAS.xlsx"
+CAMINHO_ARQUIVO = os.getenv("CAMINHO_REG403")
 
 # 3. Suas Credenciais
 USERNAME = os.getenv("USERNAME_ONEDRIVE")  

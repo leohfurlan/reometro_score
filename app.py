@@ -1,4 +1,8 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_bcrypt import Bcrypt
+from models.usuario import db, Usuario
+
 from datetime import datetime
 import math, re, json, os
 from difflib import get_close_matches
@@ -7,7 +11,7 @@ import pandas as pd
 # Modelos
 from models.massa import Massa
 from models.ensaio import Ensaio
-
+from config import Config
 # Serviços
 from connection import connect_to_database      
 from etl_planilha import carregar_dicionario_lotes 
@@ -15,7 +19,25 @@ from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import aplicar_configuracoes_no_catalogo, salvar_configuracao
 
 app = Flask(__name__)
-app.secret_key = 'segredo_reoscore' # Necessário para mensagens de feedback (flash)
+app.config.from_object(Config)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") # Necessário para mensagens de feedback (flash)
+
+# --- CONFIGURAÇÃO DO BANCO DE USUÁRIOS (SQLite Local) ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_reoscore.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db.init_app(app)
+bcrypt = Bcrypt(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+# Cria o banco de dados na primeira execução se não existir
+with app.app_context():
+    db.create_all()
+
+@login_manager.user_loader
+def load_user(user_id):
+    return Usuario.query.get(int(user_id))
 
 # ==========================================
 # 1. INICIALIZAÇÃO
@@ -263,6 +285,42 @@ def atualizar_cache_do_banco():
 # 5. ROTAS
 # ==========================================
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = Usuario.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password, bcrypt):
+            login_user(user)
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Login ou senha inválidos.', 'danger')
+            
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Você saiu do sistema.', 'info')
+    return redirect(url_for('login'))
+
+# Rota auxiliar para criar o primeiro ADMIN (execute uma vez e apague ou proteja)
+@app.route('/criar_admin')
+def criar_admin():
+    if Usuario.query.filter_by(username='admin').first():
+        return "Admin já existe."
+    
+    hashed_pw = bcrypt.generate_password_hash('senha123').decode('utf-8')
+    novo_admin = Usuario(username='admin', password_hash=hashed_pw, role='admin')
+    db.session.add(novo_admin)
+    db.session.commit()
+    return "Admin criado com sucesso! (User: admin / Pass: senha123)"
+
+
 @app.route('/atualizar_dados')
 def rota_atualizar():
     """Rota disparada pelo botão manual"""
@@ -274,6 +332,7 @@ def rota_atualizar():
     return redirect(url_for('dashboard'))
 
 @app.route('/')
+@login_required
 def dashboard():
     # Se cache vazio, força primeira carga
     if CACHE_GLOBAL['ultimo_update'] is None:
@@ -353,7 +412,11 @@ def dashboard():
 
 # ... (Rotas Config mantidas iguais) ...
 @app.route('/config')
+@login_required
 def pagina_config():
+    if current_user.role != 'admin':
+        flash("Acesso negado. Apenas administradores podem alterar configurações.", "warning")
+        return redirect(url_for('dashboard'))
     query = request.args.get('q', '').upper()
     produtos = []
     if not query: produtos = list(CATALOGO_POR_CODIGO.values())[:50]
