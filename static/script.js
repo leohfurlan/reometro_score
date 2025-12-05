@@ -26,9 +26,9 @@ const initUI = () => {
 
     if (detailsModal) {
         detailsModal.addEventListener('show.bs.modal', event => {
-            const perfil = button.getAttribute('data-perfil');
             const button = event.relatedTarget;
             if (!button) return;
+            const perfil = button.getAttribute('data-perfil');
 
             const batch = button.getAttribute('data-batch');
             const material = button.getAttribute('data-material');
@@ -40,6 +40,7 @@ const initUI = () => {
             const tempPadrao = tempPadraoAttr ? parseFloat(tempPadraoAttr) : NaN;
             const grupo = button.getAttribute('data-grupo');
             const tempoMax = button.getAttribute('data-tempo-max');
+            const tempoConfig = button.getAttribute('data-tempo-config');
 
             const displayBatch = batch && batch !== 'None' ? batch : 'N/A';
 
@@ -53,7 +54,16 @@ const initUI = () => {
             setSafeText('#modalIdsDisplay', idsAgrupados && idsAgrupados.trim() ? `Ensaios: ${idsAgrupados}` : 'Ensaios: --');
 
             setSafeText('#modalGrupo', grupo + (perfil ? ` (${perfil})` : ''));
-            setSafeText('#modalTempo', tempoMax);
+
+            const tempoDisplay = (() => {
+                const med = tempoMax && tempoMax.trim() ? `${tempoMax}s` : '--';
+                if (tempoConfig && tempoConfig.trim()) {
+                    if (med !== '--') return `${med} (alvo ${tempoConfig}s)`;
+                    return `${tempoConfig}s (alvo)`;
+                }
+                return med;
+            })();
+            setSafeText('#modalTempo', tempoDisplay);
 
             const baseTemp = tempReal || '--';
             const padraoValido = !Number.isNaN(tempPadrao) && tempPadrao > 0;

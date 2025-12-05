@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Configuração de Massas - ReoScore{% endblock %}
+{% block title %}Configuracao de Massas - ReoScore{% endblock %}
 
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-cogs me-2"></i>Configurações de Massas</h2>
-        <p class="text-muted small">Defina os parâmetros de qualidade e pesos para cálculo do Score.</p>
+        <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-cogs me-2"></i>Configuracoes de Massas</h2>
+        <p class="text-muted small">Defina os parametros de qualidade e pesos para calculo do Score.</p>
     </div>
     
     <a href="{{ url_for('dashboard') }}" class="btn btn-success shadow-sm">
@@ -19,7 +19,7 @@
     <form method="GET" action="/config">
         <div class="input-group">
             <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
-            <input type="text" name="q" class="form-control border-start-0 ps-0" placeholder="Buscar por nome ou código..." value="{{ query }}">
+            <input type="text" name="q" class="form-control border-start-0 ps-0" placeholder="Buscar por nome ou codigo..." value="{{ query }}">
             <button class="btn btn-primary" type="submit">Buscar</button>
         </div>
     </form>
@@ -31,11 +31,11 @@
             <table class="table table-hover mb-0 align-middle">
                 <thead class="bg-light">
                     <tr>
-                        <th class="ps-3">Cód.</th>
-                        <th>Descrição</th>
+                        <th class="ps-3">Cod.</th>
+                        <th>Descricao</th>
                         <th>Perfis Ativos</th>
                         <th>Status</th>
-                        <th class="text-end pe-3">Ação</th>
+                        <th class="text-end pe-3">Acao</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -91,7 +91,8 @@
 {% block modais %}
     {% for prod in produtos %}
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
-            <div class="modal-dialog modal-xl"> <form action="/salvar_config" method="POST">
+            <div class="modal-dialog modal-xl">
+                <form action="/salvar_config" method="POST">
                     <div class="modal-content">
                         <div class="modal-header bg-light">
                             <h5 class="modal-title fw-bold">Configurar: {{ prod.descricao }}</h5>
@@ -110,16 +111,24 @@
                                 <div class="col-md-6 border-end">
                                     <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-danger bg-opacity-10 rounded">
                                         <h6 class="text-danger fw-bold mb-0"><i class="fas fa-fire me-2"></i>Alta Temp. (Batch)</h6>
-                                        <div class="input-group input-group-sm" style="width: 160px;">
-                                            <span class="input-group-text border-0 bg-transparent text-muted small">Padrão:</span>
-                                            <input type="number" step="0.1" name="alta_temp_padrao" class="form-control fw-bold text-center" 
-                                                   value="{{ perfis_alta.get('temp_padrao', '') }}" placeholder="Ex: 190">
-                                            <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                        <div class="d-flex gap-2">
+                                            <div class="input-group input-group-sm" style="width: 150px;">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">Padrao:</span>
+                                                <input type="number" step="0.1" name="alta_temp_padrao" class="form-control fw-bold text-center" 
+                                                       value="{{ perfis_alta.get('temp_padrao', '') }}" placeholder="Ex: 190">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                            </div>
+                                            <div class="input-group input-group-sm" style="width: 170px;">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">Tempo:</span>
+                                                <input type="number" step="1" min="0" name="alta_tempo_total" class="form-control fw-bold text-center" 
+                                                       value="{{ perfis_alta.get('tempo_total', '') }}" placeholder="Ex: 300">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">s</span>
+                                            </div>
                                         </div>
                                     </div>
 
                                     <div class="row g-1 mb-2 text-center text-muted x-small fw-bold" style="font-size: 0.75rem;">
-                                        <div class="col-3 text-start ps-2">Parâmetro</div>
+                                        <div class="col-3 text-start ps-2">Parametro</div>
                                         <div class="col-2">Min</div>
                                         <div class="col-2">Alvo</div>
                                         <div class="col-2">Max</div>
@@ -155,16 +164,24 @@
                                 <div class="col-md-6">
                                     <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-primary bg-opacity-10 rounded">
                                         <h6 class="text-primary fw-bold mb-0"><i class="fas fa-snowflake me-2"></i>Baixa Temp. (Mistura)</h6>
-                                        <div class="input-group input-group-sm" style="width: 160px;">
-                                            <span class="input-group-text border-0 bg-transparent text-muted small">Padrão:</span>
-                                            <input type="number" step="0.1" name="baixa_temp_padrao" class="form-control fw-bold text-center" 
-                                                   value="{{ perfis_baixa.get('temp_padrao', '') }}" placeholder="Ex: 150">
-                                            <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                        <div class="d-flex gap-2">
+                                            <div class="input-group input-group-sm" style="width: 150px;">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">Padrao:</span>
+                                                <input type="number" step="0.1" name="baixa_temp_padrao" class="form-control fw-bold text-center" 
+                                                       value="{{ perfis_baixa.get('temp_padrao', '') }}" placeholder="Ex: 150">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">°C</span>
+                                            </div>
+                                            <div class="input-group input-group-sm" style="width: 170px;">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">Tempo:</span>
+                                                <input type="number" step="1" min="0" name="baixa_tempo_total" class="form-control fw-bold text-center" 
+                                                       value="{{ perfis_baixa.get('tempo_total', '') }}" placeholder="Ex: 600">
+                                                <span class="input-group-text border-0 bg-transparent text-muted small">s</span>
+                                            </div>
                                         </div>
                                     </div>
 
                                     <div class="row g-1 mb-2 text-center text-muted x-small fw-bold" style="font-size: 0.75rem;">
-                                        <div class="col-3 text-start ps-2">Parâmetro</div>
+                                        <div class="col-3 text-start ps-2">Parametro</div>
                                         <div class="col-2">Min</div>
                                         <div class="col-2">Alvo</div>
                                         <div class="col-2">Max</div>
@@ -200,7 +217,7 @@
 
                             <div class="mt-4">
                                 <h6 class="text-secondary fw-bold mb-3 border-bottom pb-2 d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-list me-2"></i>PARÂMETROS DINÂMICOS (LEGACY)</span>
+                                    <span><i class="fas fa-list me-2"></i>PARAMETROS DINAMICOS (LEGACY)</span>
                                     <button type="button" class="btn btn-sm btn-outline-success" onclick="addParamRow('containerParams{{ prod.cod_sankhya }}')">
                                         <i class="fas fa-plus"></i> Novo
                                     </button>
@@ -235,7 +252,7 @@
                         </div>
                         <div class="modal-footer bg-light">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                            <button type="submit" class="btn btn-primary px-4 fw-bold">Salvar Configuração</button>
+                            <button type="submit" class="btn btn-primary px-4 fw-bold">Salvar Configuracao</button>
                         </div>
                     </div>
                 </form>

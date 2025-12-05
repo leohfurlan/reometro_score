@@ -194,8 +194,17 @@ def atualizar_cache_do_banco():
                 
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
-                'ids_ensaio': [], 'massa': produto, 'lote_visivel': chave_lote, 'batch': chave_batch,
-                'data': row['DATA'], 'ts2': None, 't90': None, 'visc': None, 'temps': [], 'grupos': set()
+                'ids_ensaio': [],
+                'massa': produto,
+                'lote_visivel': chave_lote,
+                'batch': chave_batch,
+                'data': row['DATA'],
+                'ts2': None,
+                't90': None,
+                'visc': None,
+                'temps': [],
+                'tempo_max': None,
+                'grupos': set()
             }
         
         reg = dados_agrupados[chave_unica]
@@ -207,11 +216,14 @@ def atualizar_cache_do_banco():
         v_t90 = safe_float(row['T90'])
         v_visc = safe_float(row['Viscosidade'])
         v_temp = safe_float(row['TEMP_PLATO_INF'])
+        v_tempo_max = safe_float(row['MAXIMO_TEMPO'])
         
         if v_ts2: reg['ts2'] = v_ts2
         if v_t90: reg['t90'] = v_t90
         if v_visc: reg['visc'] = v_visc
         if v_temp and v_temp not in reg['temps']: reg['temps'].append(v_temp)
+        if v_tempo_max and not reg['tempo_max']:
+            reg['tempo_max'] = v_tempo_max
 
     # 2. Cálculo de Médias (Apenas onde existe dado real)
     medias_visc_por_lote = {}
@@ -267,7 +279,7 @@ def atualizar_cache_do_banco():
             temp_plato=dados['temps'][0] if dados['temps'] else 0,
             temps_plato=list(dados['temps']),
             cod_grupo=list(dados['grupos'])[0],
-            tempo_maximo=0,
+            tempo_maximo=dados.get('tempo_max') or 0,
             ids_agrupados=list(dados['ids_ensaio'])
         )
         novo_ensaio.calcular_score()
@@ -437,12 +449,16 @@ def salvar_config():
     
     specs = {}
     
-    # 1. Captura as Temperaturas Padrão dos Perfis
+    # 1. Captura as Temperaturas Padrão e tempo alvo dos Perfis
     t_alta = request.form.get('alta_temp_padrao')
     t_baixa = request.form.get('baixa_temp_padrao')
+    tempo_alta = request.form.get('alta_tempo_total')
+    tempo_baixa = request.form.get('baixa_tempo_total')
     
     if t_alta and t_alta.strip(): specs['alta_temp_padrao'] = f(t_alta)
     if t_baixa and t_baixa.strip(): specs['baixa_temp_padrao'] = f(t_baixa)
+    if tempo_alta and tempo_alta.strip(): specs['alta_tempo_total'] = f(tempo_alta)
+    if tempo_baixa and tempo_baixa.strip(): specs['baixa_tempo_total'] = f(tempo_baixa)
 
     # 2. Captura os Parâmetros Fixos (Ts2, T90, Viscosidade) por Perfil
     perfis = ['alta', 'baixa']

@@ -1,6 +1,8 @@
 import json
 import os
 
+from models.massa import Parametro
+
 CONFIG_FILE = "config_massas.json"
 
 def carregar_configuracoes():
@@ -53,6 +55,9 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
                     if nome_real == "temp_padrao":
                         produto.perfis[perfil]['temp_padrao'] = valores
                         continue
+                    if nome_real == "tempo_total":
+                        produto.perfis[perfil]['tempo_total'] = valores
+                        continue
 
                     # Caso Padrão: É um objeto Parametro (dict)
                     if isinstance(valores, dict):
@@ -67,9 +72,13 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
                 else:
                     # Compatibilidade Legacy (sem prefixo vai para 'parametros' genérico)
                     if isinstance(valores, dict) and hasattr(produto, 'parametros'):
-                        # Aqui você pode instanciar o Parametro manualmente ou criar um método helper
-                        # Assumindo uso de dicionário direto ou lógica antiga:
-                         pass # (Seus parâmetros dinâmicos antigos entrariam aqui)
+                        produto.parametros[chave_param] = Parametro(
+                            nome=chave_param,
+                            peso=valores.get('peso', 10),
+                            alvo=valores.get('alvo', 0),
+                            minimo=valores.get('min', 0),
+                            maximo=valores.get('max', 0)
+                        )
             
             count += 1
     
