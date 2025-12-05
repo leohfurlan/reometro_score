@@ -29,14 +29,14 @@ const initUI = () => {
             const button = event.relatedTarget;
             if (!button) return;
 
-            // Atributos básicos
             const batch = button.getAttribute('data-batch');
             const material = button.getAttribute('data-material');
             const score = button.getAttribute('data-score');
-            
-            // --- NOVOS ATRIBUTOS (Temperatura, Grupo, Tempo) ---
-            const tempReal = button.getAttribute('data-temp-real');
-            const tempPadrao = button.getAttribute('data-temp-padrao');
+            const idsAgrupados = button.getAttribute('data-ids');
+
+            const tempReal = (button.getAttribute('data-temp-real') || '').trim();
+            const tempPadraoAttr = button.getAttribute('data-temp-padrao');
+            const tempPadrao = tempPadraoAttr ? parseFloat(tempPadraoAttr) : NaN;
             const grupo = button.getAttribute('data-grupo');
             const tempoMax = button.getAttribute('data-tempo-max');
 
@@ -47,28 +47,34 @@ const initUI = () => {
                 if (el) el.textContent = val;
             };
 
-            // Preenche Cabeçalho
             setSafeText('#modalBatchDisplay', 'BATCH: ' + displayBatch);
             setSafeText('#modalMaterialDisplay', 'Material: ' + material);
+            setSafeText('#modalIdsDisplay', idsAgrupados && idsAgrupados.trim() ? `Ensaios: ${idsAgrupados}` : 'Ensaios: --');
 
-            // --- PREENCHE NOVOS DETALHES ---
             setSafeText('#modalGrupo', grupo);
             setSafeText('#modalTempo', tempoMax);
-            
-            // Lógica visual para temperatura (Mostra "Real / Alvo" se tiver alvo, senão só "Real")
-            const tempDisplay = parseFloat(tempPadrao) > 0 
-                ? `${tempReal} / ${tempPadrao}` 
-                : `${tempReal}`;
+
+            const baseTemp = tempReal || '--';
+            const padraoValido = !Number.isNaN(tempPadrao) && tempPadrao > 0;
+            const padraoStr = padraoValido ? tempPadrao.toFixed(0) : '';
+
+            let tempDisplay = baseTemp;
+            if (padraoValido) {
+                if (baseTemp && baseTemp !== '--') {
+                    tempDisplay = baseTemp.includes(padraoStr) ? baseTemp : `${baseTemp} / ${padraoStr}`;
+                } else {
+                    tempDisplay = padraoStr;
+                }
+            }
+
             setSafeText('#modalTemp', tempDisplay);
 
-            // Preenche Score
             const scoreElem = detailsModal.querySelector('#modalScoreDisplay');
             if (scoreElem) {
                 scoreElem.textContent = score;
                 scoreElem.className = parseFloat(score) >= 85 ? 'text-success fw-bold fs-5' : 'text-danger fw-bold fs-5';
             }
 
-            // Função auxiliar para preencher os cards de parâmetros (Ts2, T90, Visc)
             function updateParam(prefix, minId, targetId, maxId, measuredId) {
                 const minVal = button.getAttribute(`data-${prefix}-min`);
                 const targetVal = button.getAttribute(`data-${prefix}-target`);
@@ -209,10 +215,8 @@ const initUI = () => {
         const currentSort = table.dataset.currentSort;
         const currentOrder = table.dataset.currentOrder;
 
-        // Se já está no estado salvo, nada a fazer
         if (saved.sort === currentSort && saved.order === currentOrder) return;
 
-        // Atualiza URL e recarrega a tabela via HTMX ou fallback reload
         const url = new URL(window.location.href);
         url.searchParams.set('sort', saved.sort);
         url.searchParams.set('order', saved.order);
@@ -228,7 +232,6 @@ const initUI = () => {
     captureSortFromTable();
     ensureSortPreferenceApplied();
 
-    // Re-bind eventos após swap do HTMX (paginação/filtro)
     document.body.addEventListener('htmx:afterSwap', evt => {
         if (evt.detail.target.id === 'tabela-container') {
             loadColumnPreferences();
@@ -239,7 +242,6 @@ const initUI = () => {
     });
 };
 
-// Inicialização segura
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initUI);
 } else {

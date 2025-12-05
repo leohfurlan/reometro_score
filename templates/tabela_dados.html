@@ -47,7 +47,8 @@
                     {% if ensaio.batch %} <div class="text-muted small">Batch: {{ ensaio.batch }}</div> {% endif %}
                 </td>
                 <td class="col-temp">
-                    {% if ensaio.temp_plato > 0 %}{{ "%.0f"|format(ensaio.temp_plato) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    {% set temp_display = ensaio.temp_plato_display %}
+                    {% if temp_display %}{{ temp_display }}{% else %}<span class="text-muted">-</span>{% endif %}
                 </td>
                 <td class="col-ts2 {{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}</td>
                 <td class="col-t90 {{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('T90', 0)) }}</td>
@@ -77,8 +78,9 @@
                     <button class="btn btn-sm btn-outline-primary py-0 px-1" data-bs-toggle="modal" data-bs-target="#detailsModal"
                             data-id="{{ ensaio.id_ensaio }}" data-batch="{{ ensaio.batch }}" data-lote="{{ ensaio.lote }}"
                             data-material="{{ ensaio.massa.descricao }}" data-score="{{ '%.1f'|format(ensaio.score_final) }}"
-                            data-temp-real="{{ ensaio.temp_plato }}" data-temp-padrao="{{ ensaio.massa.temp_padrao }}"
+                            data-temp-real="{{ ensaio.temp_plato_display }}" data-temp-padrao="{{ ensaio.massa.temp_padrao }}"
                             data-grupo="{{ ensaio.cod_grupo }}" data-tempo-max="{{ ensaio.tempo_maximo }}"
+                            data-ids="{{ ensaio.ids_display }}"
                             data-ts2-min="{{ '%.2f'|format(p_ts2.minimo) if p_ts2 else '--' }}"
                             data-ts2-target="{{ '%.2f'|format(p_ts2.alvo) if p_ts2 else '--' }}"
                             data-ts2-max="{{ '%.2f'|format(p_ts2.maximo) if p_ts2 else '--' }}"

@@ -173,7 +173,7 @@ def atualizar_cache_do_banco():
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
                 'ids_ensaio': [], 'massa': produto, 'lote_visivel': chave_lote, 'batch': chave_batch,
-                'data': row['DATA'], 'ts2': None, 't90': None, 'visc': None, 'temp': None, 'grupos': set()
+                'data': row['DATA'], 'ts2': None, 't90': None, 'visc': None, 'temps': [], 'grupos': set()
             }
         
         reg = dados_agrupados[chave_unica]
@@ -189,7 +189,7 @@ def atualizar_cache_do_banco():
         if v_ts2: reg['ts2'] = v_ts2
         if v_t90: reg['t90'] = v_t90
         if v_visc: reg['visc'] = v_visc
-        if v_temp and not reg['temp']: reg['temp'] = v_temp 
+        if v_temp and v_temp not in reg['temps']: reg['temps'].append(v_temp)
 
     # 2. Cálculo de Médias (Apenas onde existe dado real)
     medias_visc_por_lote = {}
@@ -242,9 +242,11 @@ def atualizar_cache_do_banco():
             batch=dados['batch'],
             data_hora=dados['data'],
             origem_viscosidade=origem_visc,
-            temp_plato=dados['temp'] if dados['temp'] else 0,
+            temp_plato=dados['temps'][0] if dados['temps'] else 0,
+            temps_plato=list(dados['temps']),
             cod_grupo=list(dados['grupos'])[0],
-            tempo_maximo=0
+            tempo_maximo=0,
+            ids_agrupados=list(dados['ids_ensaio'])
         )
         novo_ensaio.calcular_score()
         lista_final.append(novo_ensaio)
