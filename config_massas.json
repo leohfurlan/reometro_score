@@ -2,6 +2,8 @@
     "26791": {
         "alta_temp_padrao": 195.0,
         "baixa_temp_padrao": 150.0,
+        "alta_tempo_total": 180.0,
+        "baixa_tempo_total": 1500.0,
         "alta_Ts2": {
             "min": 40.0,
             "alvo": 60.0,

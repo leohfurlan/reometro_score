@@ -5,7 +5,7 @@ class Ensaio:
     def __init__(self, id_ensaio, massa_objeto: Massa, valores_medidos, lote, batch,
                  data_hora=None, origem_viscosidade="N/A",
                  temp_plato=0, temps_plato=None, cod_grupo=0, tempo_maximo=0,
-                 ids_agrupados=None):
+                 tempos_max=None, ids_agrupados=None):
         self.id_ensaio = id_ensaio
         self.massa = massa_objeto
         self.valores_medidos = valores_medidos
@@ -25,6 +25,7 @@ class Ensaio:
         self.temp_plato = self.temp_plato_lista[0] if self.temp_plato_lista else 0
         self.cod_grupo = cod_grupo
         self.tempo_maximo = tempo_maximo
+        self.tempo_max_lista = tempos_max if tempos_max is not None else ([] if tempo_maximo == 0 else [tempo_maximo])
         self.tempo_configurado = None
         self.ids_agrupados = ids_agrupados if ids_agrupados is not None else [id_ensaio]
 
@@ -194,6 +195,13 @@ class Ensaio:
         if not self.temp_plato_lista:
             return ""
         ordenado = sorted(self.temp_plato_lista, reverse=True)
+        return " / ".join(f"{t:.0f}" for t in ordenado)
+
+    @property
+    def tempo_max_display(self):
+        if not self.tempo_max_lista:
+            return ""
+        ordenado = sorted(self.tempo_max_lista, reverse=True)
         return " / ".join(f"{t:.0f}" for t in ordenado)
 
     @property

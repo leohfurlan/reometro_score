@@ -153,6 +153,15 @@
                         </select>
                     </div>
                     <div class="col-md-2">
+                        <label class="form-label small fw-bold text-muted">Tipo de Ensaio</label>
+                        <select name="tipo_ensaio" class="form-select filtro-auto">
+                            <option value="">Todos</option>
+                            <option value="ALTA" {% if tipo_ensaio_filter == 'ALTA' %}selected{% endif %}>Alta Temperatura</option>
+                            <option value="BAIXA" {% if tipo_ensaio_filter == 'BAIXA' %}selected{% endif %}>Baixa Temperatura</option>
+                            <option value="VISCOSIDADE" {% if tipo_ensaio_filter == 'VISCOSIDADE' %}selected{% endif %}>Viscosidade</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
                         <label class="form-label small fw-bold text-muted">Status</label>
                         <select name="acao_filter" class="form-select filtro-auto">
                             <option value="">Todos</option>

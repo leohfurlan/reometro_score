@@ -131,6 +131,29 @@ def match_nome_inteligente(texto_bruto):
             return CATALOGO_POR_NOME[melhor_match]
     return None
 
+def classificar_tipo_ensaio(ensaio):
+    """Retorna Alta, Baixa ou Viscosidade para usar no filtro."""
+    try:
+        rotulo_grupo = MAPA_GRUPOS.get(ensaio.cod_grupo)
+        if rotulo_grupo and "VISCOSIMETRO" in str(rotulo_grupo).upper():
+            return "VISCOSIDADE"
+    except Exception:
+        pass
+
+    nome_perfil = getattr(ensaio, 'nome_perfil_usado', '') or ''
+    nome_up = nome_perfil.upper()
+    if "ALTA" in nome_up:
+        return "ALTA"
+    if "BAIXA" in nome_up:
+        return "BAIXA"
+
+    temp = ensaio.temp_plato or 0
+    if temp >= 175:
+        return "ALTA"
+    if 120 <= temp < 175:
+        return "BAIXA"
+    return "INDEFINIDO"
+
 # ==========================================
 # 4. ATUALIZAÇÃO DO CACHE (MANUAL)
 # ==========================================
@@ -203,6 +226,7 @@ def atualizar_cache_do_banco():
                 't90': None,
                 'visc': None,
                 'temps': [],
+                'tempos_max': [],
                 'tempo_max': None,
                 'grupos': set()
             }
@@ -222,8 +246,11 @@ def atualizar_cache_do_banco():
         if v_t90: reg['t90'] = v_t90
         if v_visc: reg['visc'] = v_visc
         if v_temp and v_temp not in reg['temps']: reg['temps'].append(v_temp)
-        if v_tempo_max and not reg['tempo_max']:
-            reg['tempo_max'] = v_tempo_max
+        if v_tempo_max:
+            if not reg['tempo_max']:
+                reg['tempo_max'] = v_tempo_max
+            if v_tempo_max not in reg['tempos_max']:
+                reg['tempos_max'].append(v_tempo_max)
 
     # 2. Cálculo de Médias (Apenas onde existe dado real)
     medias_visc_por_lote = {}
@@ -280,9 +307,14 @@ def atualizar_cache_do_banco():
             temps_plato=list(dados['temps']),
             cod_grupo=list(dados['grupos'])[0],
             tempo_maximo=dados.get('tempo_max') or 0,
+            tempos_max=list(dados.get('tempos_max') or []),
             ids_agrupados=list(dados['ids_ensaio'])
         )
         novo_ensaio.calcular_score()
+        try:
+            novo_ensaio.tipo_ensaio = classificar_tipo_ensaio(novo_ensaio)
+        except Exception:
+            novo_ensaio.tipo_ensaio = "INDEFINIDO"
         lista_final.append(novo_ensaio)
     
     CACHE_GLOBAL['dados'] = lista_final
@@ -358,6 +390,7 @@ def dashboard():
     f_mat = request.args.get('material_filter', '')
     f_cod = request.args.get('codigo_filter', '').strip()
     f_acao = request.args.get('acao_filter', '')
+    f_tipo = request.args.get('tipo_ensaio', '')
     d_start = request.args.get('date_start', '')
     d_end = request.args.get('date_end', '')
     
@@ -376,6 +409,9 @@ def dashboard():
         if f_acao == "APROVADOS": ensaios_filtrados = [e for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada]
         elif f_acao == "RESSALVA": ensaios_filtrados = [e for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada]
         elif f_acao == "REPROVADO": ensaios_filtrados = [e for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada]
+    if f_tipo:
+        alvo = f_tipo.upper()
+        ensaios_filtrados = [e for e in ensaios_filtrados if getattr(e, 'tipo_ensaio', '').upper() == alvo]
     if d_start:
         ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora >= datetime.strptime(d_start, '%Y-%m-%d')]
     if d_end:
@@ -414,7 +450,7 @@ def dashboard():
         'total_registros_filtrados': total_filtrado, 'total_geral': total_geral,
         'pagina_atual': page, 'total_paginas': total_paginas,
         'materiais_filtro': CACHE_GLOBAL['materiais'],
-        'search_term': search, 'material_filter': f_mat, 'codigo_filter': f_cod, 'acao_filter': f_acao,
+        'search_term': search, 'material_filter': f_mat, 'codigo_filter': f_cod, 'acao_filter': f_acao, 'tipo_ensaio_filter': f_tipo,
         'date_start': d_start, 'date_end': d_end, 'sort_by': sort_by, 'order': order,
         'ultimo_update': CACHE_GLOBAL['ultimo_update']
     }

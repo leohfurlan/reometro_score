@@ -56,7 +56,8 @@ const initUI = () => {
             setSafeText('#modalGrupo', grupo + (perfil ? ` (${perfil})` : ''));
 
             const tempoDisplay = (() => {
-                const med = tempoMax && tempoMax.trim() ? `${tempoMax}s` : '--';
+                const medRaw = tempoMax && tempoMax.trim() ? tempoMax.trim() : '';
+                const med = medRaw ? `${medRaw} s` : '--';
                 if (tempoConfig && tempoConfig.trim()) {
                     if (med !== '--') return `${med} (alvo ${tempoConfig}s)`;
                     return `${tempoConfig}s (alvo)`;
