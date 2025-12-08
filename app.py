@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from models.usuario import db, Usuario
@@ -19,6 +19,8 @@ from services.etl_service import (
     carregar_referencias_estaticas, 
     _CATALOGO_CODIGO as CATALOGO_POR_CODIGO
 )
+
+from connection import connect_to_database
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -294,6 +296,98 @@ def salvar_config():
     
     flash(f"Configuração do produto {cod} salva e aplicada!", "success")
     return redirect(url_for('pagina_config', q=cod))
+
+@app.route('/api/grafico')
+@login_required
+def api_grafico():
+    ids_str = request.args.get('ids', '')
+    if not ids_str: return jsonify({})
+
+    selected_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
+    if len(selected_ids) > 10:
+        return jsonify({'error': 'Max 10 items.'}), 400
+
+    # 1. Expand IDs (Get Group Partners)
+    all_ids_to_fetch = []
+    map_id_to_parent = {} 
+
+    for cached in CACHE_GLOBAL['dados']:
+        if cached.id_ensaio in selected_ids:
+            for sub_id in cached.ids_agrupados:
+                all_ids_to_fetch.append(sub_id)
+                map_id_to_parent[sub_id] = cached
+
+    if not all_ids_to_fetch:
+        return jsonify({'error': 'Not found.'}), 404
+
+    # 2. Fetch Data + Temperature (JOIN)
+    conn = connect_to_database()
+    cursor = conn.cursor()
+    
+    placeholders = ','.join('?' * len(all_ids_to_fetch))
+    
+    # We join with ENSAIO to get the temperature of that specific test run
+    query = f'''
+        SELECT V.COD_ENSAIO, V.TEMPO, V.TORQUE, E.TEMP_PLATO_INF
+        FROM dbo.ENSAIO_VALORES V
+        JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
+        WHERE V.COD_ENSAIO IN ({placeholders})
+        ORDER BY V.COD_ENSAIO, V.TEMPO
+    '''
+    
+    try:
+        cursor.execute(query, all_ids_to_fetch)
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    # 3. Structure and Separate
+    datasets_reo = {}
+    datasets_visc = {}
+    materiais = set()
+    
+    for row in rows:
+        c_id, c_time, c_val, c_temp = row
+        
+        parent = map_id_to_parent.get(c_id)
+        if not parent: continue
+        
+        materiais.add(parent.massa.descricao)
+        
+        # --- CLASSIFICATION BY TEMPERATURE ---
+        # Strictly apply the rule: 90-115C = Viscosity
+        temp = float(c_temp) if c_temp else 0
+        is_viscosity = (90 <= temp <= 115)
+        
+        # Additional check: If the parent is explicitly VISCOSITY type, trust it
+        if getattr(parent, 'tipo_ensaio', '') == 'VISCOSIDADE':
+            is_viscosity = True
+
+        target_dict = datasets_visc if is_viscosity else datasets_reo
+        
+        if c_id not in target_dict:
+            # Smart Label: "LOTE (ID)"
+            label = f"{parent.lote} (ID: {c_id})"
+            
+            target_dict[c_id] = {
+                'label': label,
+                'material': parent.massa.descricao,
+                'data': [],
+                'borderColor': '', 
+                'fill': False,
+                'pointRadius': 0,
+                'borderWidth': 2,
+                'tension': 0.4
+            }
+        
+        target_dict[c_id]['data'].append({'x': float(c_time), 'y': float(c_val)})
+
+    return jsonify({
+        'reometria': list(datasets_reo.values()),
+        'viscosidade': list(datasets_visc.values()),
+        'materiais': list(materiais)
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True)

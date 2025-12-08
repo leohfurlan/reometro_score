@@ -3,83 +3,96 @@ import os
 import shutil
 import tempfile
 import warnings
+from dotenv import load_dotenv
 
-# Ignora avisos chatos do Excel (Data Validation)
+# Carrega as variáveis do arquivo .env
+load_dotenv()
+
+# Ignora avisos do Excel
 warnings.simplefilter("ignore")
 
-# --- CONFIGURAÇÃO ---
-CAMINHO_ORIGINAL = r"C:\Users\leonardo.furlan\Vulcaflex Industria e Comercio Ltda\Laboratorio - LABORATÓRIO\RESULTADOS ANÁLISES\REG 403 - 38 ACOMPANHAMENTO ANÁLISES DE MASSAS.xlsx"
-
 def carregar_dicionario_lotes():
-    print("--- 📂 ETL: Carregando Dicionário de Lotes (Modo Clone v2) ---")
+    print("--- 📂 ETL: Carregando Dicionário de Lotes (Via OneDrive Local) ---")
     
-    if not os.path.exists(CAMINHO_ORIGINAL):
-        print(f"❌ ERRO: Arquivo original não encontrado.")
+    # 1. Pega o caminho configurado no .env
+    caminho_arquivo = os.getenv("CAMINHO_REG403")
+    
+    if not caminho_arquivo:
+        print("❌ ERRO: Variável 'CAMINHO_REG403' não encontrada no .env")
         return {}
 
-    # 1. Clone Temporário
+    # Remove aspas se houver (comum em copy/paste de caminhos)
+    caminho_arquivo = caminho_arquivo.replace('"', '')
+
+    if not os.path.exists(caminho_arquivo):
+        print(f"❌ ERRO: Arquivo não encontrado no disco.")
+        print(f"   -> Caminho buscado: {caminho_arquivo}")
+        print("   -> DICA: Verifique se o OneDrive está rodando e sincronizado.")
+        return {}
+
+    print(f"   > Arquivo localizado: ...{caminho_arquivo[-40:]}")
+
+    # 2. Clone Temporário (Para não travar o arquivo se alguém estiver com ele aberto)
     temp_dir = tempfile.gettempdir()
     caminho_clone = os.path.join(temp_dir, "temp_reg403_cache.xlsx")
 
     try:
-        shutil.copy2(CAMINHO_ORIGINAL, caminho_clone)
+        shutil.copy2(caminho_arquivo, caminho_clone)
     except Exception as e:
-        print(f"❌ Falha ao clonar (Arquivo muito bloqueado?): {e}")
+        print(f"❌ Falha ao clonar arquivo (Arquivo travado?): {e}")
         return {}
 
     mapa_lote_massa = {}
+    # Abas para ler (Pode adicionar '2026' no futuro)
     abas_para_ler = ['2023', '2024', '2025'] 
     
     try:
         for aba in abas_para_ler:
             try:
-                # --- A CORREÇÃO ESTÁ AQUI: header=1 ---
-                # Pula a linha 0 (Título) e usa a linha 1 como Cabeçalho
+                # header=1: Pula a linha de título e pega o cabeçalho real
                 df = pd.read_excel(caminho_clone, sheet_name=aba, engine='openpyxl', header=1)
                 
-                # Normaliza nomes das colunas (Remove espaços extras e põe em maiúsculo)
+                # Normaliza nomes das colunas (Maiúsculo e sem espaços nas pontas)
                 df.columns = [str(col).strip().upper() for col in df.columns]
 
-                # --- CORREÇÃO PARA CABEÇALHO FALTANDO (Aba 2024) ---
-                # Se não achar a coluna 'MASSA', mas tiver 'LOTE', tenta adivinhar pelo índice
-                # O padrão da sua planilha é: DATA(0), HORA(1), MASSA(2), BANBURY(3), LOTE(4)
+                # Tenta corrigir cabeçalhos quebrados (comum na aba 2024)
                 if 'MASSA' not in df.columns and len(df.columns) > 3:
-                    print(f"   ℹ️ Aviso: Coluna MASSA sem nome na aba '{aba}'. Tentando índice 2...", end=" ")
-                    col_index_2 = df.columns[2] # Pega o nome da 3ª coluna (geralmente "Unnamed: 2")
+                    col_index_2 = df.columns[2] 
                     df.rename(columns={col_index_2: 'MASSA'}, inplace=True)
 
-                # Verifica se agora temos as colunas necessárias
                 if 'LOTE' not in df.columns or 'MASSA' not in df.columns:
-                    print(f"⚠️ Pulei '{aba}': Colunas LOTE/MASSA não encontradas. (Colunas vistas: {list(df.columns[:5])})")
                     continue
 
-                # Processamento normal
+                # Limpeza dos dados
                 df = df.dropna(subset=['LOTE', 'MASSA'])
                 df['LOTE'] = df['LOTE'].astype(str).str.strip().str.upper()
                 df['MASSA'] = df['MASSA'].astype(str).str.strip()
-                df = df[df['LOTE'].str.len() > 2] # Remove lixo
                 
+                # Filtra lotes inválidos (muito curtos)
+                df = df[df['LOTE'].str.len() > 2] 
+                
+                # Transforma em dicionário { LOTE: MASSA }
                 dict_aba = pd.Series(df.MASSA.values, index=df.LOTE).to_dict()
                 mapa_lote_massa.update(dict_aba)
-                print(f"✅ '{aba}': {len(dict_aba)} lotes.")
+                # print(f"   -> Aba '{aba}': {len(dict_aba)} registros.")
                 
             except ValueError:
-                # print(f"ℹ️ Aba '{aba}' não existe.") # Silencioso para não poluir
+                # Aba não existe no arquivo, ignora
                 pass
             except Exception as e:
-                print(f"❌ Erro na aba '{aba}': {e}")
+                print(f"⚠️ Aviso na aba '{aba}': {e}")
                 
     finally:
+        # Remove o arquivo temporário
         if os.path.exists(caminho_clone):
             try: os.remove(caminho_clone)
             except: pass
 
-    print(f"--- 🏁 Sucesso: {len(mapa_lote_massa)} lotes carregados. ---")
+    print(f"✅ SUCESSO: {len(mapa_lote_massa)} lotes carregados da planilha.")
     return mapa_lote_massa
 
 if __name__ == "__main__":
+    # Teste direto
     dicionario = carregar_dicionario_lotes()
-    
-    # Teste com o lote que deu erro antes
-    lote = "9215"
-    print(f"\n🧪 Teste Lote {lote}: {dicionario.get(lote, 'NÃO ENCONTRADO')}")
+    if dicionario:
+        print(f"Exemplo de carga: {list(dicionario.items())[:3]}")

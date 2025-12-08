@@ -12,6 +12,10 @@
             <tr>
                 {% set filter_params = {'search': search_term, 'acao_filter': acao_filter, 'date_start': date_start, 'date_end': date_end, 'material_filter': material_filter, 'codigo_filter': codigo_filter, 'tipo_ensaio': tipo_ensaio_filter} %}
                 
+                <th class="text-center" style="width: 40px;">
+                    <input type="checkbox" id="selectAll" onclick="toggleAllCheckboxes(this)">
+                </th>
+
                 <th class="resizable-col col-id"><a href="#" hx-get="{{ url_for('dashboard', sort='id', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="id" data-order="{{ 'asc' if order=='desc' else 'desc' }}">ID <i class="fas fa-sort small"></i></a></th>
                 <th class="resizable-col col-data"><a href="#" hx-get="{{ url_for('dashboard', sort='data', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="data" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Data <i class="fas fa-sort small"></i></a></th>
                 <th class="resizable-col col-material"><a href="#" hx-get="{{ url_for('dashboard', sort='material', order='asc' if order=='desc' else 'desc', page=pagina_atual, **filter_params) }}" hx-target="#tabela-container" hx-push-url="true" class="text-decoration-none text-secondary d-block sort-link" data-sort="material" data-order="{{ 'asc' if order=='desc' else 'desc' }}">Material <i class="fas fa-sort small"></i></a></th>
@@ -28,6 +32,10 @@
         <tbody>
             {% for ensaio in ensaios %}
             <tr>
+                <td class="text-center">
+                    <input type="checkbox" class="form-check-input curve-selector" value="{{ ensaio.id_ensaio }}">
+                </td>
+
                 <td class="col-id">{{ ensaio.id_ensaio }}</td>
                 <td class="col-data">{% if ensaio.data_hora %}{{ ensaio.data_hora.strftime('%d/%m/%y') }}<div class="text-muted small" style="font-size: 0.7em;">{{ ensaio.data_hora.strftime('%H:%M') }}</div>{% else %}-{% endif %}</td>
                 

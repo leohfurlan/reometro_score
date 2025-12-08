@@ -254,6 +254,160 @@ const initUI = () => {
     });
 };
 
+// --- LÓGICA DE SELEÇÃO E GRÁFICOS (DUPLOS) ---
+let chartInstanceReo = null;
+let chartInstanceVisc = null;
+
+// Paleta de cores consistente para garantir que o mesmo lote tenha a mesma cor em ambos os gráficos (se necessário)
+const CORES_GRAFICO = [
+    '#0d6efd', '#dc3545', '#198754', '#ffc107', '#6f42c1', 
+    '#fd7e14', '#20c997', '#0dcaf0', '#343a40', '#6610f2'
+];
+
+// 1. Monitora cliques nos checkboxes
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('curve-selector') || e.target.id === 'selectAll') {
+        atualizarBarraComparacao();
+    }
+});
+
+function toggleAllCheckboxes(source) {
+    document.querySelectorAll('.curve-selector').forEach(cb => cb.checked = source.checked);
+    atualizarBarraComparacao();
+}
+
+function atualizarBarraComparacao() {
+    const selecionados = document.querySelectorAll('.curve-selector:checked');
+    const bar = document.getElementById('compareBar');
+    const count = document.getElementById('countSelected');
+    
+    if (selecionados.length > 0) {
+        bar.classList.remove('d-none');
+        count.textContent = selecionados.length;
+    } else {
+        bar.classList.add('d-none');
+    }
+}
+
+// 2. Função Principal: Buscar dados e Desenhar
+async function abrirGraficoComparativo() {
+    const selecionados = Array.from(document.querySelectorAll('.curve-selector:checked')).map(cb => cb.value);
+    
+    if (selecionados.length > 10) {
+        alert("Por favor, selecione no máximo 10 curvas para não travar a visualização.");
+        return;
+    }
+
+    // Abre o Modal
+    const modal = new bootstrap.Modal(document.getElementById('chartModal'));
+    modal.show();
+
+    // Chama a API
+    try {
+        const response = await fetch(`/api/grafico?ids=${selecionados.join(',')}`);
+        const data = await response.json();
+
+        if (data.error) {
+            alert("Erro: " + data.error);
+            return;
+        }
+
+        // Atualiza Título com os Materiais (Agrupamento)
+        const materialsText = data.materiais ? data.materiais.join(' | ') : 'Vários Materiais';
+        document.getElementById('modalMateriaisTitle').textContent = "Comparando: " + materialsText;
+
+        // Renderiza (ou esconde) Gráfico de Reometria
+        const temReo = data.reometria && data.reometria.length > 0;
+        document.getElementById('containerReo').style.display = temReo ? 'block' : 'none';
+        if (temReo) {
+            chartInstanceReo = criarGraficoBase('chartReo', chartInstanceReo, data.reometria, 'Torque (lb.in)');
+        }
+
+        // Renderiza (ou esconde) Gráfico de Viscosidade
+        const temVisc = data.viscosidade && data.viscosidade.length > 0;
+        document.getElementById('containerVisc').style.display = temVisc ? 'block' : 'none';
+        if (temVisc) {
+            chartInstanceVisc = criarGraficoBase('chartVisc', chartInstanceVisc, data.viscosidade, 'Mooney (MU)');
+        }
+
+        // Aviso se tudo vazio
+        document.getElementById('msgVazio').classList.toggle('d-none', temReo || temVisc);
+
+    } catch (err) {
+        console.error(err);
+        alert("Erro ao carregar dados do gráfico.");
+    }
+}
+
+// 3. Função Genérica para Criar Gráficos com Chart.js
+function criarGraficoBase(canvasId, chartInstance, datasets, yLabel) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+
+    // Destroi gráfico anterior se existir
+    if (chartInstance) {
+        chartInstance.destroy();
+    }
+
+    // Atribui cores sequenciais aos datasets
+    datasets.forEach((ds, index) => {
+        const cor = CORES_GRAFICO[index % CORES_GRAFICO.length];
+        ds.borderColor = cor;
+        ds.backgroundColor = cor;
+        // Ajustes visuais para performance
+        ds.pointRadius = 0; 
+        ds.borderWidth = 2;
+        ds.fill = false;
+        ds.tension = 0.4;
+    });
+
+    return new Chart(ctx, {
+        type: 'line',
+        data: { datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        font: { size: 11 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        // Tooltip personalizada
+                        title: function(context) {
+                            return `Tempo: ${context[0].parsed.x}s`;
+                        },
+                        label: function(context) {
+                            // Pega o nome do material que guardamos no dataset (se disponível) ou usa o label
+                            const material = context.dataset.material || '';
+                            const materialStr = material ? ` (${material})` : '';
+                            return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}${materialStr}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Tempo (s)' },
+                    ticks: { maxTicksLimit: 10 }
+                },
+                y: {
+                    title: { display: true, text: yLabel }
+                }
+            }
+        }
+    });
+}
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initUI);
 } else {

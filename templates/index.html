@@ -306,4 +306,55 @@
             </div>
         </div>
     </div>
+
+    <div id="compareBar" class="fixed-bottom bg-white border-top shadow p-3 d-none" style="z-index: 1060;">
+        <div class="container d-flex justify-content-between align-items-center">
+            <span class="fw-bold text-secondary">
+                <i class="fas fa-check-circle text-success me-2"></i>
+                <span id="countSelected">0</span> ensaios selecionados
+            </span>
+            <button class="btn btn-primary shadow" onclick="abrirGraficoComparativo()">
+                <i class="fas fa-chart-line me-2"></i> Comparar Curvas
+            </button>
+        </div>
+    </div>
+
+    <div class="modal fade" id="chartModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <div>
+                        <h5 class="modal-title fw-bold"><i class="fas fa-chart-area me-2"></i>Comparativo de Curvas</h5>
+                        <p class="mb-0 small text-muted" id="modalMateriaisTitle">...</p>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    
+                    <div id="containerReo" class="mb-4">
+                        <h6 class="text-primary fw-bold border-bottom pb-2">
+                            <i class="fas fa-fire-alt me-2"></i>Curvas de Reometria (Torque)
+                        </h6>
+                        <div class="card border-0 shadow-sm p-2" style="height: 350px;">
+                            <canvas id="chartReo"></canvas>
+                        </div>
+                    </div>
+
+                    <div id="containerVisc">
+                        <h6 class="text-success fw-bold border-bottom pb-2">
+                            <i class="fas fa-water me-2"></i>Curvas de Viscosidade (Mooney)
+                        </h6>
+                        <div class="card border-0 shadow-sm p-2" style="height: 350px;">
+                            <canvas id="chartVisc"></canvas>
+                        </div>
+                    </div>
+
+                    <div id="msgVazio" class="text-center text-muted py-5 d-none">
+                        Nenhum dado de curva encontrado para os itens selecionados.
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
 {% endblock %}
