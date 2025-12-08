@@ -1,0 +1,10 @@
+Flask
+Flask-Login
+Flask-Bcrypt
+SQLAlchemy
+Flask-SQLAlchemy
+pandas
+openpyxl
+pyodbc
+oracledb
+python-dotenv
