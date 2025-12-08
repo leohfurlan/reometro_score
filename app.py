@@ -4,23 +4,25 @@ from flask_bcrypt import Bcrypt
 from models.usuario import db, Usuario
 
 from datetime import datetime
-import math, re, json, os
-from difflib import get_close_matches
-import pandas as pd 
+import math
+import os
 
-# Modelos
-from models.massa import Massa
-from models.ensaio import Ensaio
+# Configurações e Modelos
 from config import Config
-# Serviços
-from connection import connect_to_database      
-from etl_planilha import carregar_dicionario_lotes 
-from services.sankhya_service import importar_catalogo_sankhya 
-from services.config_manager import aplicar_configuracoes_no_catalogo, salvar_configuracao
+from services.config_manager import salvar_configuracao
+
+# --- NOVA IMPORTAÇÃO: SERVIÇO DE ETL ---
+# Importamos a variável _CATALOGO_CODIGO para que a tela de Config 
+# acesse os mesmos objetos que o ETL usa.
+from services.etl_service import (
+    processar_carga_dados, 
+    carregar_referencias_estaticas, 
+    _CATALOGO_CODIGO as CATALOGO_POR_CODIGO
+)
 
 app = Flask(__name__)
 app.config.from_object(Config)
-app.secret_key = os.getenv("FLASK_SECRET_KEY") # Necessário para mensagens de feedback (flash)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 
 # --- CONFIGURAÇÃO DO BANCO DE USUÁRIOS (SQLite Local) ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_reoscore.db'
@@ -40,32 +42,14 @@ def load_user(user_id):
     return Usuario.query.get(int(user_id))
 
 # ==========================================
-# 1. INICIALIZAÇÃO
+# 1. INICIALIZAÇÃO E CACHE
 # ==========================================
-print("\n=== REOSCORE V13 (MANUAL UPDATE + VISC LOGIC) ===")
+print("\n=== REOSCORE V13 (MODULARIZED) ===")
 
-CATALOGO_POR_CODIGO, CATALOGO_POR_NOME = importar_catalogo_sankhya()
-aplicar_configuracoes_no_catalogo(CATALOGO_POR_CODIGO)
-MAPA_LOTES_PLANILHA = carregar_dicionario_lotes()
+# Inicializa as referências estáticas (Catálogos, Lotes, Configs)
+carregar_referencias_estaticas()
 
-MAPA_GRUPOS = {}
-DE_PARA_CORRECOES = {}
-
-if os.path.exists("mapa_tipo_equipamentos.xlsx"):
-    try:
-        df_g = pd.read_excel("mapa_tipo_equipamentos.xlsx")
-        MAPA_GRUPOS = dict(zip(df_g['COD_GRUPO'], df_g['TIPO SUGERIDO']))
-    except: pass
-
-if os.path.exists("de_para_massas.json"):
-    try:
-        with open("de_para_massas.json", 'r', encoding='utf-8') as f:
-            DE_PARA_CORRECOES = json.load(f)
-    except: pass
-
-# ==========================================
-# 2. CACHE GLOBAL (SEM TIMER AUTOMÁTICO)
-# ==========================================
+# Cache em memória para exibição rápida
 CACHE_GLOBAL = {
     'dados': [],            
     'materiais': [],        
@@ -74,259 +58,7 @@ CACHE_GLOBAL = {
 }
 
 # ==========================================
-# 3. HELPER FUNCTIONS
-# ==========================================
-
-def safe_float(val):
-    """Converte para float se possível, senão retorna None (e não 0.0)"""
-    if val is None: return None
-    try:
-        f = float(val)
-        if math.isnan(f): return None
-        if f == 0: return None # Trata 0 como ausência de dado também
-        return f
-    except: return None
-
-def extrair_lote_da_string(texto_sujo):
-    if not texto_sujo: return None, None
-    texto = str(texto_sujo).strip().upper()
-    
-    if '*' in texto:
-        partes = texto.split('*')
-        if len(partes) >= 2:
-            candidato = partes[1].strip().lstrip('0')
-            if not candidato: candidato = '0'
-            if candidato in MAPA_LOTES_PLANILHA: return candidato, "Asterisco"
-
-    if texto in MAPA_LOTES_PLANILHA: return texto, "Exato"
-
-    todos_numeros = re.findall(r'\d+', texto)
-    for num in reversed(todos_numeros): 
-        candidato = num.lstrip('0')
-        if candidato in MAPA_LOTES_PLANILHA: return candidato, "Regex"
-    return None, None
-
-def match_nome_inteligente(texto_bruto):
-    if not texto_bruto: return None
-    texto = str(texto_bruto).strip().upper()
-    
-    if texto in DE_PARA_CORRECOES: texto = DE_PARA_CORRECOES[texto]
-
-    if texto in CATALOGO_POR_NOME: return CATALOGO_POR_NOME[texto]
-    if ("MASSA " + texto) in CATALOGO_POR_NOME: return CATALOGO_POR_NOME["MASSA " + texto]
-    if texto.startswith("MASSA "):
-        sem = texto.replace("MASSA ", "").strip()
-        if sem in CATALOGO_POR_NOME: return CATALOGO_POR_NOME[sem]
-
-    opcoes = list(CATALOGO_POR_NOME.keys())
-    matches = get_close_matches(texto, opcoes, n=1, cutoff=0.7)
-    
-    if matches:
-        melhor_match = matches[0]
-        palavras_orig = set(texto.split())
-        palavras_match = set(melhor_match.split())
-        diferenca = palavras_match - palavras_orig
-        palavras_risco = {'ORB', 'AQ', 'PRETO', 'BRANCO', 'STD', 'ESPECIAL'}
-        if not diferenca.intersection(palavras_risco):
-            return CATALOGO_POR_NOME[melhor_match]
-    return None
-
-def classificar_tipo_ensaio(ensaio):
-    """Retorna Alta, Baixa ou Viscosidade para usar no filtro."""
-    try:
-        rotulo_grupo = MAPA_GRUPOS.get(ensaio.cod_grupo)
-        if rotulo_grupo and "VISCOSIMETRO" in str(rotulo_grupo).upper():
-            return "VISCOSIDADE"
-    except Exception:
-        pass
-
-    nome_perfil = getattr(ensaio, 'nome_perfil_usado', '') or ''
-    nome_up = nome_perfil.upper()
-    if "ALTA" in nome_up:
-        return "ALTA"
-    if "BAIXA" in nome_up:
-        return "BAIXA"
-
-    temp = ensaio.temp_plato or 0
-    if temp >= 175:
-        return "ALTA"
-    if 120 <= temp < 175:
-        return "BAIXA"
-    return "INDEFINIDO"
-
-# ==========================================
-# 4. ATUALIZAÇÃO DO CACHE (MANUAL)
-# ==========================================
-def atualizar_cache_do_banco():
-    print("--- 🔄 ATUALIZANDO CACHE (SQL + ETL) ---")
-    start_time = datetime.now()
-    
-    resultados_brutos = []
-    conn = None
-    try:
-        conn = connect_to_database()
-        cursor = conn.cursor()
-        query = '''
-        SELECT 
-            COD_ENSAIO, NUMERO_LOTE, BATCH, DATA, 
-            T2TEMPO as Ts2, T90TEMPO as T90, VISCOSIDADEFINALTORQUE as Viscosidade, 
-            TEMP_PLATO_INF, COD_GRUPO, MAXIMO_TEMPO,
-            CODIGO as CODIGO_REO, AMOSTRA
-        FROM dbo.ENSAIO 
-        WHERE DATA >= '2025-07-01'
-        ORDER BY DATA DESC
-        '''
-        cursor.execute(query)
-        colunas = [c[0] for c in cursor.description]
-        resultados_brutos = [dict(zip(colunas, row)) for row in cursor.fetchall()]
-    except Exception as e:
-        print(f"❌ Erro SQL: {e}")
-        return False
-    finally:
-        if conn: conn.close()
-
-    print(f"   > Processando {len(resultados_brutos)} linhas...")
-    
-    dados_agrupados = {} 
-    
-    # 1. Agrupamento
-    for row in resultados_brutos:
-        lote_orig = row['NUMERO_LOTE']
-        amostra = row['AMOSTRA']
-        grupo = row['COD_GRUPO']
-        
-        lote_final, _ = extrair_lote_da_string(lote_orig)
-        if not lote_final: lote_final, _ = extrair_lote_da_string(amostra)
-        
-        chave_lote = lote_final if lote_final else str(lote_orig).strip().upper()
-        try: chave_batch = int(row['BATCH'])
-        except: chave_batch = 0
-        chave_unica = (chave_lote, chave_batch)
-        
-        produto = None
-        tipo_equip = MAPA_GRUPOS.get(grupo, "INDEFINIDO")
-        usar_cod = (tipo_equip != "VISCOSIMETRO")
-        
-        if lote_final:
-            nome = MAPA_LOTES_PLANILHA.get(lote_final)
-            if nome: produto = match_nome_inteligente(nome)
-        
-        if not produto:
-            produto = match_nome_inteligente(amostra)
-            if not produto and usar_cod: produto = match_nome_inteligente(row['CODIGO_REO'])
-                
-        if chave_unica not in dados_agrupados:
-            dados_agrupados[chave_unica] = {
-                'ids_ensaio': [],
-                'massa': produto,
-                'lote_visivel': chave_lote,
-                'batch': chave_batch,
-                'data': row['DATA'],
-                'ts2': None,
-                't90': None,
-                'visc': None,
-                'temps': [],
-                'tempos_max': [],
-                'tempo_max': None,
-                'grupos': set()
-            }
-        
-        reg = dados_agrupados[chave_unica]
-        reg['ids_ensaio'].append(row['COD_ENSAIO'])
-        reg['grupos'].add(grupo)
-        if not reg['massa'] and produto: reg['massa'] = produto
-            
-        v_ts2 = safe_float(row['Ts2'])
-        v_t90 = safe_float(row['T90'])
-        v_visc = safe_float(row['Viscosidade'])
-        v_temp = safe_float(row['TEMP_PLATO_INF'])
-        v_tempo_max = safe_float(row['MAXIMO_TEMPO'])
-        
-        if v_ts2: reg['ts2'] = v_ts2
-        if v_t90: reg['t90'] = v_t90
-        if v_visc: reg['visc'] = v_visc
-        if v_temp and v_temp not in reg['temps']: reg['temps'].append(v_temp)
-        if v_tempo_max:
-            if not reg['tempo_max']:
-                reg['tempo_max'] = v_tempo_max
-            if v_tempo_max not in reg['tempos_max']:
-                reg['tempos_max'].append(v_tempo_max)
-
-    # 2. Cálculo de Médias (Apenas onde existe dado real)
-    medias_visc_por_lote = {}
-    acumulador_lote = {}
-    
-    for dados in dados_agrupados.values():
-        l = dados['lote_visivel']
-        v = dados['visc']
-        if v:
-            if l not in acumulador_lote: acumulador_lote[l] = []
-            acumulador_lote[l].append(v)
-            
-    for l, valores in acumulador_lote.items():
-        medias_visc_por_lote[l] = sum(valores) / len(valores)
-
-    # 3. Criação Final
-    lista_final = []
-    materiais_set = set()
-    
-    for _, dados in dados_agrupados.items():
-        if not dados['massa']: continue
-        
-        materiais_set.add(dados['massa'])
-        
-        # Lógica Fina da Viscosidade
-        valor_visc = dados['visc']
-        origem_visc = "N/A"
-        
-        if valor_visc:
-            origem_visc = "Real"
-        elif dados['lote_visivel'] in medias_visc_por_lote:
-            # Só aplica média se o lote tiver histórico
-            valor_visc = medias_visc_por_lote[dados['lote_visivel']]
-            origem_visc = "Média (Lote)"
-        else:
-            # Mantém None para indicar ausência real
-            valor_visc = None
-        
-        # Monta dicionário de medidas (Só o que existe)
-        medidas = {}
-        if dados['ts2']: medidas['Ts2'] = dados['ts2']
-        if dados['t90']: medidas['T90'] = dados['t90']
-        if valor_visc: medidas['Viscosidade'] = valor_visc
-
-        novo_ensaio = Ensaio(
-            id_ensaio=dados['ids_ensaio'][0],
-            massa_objeto=dados['massa'],
-            valores_medidos=medidas,
-            lote=dados['lote_visivel'],
-            batch=dados['batch'],
-            data_hora=dados['data'],
-            origem_viscosidade=origem_visc,
-            temp_plato=dados['temps'][0] if dados['temps'] else 0,
-            temps_plato=list(dados['temps']),
-            cod_grupo=list(dados['grupos'])[0],
-            tempo_maximo=dados.get('tempo_max') or 0,
-            tempos_max=list(dados.get('tempos_max') or []),
-            ids_agrupados=list(dados['ids_ensaio'])
-        )
-        novo_ensaio.calcular_score()
-        try:
-            novo_ensaio.tipo_ensaio = classificar_tipo_ensaio(novo_ensaio)
-        except Exception:
-            novo_ensaio.tipo_ensaio = "INDEFINIDO"
-        lista_final.append(novo_ensaio)
-    
-    CACHE_GLOBAL['dados'] = lista_final
-    CACHE_GLOBAL['materiais'] = sorted(list(materiais_set), key=lambda m: m.descricao)
-    CACHE_GLOBAL['ultimo_update'] = datetime.now()
-    CACHE_GLOBAL['total_registros_brutos'] = len(resultados_brutos)
-    
-    print(f"✅ CACHE ATUALIZADO: {len(lista_final)} ensaios em {(datetime.now() - start_time).total_seconds():.1f}s.")
-    return True
-
-# ==========================================
-# 5. ROTAS
+# 2. ROTAS DE AUTENTICAÇÃO
 # ==========================================
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -352,7 +84,6 @@ def logout():
     flash('Você saiu do sistema.', 'info')
     return redirect(url_for('login'))
 
-# Rota auxiliar para criar o primeiro ADMIN (execute uma vez e apague ou proteja)
 @app.route('/criar_admin')
 def criar_admin():
     if Usuario.query.filter_by(username='admin').first():
@@ -364,15 +95,26 @@ def criar_admin():
     db.session.commit()
     return "Admin criado com sucesso! (User: admin / Pass: senha123)"
 
+# ==========================================
+# 3. ROTAS PRINCIPAIS (DASHBOARD)
+# ==========================================
 
 @app.route('/atualizar_dados')
+@login_required
 def rota_atualizar():
-    """Rota disparada pelo botão manual"""
-    sucesso = atualizar_cache_do_banco()
-    if sucesso:
-        flash(f"Dados atualizados com sucesso! {len(CACHE_GLOBAL['dados'])} registros carregados.", "success")
-    else:
-        flash("Erro ao atualizar dados. Verifique a conexão.", "danger")
+    """Rota disparada pelo botão manual para forçar o ETL."""
+    try:
+        resultado = processar_carga_dados()
+        
+        if resultado:
+            CACHE_GLOBAL.update(resultado)
+            flash(f"Dados atualizados com sucesso! {len(CACHE_GLOBAL['dados'])} registros carregados.", "success")
+        else:
+            flash("Erro ao atualizar dados. Verifique a conexão com o Banco de Dados.", "danger")
+            
+    except Exception as e:
+        flash(f"Erro crítico durante atualização: {str(e)}", "danger")
+
     return redirect(url_for('dashboard'))
 
 @app.route('/')
@@ -380,12 +122,16 @@ def rota_atualizar():
 def dashboard():
     # Se cache vazio, força primeira carga
     if CACHE_GLOBAL['ultimo_update'] is None:
-        atualizar_cache_do_banco()
+        print("--- Cache vazio. Iniciando carga automática... ---")
+        resultado = processar_carga_dados()
+        if resultado:
+            CACHE_GLOBAL.update(resultado)
     
+    # Trabalha com cópia da lista para filtragem
     ensaios_filtrados = list(CACHE_GLOBAL['dados'])
     total_geral = len(ensaios_filtrados)
     
-    # Filtros
+    # --- FILTROS DE VIEW (Controller) ---
     search = request.args.get('search', '').strip().upper()
     f_mat = request.args.get('material_filter', '')
     f_cod = request.args.get('codigo_filter', '').strip()
@@ -399,6 +145,7 @@ def dashboard():
     page = request.args.get('page', 1, type=int)
     LIMIT = 20
 
+    # Aplicação dos Filtros
     if search:
         ensaios_filtrados = [e for e in ensaios_filtrados if search in str(e.lote).upper() or search in str(e.batch) or search in str(e.massa.descricao).upper()]
     if f_mat:
@@ -417,7 +164,7 @@ def dashboard():
     if d_end:
         ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59, second=59)]
 
-    # KPI
+    # Cálculo de KPIs
     total_filtrado = len(ensaios_filtrados)
     kpi = {
         'total': total_filtrado,
@@ -458,25 +205,37 @@ def dashboard():
     if request.headers.get('HX-Request'): return render_template('tabela_dados.html', **context)
     return render_template('index.html', **context)
 
-# ... (Rotas Config mantidas iguais) ...
+# ==========================================
+# 4. ROTAS DE CONFIGURAÇÃO (ADMIN)
+# ==========================================
+
 @app.route('/config')
 @login_required
 def pagina_config():
     if current_user.role != 'admin':
         flash("Acesso negado. Apenas administradores podem alterar configurações.", "warning")
         return redirect(url_for('dashboard'))
+    
     query = request.args.get('q', '').upper()
     produtos = []
-    if not query: produtos = list(CATALOGO_POR_CODIGO.values())[:50]
+    
+    # Usa CATALOGO_POR_CODIGO importado do etl_processor
+    if not query: 
+        produtos = list(CATALOGO_POR_CODIGO.values())[:50]
     else:
         for p in CATALOGO_POR_CODIGO.values():
             if query in str(p.cod_sankhya) or query in p.descricao.upper():
                 produtos.append(p)
                 if len(produtos) > 50: break
+                
     return render_template('config.html', produtos=produtos, query=query)
 
 @app.route('/salvar_config', methods=['POST'])
+@login_required
 def salvar_config():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
     cod = request.form.get('cod_sankhya')
     
     # Funções auxiliares de conversão
@@ -485,7 +244,7 @@ def salvar_config():
     
     specs = {}
     
-    # 1. Captura as Temperaturas Padrão e tempo alvo dos Perfis
+    # 1. Captura as Temperaturas Padrão e tempo alvo
     t_alta = request.form.get('alta_temp_padrao')
     t_baixa = request.form.get('baixa_temp_padrao')
     tempo_alta = request.form.get('alta_tempo_total')
@@ -496,29 +255,24 @@ def salvar_config():
     if tempo_alta and tempo_alta.strip(): specs['alta_tempo_total'] = f(tempo_alta)
     if tempo_baixa and tempo_baixa.strip(): specs['baixa_tempo_total'] = f(tempo_baixa)
 
-    # 2. Captura os Parâmetros Fixos (Ts2, T90, Viscosidade) por Perfil
+    # 2. Captura os Parâmetros Fixos
     perfis = ['alta', 'baixa']
     params = ['Ts2', 'T90', 'Viscosidade']
     
     for perfil in perfis:
         for p in params:
-            prefix = f"{perfil}_{p}" # Ex: alta_Ts2
-            
+            prefix = f"{perfil}_{p}"
             min_v = request.form.get(f"{prefix}_min")
             alvo_v = request.form.get(f"{prefix}_alvo")
             max_v = request.form.get(f"{prefix}_max")
             peso_v = request.form.get(f"{prefix}_peso")
             
-            # Só salva se houver algum valor relevante preenchido
             if min_v or alvo_v or max_v:
                 specs[prefix] = {
-                    "min": f(min_v),
-                    "alvo": f(alvo_v),
-                    "max": f(max_v),
-                    "peso": i(peso_v)
+                    "min": f(min_v), "alvo": f(alvo_v), "max": f(max_v), "peso": i(peso_v)
                 }
 
-    # 3. Mantém compatibilidade com Parâmetros Dinâmicos (Legacy)
+    # 3. Mantém compatibilidade Legacy
     novos_nomes = request.form.getlist('din_nome[]')
     novos_pesos = request.form.getlist('din_peso[]')
     novos_mins = request.form.getlist('din_min[]')
@@ -528,16 +282,17 @@ def salvar_config():
     for idx, nome in enumerate(novos_nomes):
         if nome.strip():
             specs[nome] = {
-                "min": f(novos_mins[idx]),
-                "alvo": f(novos_alvos[idx]),
-                "max": f(novos_maxs[idx]),
-                "peso": i(novos_pesos[idx])
+                "min": f(novos_mins[idx]), "alvo": f(novos_alvos[idx]),
+                "max": f(novos_maxs[idx]), "peso": i(novos_pesos[idx])
             }
             
-    # Salva no arquivo JSON e recarrega na memória
+    # Salva no arquivo JSON
     salvar_configuracao(cod, specs)
-    aplicar_configuracoes_no_catalogo(CATALOGO_POR_CODIGO)
     
+    # Recarrega as configurações na memória do ETL para aplicar imediatamente
+    carregar_referencias_estaticas()
+    
+    flash(f"Configuração do produto {cod} salva e aplicada!", "success")
     return redirect(url_for('pagina_config', q=cod))
 
 if __name__ == '__main__':
