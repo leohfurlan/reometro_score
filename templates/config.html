@@ -201,16 +201,24 @@
                             <input type="hidden" name="cod_sankhya" value="{{ prod.cod_sankhya }}">
                             
                             <div class="card mb-3 border-danger border-opacity-25 shadow-sm">
-                                <div class="card-header bg-danger bg-opacity-10 text-danger fw-bold d-flex justify-content-between">
+                                <div class="card-header bg-danger bg-opacity-10 text-danger fw-bold d-flex justify-content-between align-items-center">
                                     <span><i class="fas fa-fire me-2"></i>Alta Temperatura (Cura/Batch)</span>
+                                    
                                     {% set perfis_alta = prod.perfis.get('alta', {}) if prod.perfis else {} %}
+                                    
                                     <div class="d-flex gap-2 align-items-center">
-                                        <small class="text-dark">Ref:</small>
-                                        <input type="number" step="1" name="alta_temp_padrao" class="form-control form-control-sm border-0 bg-white" 
-                                               style="width: 70px;" placeholder="°C" value="{{ perfis_alta.get('temp_padrao', '') }}">
-                                        <small class="text-dark">Tempo:</small>
-                                        <input type="number" step="1" name="alta_tempo_total" class="form-control form-control-sm border-0 bg-white" 
-                                               style="width: 70px;" placeholder="s" value="{{ perfis_alta.get('tempo_total', '') }}">
+                                        {% if perfis_alta.get('temp_padrao') or perfis_alta.get('tempo_total') %}
+                                            <small class="text-dark fw-bold">Ref:</small>
+                                            <input type="number" step="1" name="alta_temp_padrao" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
+                                                style="width: 60px;" value="{{ perfis_alta.get('temp_padrao', '') }}">
+                                            <small class="text-dark fw-bold">Tempo:</small>
+                                            <input type="number" step="1" name="alta_tempo_total" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
+                                                style="width: 60px;" value="{{ perfis_alta.get('tempo_total', '') }}">
+                                        {% else %}
+                                            <span class="badge bg-white text-muted border">Sem Reometria</span>
+                                            <input type="number" name="alta_temp_padrao" class="d-none" placeholder="°C">
+                                            <input type="number" name="alta_tempo_total" class="d-none" placeholder="s">
+                                        {% endif %}
                                     </div>
                                 </div>
                                 <div class="card-body p-2">

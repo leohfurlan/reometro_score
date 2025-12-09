@@ -141,44 +141,44 @@
     },
     "981": {
         "alta_temp_padrao": 185.0,
+        "baixa_temp_padrao": 150.0,
         "alta_tempo_total": 180.0,
+        "baixa_tempo_total": 900.0,
         "alta_Ts2": {
             "min": 60.0,
-            "max": 74.0,
             "alvo": 67.0,
+            "max": 74.0,
             "peso": 10
         },
         "alta_T90": {
             "min": 105.0,
-            "max": 120.0,
             "alvo": 112.5,
-            "peso": 10
+            "max": 120.0,
+            "peso": 8
         },
-        "baixa_temp_padrao": 150.0,
-        "baixa_tempo_total": 900.0,
+        "alta_Viscosidade": {
+            "min": 37.0,
+            "alvo": 42.0,
+            "max": 47.0,
+            "peso": 2
+        },
         "baixa_Ts2": {
             "min": 265.0,
-            "max": 428.0,
             "alvo": 346.5,
+            "max": 428.0,
             "peso": 10
         },
         "baixa_T90": {
             "min": 458.0,
-            "max": 717.0,
             "alvo": 587.5,
-            "peso": 10
-        },
-        "alta_Viscosidade": {
-            "min": 37.0,
-            "max": 47.0,
-            "alvo": 42.0,
-            "peso": 10
+            "max": 717.0,
+            "peso": 8
         },
         "baixa_Viscosidade": {
             "min": 37.0,
-            "max": 47.0,
             "alvo": 42.0,
-            "peso": 10
+            "max": 47.0,
+            "peso": 2
         }
     },
     "982": {

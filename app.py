@@ -258,12 +258,20 @@ def pagina_config():
     if sort_by == 'cod':
         produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
     elif sort_by == 'status':
-        # Ordena quem tem config primeiro ou por último
+        # CORREÇÃO AQUI: Força o retorno a ser um booleano (True/False)
         def get_status_sort(p):
-            return (
-                (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
-                (p.parametros and len(p.parametros) > 0)
-            )
+            tem_perfil = False
+            if p.perfis:
+                # Verifica se existe e converte para bool
+                if p.perfis.get('alta') or p.perfis.get('baixa'):
+                    tem_perfil = True
+            
+            tem_param = False
+            if p.parametros and len(p.parametros) > 0:
+                tem_param = True
+                
+            return tem_perfil or tem_param
+
         produtos_filtrados.sort(key=get_status_sort, reverse=reverse)
     else:
         # Padrão: Descrição
