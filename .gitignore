@@ -13,3 +13,4 @@ criar_admin.py
 obsoletos/
 *.json
 .gitignore
+*.pdf

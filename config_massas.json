@@ -5,39 +5,2763 @@
         "alta_tempo_total": 180.0,
         "baixa_tempo_total": 1500.0,
         "alta_Ts2": {
-            "min": 40.0,
-            "alvo": 60.0,
-            "max": 80.0,
-            "peso": 8
+            "min": 49.0,
+            "max": 73.0,
+            "alvo": 61.0,
+            "peso": 10
         },
         "alta_T90": {
-            "min": 80.0,
-            "alvo": 100.0,
-            "max": 120.0,
-            "peso": 6
+            "min": 79.0,
+            "max": 124.0,
+            "alvo": 101.5,
+            "peso": 10
         },
         "alta_Viscosidade": {
             "min": 56.0,
-            "alvo": 63.0,
             "max": 70.0,
+            "alvo": 63.0,
             "peso": 10
         },
         "baixa_Ts2": {
             "min": 540.0,
-            "alvo": 645.0,
             "max": 780.0,
-            "peso": 8
+            "alvo": 660.0,
+            "peso": 10
         },
         "baixa_T90": {
             "min": 1080.0,
-            "alvo": 1170.0,
             "max": 1260.0,
-            "peso": 6
+            "alvo": 1170.0,
+            "peso": 10
         },
         "baixa_Viscosidade": {
             "min": 56.0,
-            "alvo": 63.0,
             "max": 70.0,
+            "alvo": 63.0,
+            "peso": 10
+        }
+    },
+    "1052": {
+        "alta_temp_padrao": 198.0,
+        "alta_tempo_total": 300.0,
+        "alta_Ts2": {
+            "min": 90.0,
+            "max": 150.0,
+            "alvo": 120.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 180.0,
+            "max": 260.0,
+            "alvo": 220.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 65.0,
+            "max": 75.0,
+            "alvo": 70.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 65.0,
+            "max": 75.0,
+            "alvo": 70.0,
+            "peso": 10
+        }
+    },
+    "16170": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 30.0,
+            "max": 45.0,
+            "alvo": 37.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 50.0,
+            "max": 76.0,
+            "alvo": 63.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 194.0,
+            "max": 291.0,
+            "alvo": 242.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 517.0,
+            "max": 776.0,
+            "alvo": 646.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 65.0,
+            "max": 75.0,
+            "alvo": 70.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 65.0,
+            "max": 75.0,
+            "alvo": 70.0,
+            "peso": 10
+        }
+    },
+    "8359": {
+        "alta_temp_padrao": 198.0,
+        "alta_tempo_total": 300.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 90.0,
+            "alvo": 75.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 135.0,
+            "max": 165.0,
+            "alvo": 150.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 65.0,
+            "max": 80.0,
+            "alvo": 72.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 65.0,
+            "max": 80.0,
+            "alvo": 72.5,
+            "peso": 10
+        }
+    },
+    "981": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 74.0,
+            "alvo": 67.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 105.0,
+            "max": 120.0,
+            "alvo": 112.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 265.0,
+            "max": 428.0,
+            "alvo": 346.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 458.0,
+            "max": 717.0,
+            "alvo": 587.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 37.0,
+            "max": 47.0,
+            "alvo": 42.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 37.0,
+            "max": 47.0,
+            "alvo": 42.0,
+            "peso": 10
+        }
+    },
+    "982": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 62.0,
+            "max": 93.0,
+            "alvo": 77.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 123.0,
+            "max": 185.0,
+            "alvo": 154.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 390.0,
+            "max": 750.0,
+            "alvo": 570.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 854.0,
+            "max": 1282.0,
+            "alvo": 1068.0,
+            "peso": 10
+        }
+    },
+    "9285": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 47.0,
+            "max": 71.0,
+            "alvo": 59.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 92.0,
+            "max": 138.0,
+            "alvo": 115.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 720.0,
+        "baixa_Ts2": {
+            "min": 183.0,
+            "max": 272.0,
+            "alvo": 227.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 369.0,
+            "max": 542.0,
+            "alvo": 455.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 53.0,
+            "max": 65.0,
+            "alvo": 59.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 53.0,
+            "max": 65.0,
+            "alvo": 59.0,
+            "peso": 10
+        }
+    },
+    "9284": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 36.0,
+            "max": 53.0,
+            "alvo": 44.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 71.0,
+            "max": 105.0,
+            "alvo": 88.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 720.0,
+        "baixa_Ts2": {
+            "min": 158.0,
+            "max": 238.0,
+            "alvo": 198.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 268.0,
+            "max": 402.0,
+            "alvo": 335.0,
+            "peso": 10
+        }
+    },
+    "23249": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 240.0,
+        "alta_Ts2": {
+            "min": 71.0,
+            "max": 107.0,
+            "alvo": 89.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 151.0,
+            "max": 226.0,
+            "alvo": 188.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 358.0,
+            "max": 537.0,
+            "alvo": 447.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 976.0,
+            "max": 1335.0,
+            "alvo": 1155.5,
+            "peso": 10
+        }
+    },
+    "9934": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 48.0,
+            "max": 73.0,
+            "alvo": 60.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 101.0,
+            "max": 156.0,
+            "alvo": 128.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 711.0,
+            "max": 1067.0,
+            "alvo": 889.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1139.0,
+            "max": 1709.0,
+            "alvo": 1424.0,
+            "peso": 10
+        }
+    },
+    "23777": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 46.0,
+            "max": 83.0,
+            "alvo": 64.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 76.0,
+            "max": 96.0,
+            "alvo": 86.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 360.0,
+            "max": 540.0,
+            "alvo": 450.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 545.0,
+            "max": 780.0,
+            "alvo": 662.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 40.0,
+            "max": 50.0,
+            "alvo": 45.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 40.0,
+            "max": 50.0,
+            "alvo": 45.0,
+            "peso": 10
+        }
+    },
+    "11152": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 49.0,
+            "max": 73.0,
+            "alvo": 61.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 79.0,
+            "max": 124.0,
+            "alvo": 101.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 540.0,
+            "max": 780.0,
+            "alvo": 660.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1080.0,
+            "max": 1260.0,
+            "alvo": 1170.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 56.0,
+            "max": 70.0,
+            "alvo": 63.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 56.0,
+            "max": 70.0,
+            "alvo": 63.0,
+            "peso": 10
+        }
+    },
+    "1708": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 46.0,
+            "max": 83.0,
+            "alvo": 64.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 90.0,
+            "max": 110.0,
+            "alvo": 100.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 360.0,
+            "max": 540.0,
+            "alvo": 450.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 545.0,
+            "max": 780.0,
+            "alvo": 662.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 40.0,
+            "max": 65.0,
+            "alvo": 52.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 40.0,
+            "max": 65.0,
+            "alvo": 52.5,
+            "peso": 10
+        }
+    },
+    "28232": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 40.0,
+            "max": 60.0,
+            "alvo": 50.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 70.0,
+            "max": 100.0,
+            "alvo": 85.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1500.0,
+        "baixa_Ts2": {
+            "min": 330.0,
+            "max": 510.0,
+            "alvo": 420.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 540.0,
+            "max": 780.0,
+            "alvo": 660.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 56.0,
+            "max": 75.0,
+            "alvo": 65.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 56.0,
+            "max": 75.0,
+            "alvo": 65.5,
+            "peso": 10
+        }
+    },
+    "997": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 57.0,
+            "max": 85.0,
+            "alvo": 71.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 108.0,
+            "max": 163.0,
+            "alvo": 135.5,
+            "peso": 10
+        }
+    },
+    "23835": {
+        "alta_temp_padrao": 198.0,
+        "alta_tempo_total": 600.0,
+        "alta_Ts2": {
+            "min": 70.0,
+            "max": 104.0,
+            "alvo": 87.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 319.0,
+            "max": 479.0,
+            "alvo": 399.0,
+            "peso": 10
+        }
+    },
+    "13334": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 65.0,
+            "alvo": 55.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 90.0,
+            "max": 110.0,
+            "alvo": 100.0,
+            "peso": 10
+        }
+    },
+    "19674": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 60.0,
+            "alvo": 52.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 90.0,
+            "max": 110.0,
+            "alvo": 100.0,
+            "peso": 10
+        }
+    },
+    "1131": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 48.0,
+            "max": 68.0,
+            "alvo": 58.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 100.0,
+            "max": 130.0,
+            "alvo": 115.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 338.0,
+            "max": 508.0,
+            "alvo": 423.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 726.0,
+            "max": 1086.0,
+            "alvo": 906.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 43.0,
+            "max": 53.0,
+            "alvo": 48.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 43.0,
+            "max": 53.0,
+            "alvo": 48.0,
+            "peso": 10
+        }
+    },
+    "7067": {
+        "alta_temp_padrao": 190.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 67.0,
+            "alvo": 56.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 72.0,
+            "max": 108.0,
+            "alvo": 90.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 356.0,
+            "max": 534.0,
+            "alvo": 445.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 704.0,
+            "max": 1056.0,
+            "alvo": 880.0,
+            "peso": 10
+        }
+    },
+    "24201": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 55.0,
+            "max": 70.0,
+            "alvo": 62.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 115.0,
+            "max": 135.0,
+            "alvo": 125.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 240.0,
+            "max": 420.0,
+            "alvo": 330.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1020.0,
+            "max": 1260.0,
+            "alvo": 1140.0,
+            "peso": 10
+        }
+    },
+    "24200": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 55.0,
+            "max": 70.0,
+            "alvo": 62.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 115.0,
+            "max": 135.0,
+            "alvo": 125.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 390.0,
+            "max": 540.0,
+            "alvo": 465.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 900.0,
+            "max": 1080.0,
+            "alvo": 990.0,
+            "peso": 10
+        }
+    },
+    "6166": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 19.0,
+            "max": 29.0,
+            "alvo": 24.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 41.0,
+            "max": 66.0,
+            "alvo": 53.5,
+            "peso": 10
+        }
+    },
+    "839": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 22.0,
+            "max": 33.0,
+            "alvo": 27.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 40.0,
+            "max": 60.0,
+            "alvo": 50.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 94.0,
+            "max": 141.0,
+            "alvo": 117.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 161.0,
+            "max": 242.0,
+            "alvo": 201.5,
+            "peso": 10
+        }
+    },
+    "6212": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 63.0,
+            "max": 94.0,
+            "alvo": 78.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 118.0,
+            "max": 177.0,
+            "alvo": 147.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 160.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 419.0,
+            "max": 628.0,
+            "alvo": 523.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 560.0,
+            "max": 840.0,
+            "alvo": 700.0,
+            "peso": 10
+        }
+    },
+    "23579": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 48.0,
+            "max": 73.0,
+            "alvo": 60.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 94.0,
+            "max": 156.0,
+            "alvo": 125.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 711.0,
+            "max": 1067.0,
+            "alvo": 889.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1139.0,
+            "max": 269.0,
+            "alvo": 704.0,
+            "peso": 10
+        }
+    },
+    "25485": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 30.0,
+            "max": 40.0,
+            "alvo": 35.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 75.0,
+            "max": 90.0,
+            "alvo": 82.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 128.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 150.0,
+            "max": 210.0,
+            "alvo": 180.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 780.0,
+            "max": 960.0,
+            "alvo": 870.0,
+            "peso": 10
+        }
+    },
+    "1004": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 43.0,
+            "max": 65.0,
+            "alvo": 54.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 95.0,
+            "max": 142.0,
+            "alvo": 118.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 291.0,
+            "max": 437.0,
+            "alvo": 364.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 676.0,
+            "max": 1014.0,
+            "alvo": 845.0,
+            "peso": 10
+        }
+    },
+    "1834": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 43.0,
+            "max": 65.0,
+            "alvo": 54.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 87.0,
+            "max": 131.0,
+            "alvo": 109.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 230.0,
+            "max": 345.0,
+            "alvo": 287.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 586.0,
+            "max": 878.0,
+            "alvo": 732.0,
+            "peso": 10
+        }
+    },
+    "9248": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 62.0,
+            "max": 93.0,
+            "alvo": 77.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 113.0,
+            "max": 169.0,
+            "alvo": 141.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 345.0,
+            "max": 517.0,
+            "alvo": 431.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 578.0,
+            "max": 868.0,
+            "alvo": 723.0,
+            "peso": 10
+        }
+    },
+    "7493": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 65.0,
+            "max": 97.0,
+            "alvo": 81.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 132.0,
+            "max": 199.0,
+            "alvo": 165.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 667.0,
+            "max": 1000.0,
+            "alvo": 833.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 931.0,
+            "max": 1397.0,
+            "alvo": 1164.0,
+            "peso": 10
+        }
+    },
+    "8211": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 68.0,
+            "max": 102.0,
+            "alvo": 85.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 78.0,
+            "max": 117.0,
+            "alvo": 97.5,
+            "peso": 10
+        }
+    },
+    "1007": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 47.0,
+            "max": 70.0,
+            "alvo": 58.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 78.0,
+            "max": 117.0,
+            "alvo": 97.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 388.0,
+            "max": 582.0,
+            "alvo": 485.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 575.0,
+            "max": 862.0,
+            "alvo": 718.5,
+            "peso": 10
+        }
+    },
+    "1465": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 43.0,
+            "max": 65.0,
+            "alvo": 54.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 84.0,
+            "max": 127.0,
+            "alvo": 105.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 212.0,
+            "max": 318.0,
+            "alvo": 265.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 654.0,
+            "max": 981.0,
+            "alvo": 817.5,
+            "peso": 10
+        }
+    },
+    "1011": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 82.0,
+            "max": 122.0,
+            "alvo": 102.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 136.0,
+            "max": 204.0,
+            "alvo": 170.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 529.0,
+            "max": 794.0,
+            "alvo": 661.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 923.0,
+            "max": 1384.0,
+            "alvo": 1153.5,
+            "peso": 10
+        }
+    },
+    "980": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 42.0,
+            "max": 60.0,
+            "alvo": 51.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 66.0,
+            "max": 99.0,
+            "alvo": 82.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 210.0,
+            "max": 315.0,
+            "alvo": 262.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 337.0,
+            "max": 505.0,
+            "alvo": 421.0,
+            "peso": 10
+        }
+    },
+    "7876": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 57.0,
+            "max": 86.0,
+            "alvo": 71.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 113.0,
+            "max": 170.0,
+            "alvo": 141.5,
+            "peso": 10
+        }
+    },
+    "1016": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 90.0,
+            "alvo": 75.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 130.0,
+            "max": 195.0,
+            "alvo": 162.5,
+            "peso": 10
+        }
+    },
+    "7893": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 57.0,
+            "max": 86.0,
+            "alvo": 71.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 113.0,
+            "max": 170.0,
+            "alvo": 141.5,
+            "peso": 10
+        }
+    },
+    "1018": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 84.0,
+            "max": 126.0,
+            "alvo": 105.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 126.0,
+            "max": 189.0,
+            "alvo": 157.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 564.0,
+            "max": 847.0,
+            "alvo": 705.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 701.0,
+            "max": 1051.0,
+            "alvo": 876.0,
+            "peso": 10
+        }
+    },
+    "1019": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 65.0,
+            "max": 97.0,
+            "alvo": 81.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 95.0,
+            "max": 142.0,
+            "alvo": 118.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 417.0,
+            "max": 625.0,
+            "alvo": 521.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 531.0,
+            "max": 797.0,
+            "alvo": 664.0,
+            "peso": 10
+        }
+    },
+    "1017": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 90.0,
+            "max": 135.0,
+            "alvo": 112.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 132.0,
+            "max": 197.0,
+            "alvo": 164.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 521.0,
+            "max": 782.0,
+            "alvo": 651.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 695.0,
+            "max": 1042.0,
+            "alvo": 868.5,
+            "peso": 10
+        }
+    },
+    "14488": {
+        "alta_temp_padrao": 190.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 33.0,
+            "max": 50.0,
+            "alvo": 41.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 64.0,
+            "max": 96.0,
+            "alvo": 80.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 720.0,
+        "baixa_Ts2": {
+            "min": 107.0,
+            "max": 160.0,
+            "alvo": 133.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 173.0,
+            "max": 260.0,
+            "alvo": 216.5,
+            "peso": 10
+        }
+    },
+    "2291": {
+        "alta_temp_padrao": 190.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 53.0,
+            "max": 79.0,
+            "alvo": 66.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 85.0,
+            "max": 128.0,
+            "alvo": 106.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1500.0,
+        "baixa_Ts2": {
+            "min": 404.0,
+            "max": 606.0,
+            "alvo": 505.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 653.0,
+            "max": 980.0,
+            "alvo": 816.5,
+            "peso": 10
+        }
+    },
+    "25754": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 65.0,
+            "alvo": 55.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 90.0,
+            "max": 110.0,
+            "alvo": 100.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 270.0,
+            "max": 390.0,
+            "alvo": 330.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 480.0,
+            "max": 690.0,
+            "alvo": 585.0,
+            "peso": 10
+        }
+    },
+    "24071": {
+        "alta_temp_padrao": 190.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 56.0,
+            "max": 76.0,
+            "alvo": 66.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 110.0,
+            "max": 140.0,
+            "alvo": 125.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 360.0,
+            "max": 480.0,
+            "alvo": 420.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 600.0,
+            "max": 840.0,
+            "alvo": 720.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 53.0,
+            "max": 65.0,
+            "alvo": 59.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 53.0,
+            "max": 65.0,
+            "alvo": 59.0,
+            "peso": 10
+        }
+    },
+    "23741": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 74.0,
+            "alvo": 67.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 105.0,
+            "max": 120.0,
+            "alvo": 112.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 270.0,
+            "max": 415.0,
+            "alvo": 342.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 600.0,
+            "max": 720.0,
+            "alvo": 660.0,
+            "peso": 10
+        }
+    },
+    "1474": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 26.0,
+            "max": 35.0,
+            "alvo": 30.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 55.0,
+            "max": 67.0,
+            "alvo": 61.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 128.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 264.0,
+            "max": 356.0,
+            "alvo": 310.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 650.0,
+            "max": 770.0,
+            "alvo": 710.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 23.0,
+            "max": 30.0,
+            "alvo": 26.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 23.0,
+            "max": 30.0,
+            "alvo": 26.5,
+            "peso": 10
+        }
+    },
+    "995": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 56.0,
+            "max": 66.0,
+            "alvo": 61.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 92.0,
+            "max": 109.0,
+            "alvo": 100.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 260.0,
+            "max": 330.0,
+            "alvo": 295.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 410.0,
+            "max": 510.0,
+            "alvo": 460.0,
+            "peso": 10
+        }
+    },
+    "7762": {
+        "alta_temp_padrao": 150.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 40.0,
+            "max": 75.0,
+            "alvo": 57.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 90.0,
+            "max": 150.0,
+            "alvo": 120.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 128.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 120.0,
+            "max": 300.0,
+            "alvo": 210.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 300.0,
+            "max": 626.0,
+            "alvo": 463.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 26.0,
+            "max": 35.0,
+            "alvo": 30.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 26.0,
+            "max": 35.0,
+            "alvo": 30.5,
+            "peso": 10
+        }
+    },
+    "21662": {
+        "alta_temp_padrao": 170.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 43.0,
+            "max": 55.0,
+            "alvo": 49.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 58.0,
+            "max": 69.0,
+            "alvo": 63.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 128.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 210.0,
+            "max": 270.0,
+            "alvo": 240.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 660.0,
+            "max": 720.0,
+            "alvo": 690.0,
+            "peso": 10
+        }
+    },
+    "6333": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 173.0,
+            "max": 260.0,
+            "alvo": 216.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 627.0,
+            "max": 940.0,
+            "alvo": 783.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 720.0,
+            "max": 845.0,
+            "alvo": 782.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1265.0,
+            "max": 1740.0,
+            "alvo": 1502.5,
+            "peso": 10
+        }
+    },
+    "26508": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 67.0,
+            "alvo": 56.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 89.0,
+            "max": 134.0,
+            "alvo": 111.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 480.0,
+            "max": 585.0,
+            "alvo": 532.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 900.0,
+            "max": 1020.0,
+            "alvo": 960.0,
+            "peso": 10
+        }
+    },
+    "19631": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 50.0,
+            "max": 76.0,
+            "alvo": 63.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 87.0,
+            "max": 131.0,
+            "alvo": 109.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 172.0,
+            "max": 258.0,
+            "alvo": 215.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 339.0,
+            "max": 508.0,
+            "alvo": 423.5,
+            "peso": 10
+        }
+    },
+    "1033": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 84.0,
+            "max": 125.0,
+            "alvo": 104.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 135.0,
+            "max": 202.0,
+            "alvo": 168.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 440.0,
+            "max": 660.0,
+            "alvo": 550.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 764.0,
+            "max": 1146.0,
+            "alvo": 955.0,
+            "peso": 10
+        }
+    },
+    "1034": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 67.0,
+            "max": 100.0,
+            "alvo": 83.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 111.0,
+            "max": 166.0,
+            "alvo": 138.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 559.0,
+            "max": 839.0,
+            "alvo": 699.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 841.0,
+            "max": 1262.0,
+            "alvo": 1051.5,
+            "peso": 10
+        }
+    },
+    "19805": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 79.0,
+            "max": 118.0,
+            "alvo": 98.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 123.0,
+            "max": 184.0,
+            "alvo": 153.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 609.0,
+            "max": 914.0,
+            "alvo": 761.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 859.0,
+            "max": 1288.0,
+            "alvo": 1073.5,
+            "peso": 10
+        }
+    },
+    "24768": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 31.0,
+            "max": 38.0,
+            "alvo": 34.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 55.0,
+            "max": 67.0,
+            "alvo": 61.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 128.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 275.0,
+            "max": 362.0,
+            "alvo": 318.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 610.0,
+            "max": 810.0,
+            "alvo": 710.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 24.0,
+            "max": 30.0,
+            "alvo": 27.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 24.0,
+            "max": 30.0,
+            "alvo": 27.0,
+            "peso": 10
+        }
+    },
+    "24298": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 45.0,
+            "max": 65.0,
+            "alvo": 55.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 85.0,
+            "max": 105.0,
+            "alvo": 95.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 46.0,
+            "max": 56.0,
+            "alvo": 51.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 46.0,
+            "max": 56.0,
+            "alvo": 51.0,
+            "peso": 10
+        }
+    },
+    "2155": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 29.0,
+            "max": 36.0,
+            "alvo": 32.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 56.0,
+            "max": 68.0,
+            "alvo": 62.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 194.0,
+            "max": 292.0,
+            "alvo": 243.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 380.0,
+            "max": 570.0,
+            "alvo": 475.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 23.0,
+            "max": 28.0,
+            "alvo": 25.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 23.0,
+            "max": 28.0,
+            "alvo": 25.5,
+            "peso": 10
+        }
+    },
+    "1528": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 58.0,
+            "max": 71.0,
+            "alvo": 64.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 98.0,
+            "max": 119.0,
+            "alvo": 108.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 522.0,
+            "max": 783.0,
+            "alvo": 652.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 876.0,
+            "max": 1314.0,
+            "alvo": 1095.0,
+            "peso": 10
+        }
+    },
+    "1047": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 25.0,
+            "max": 37.0,
+            "alvo": 31.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 47.0,
+            "max": 71.0,
+            "alvo": 59.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 94.0,
+            "max": 140.0,
+            "alvo": 117.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 206.0,
+            "max": 309.0,
+            "alvo": 257.5,
+            "peso": 10
+        }
+    },
+    "1053": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 40.0,
+            "max": 60.0,
+            "alvo": 50.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 70.0,
+            "max": 90.0,
+            "alvo": 80.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 210.0,
+            "max": 300.0,
+            "alvo": 255.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 360.0,
+            "max": 450.0,
+            "alvo": 405.0,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 48.0,
+            "max": 60.0,
+            "alvo": 54.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 48.0,
+            "max": 60.0,
+            "alvo": 54.0,
+            "peso": 10
+        }
+    },
+    "1056": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 120.0,
+        "alta_Ts2": {
+            "min": 19.0,
+            "max": 29.0,
+            "alvo": 24.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 61.0,
+            "max": 91.0,
+            "alvo": 76.0,
+            "peso": 10
+        }
+    },
+    "7811": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 240.0,
+        "alta_Ts2": {
+            "min": 67.0,
+            "max": 101.0,
+            "alvo": 84.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 115.0,
+            "max": 173.0,
+            "alvo": 144.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 496.0,
+            "max": 744.0,
+            "alvo": 620.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 862.0,
+            "max": 1292.0,
+            "alvo": 1077.0,
+            "peso": 10
+        }
+    },
+    "1060": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 69.0,
+            "max": 104.0,
+            "alvo": 86.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 113.0,
+            "max": 169.0,
+            "alvo": 141.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 358.0,
+            "max": 538.0,
+            "alvo": 448.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 671.0,
+            "max": 1007.0,
+            "alvo": 839.0,
+            "peso": 10
+        }
+    },
+    "22052": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 73.0,
+            "max": 94.0,
+            "alvo": 83.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 115.0,
+            "max": 160.0,
+            "alvo": 137.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 647.0,
+            "max": 942.0,
+            "alvo": 794.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 931.0,
+            "max": 1372.0,
+            "alvo": 1151.5,
+            "peso": 10
+        }
+    },
+    "1062": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 84.0,
+            "alvo": 72.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 102.0,
+            "max": 135.0,
+            "alvo": 118.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 411.0,
+            "max": 536.0,
+            "alvo": 473.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 648.0,
+            "max": 973.0,
+            "alvo": 810.5,
+            "peso": 10
+        }
+    },
+    "1067": {
+        "alta_temp_padrao": 195.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 50.0,
+            "max": 76.0,
+            "alvo": 63.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 80.0,
+            "max": 120.0,
+            "alvo": 100.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 504.0,
+            "max": 757.0,
+            "alvo": 630.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 789.0,
+            "max": 1183.0,
+            "alvo": 986.0,
+            "peso": 10
+        }
+    },
+    "1070": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 68.0,
+            "max": 102.0,
+            "alvo": 85.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 119.0,
+            "max": 173.0,
+            "alvo": 146.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 452.0,
+            "max": 678.0,
+            "alvo": 565.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 786.0,
+            "max": 1179.0,
+            "alvo": 982.5,
+            "peso": 10
+        }
+    },
+    "1078": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 57.0,
+            "max": 86.0,
+            "alvo": 71.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 107.0,
+            "max": 160.0,
+            "alvo": 133.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 324.0,
+            "max": 486.0,
+            "alvo": 405.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 780.0,
+            "max": 1170.0,
+            "alvo": 975.0,
+            "peso": 10
+        }
+    },
+    "1080": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 74.0,
+            "max": 112.0,
+            "alvo": 93.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 125.0,
+            "max": 187.0,
+            "alvo": 156.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 480.0,
+            "max": 660.0,
+            "alvo": 570.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 930.0,
+            "max": 1080.0,
+            "alvo": 1005.0,
+            "peso": 10
+        }
+    },
+    "1041": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 78.0,
+            "max": 117.0,
+            "alvo": 97.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 128.0,
+            "max": 192.0,
+            "alvo": 160.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 292.0,
+            "max": 438.0,
+            "alvo": 365.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 835.0,
+            "max": 1253.0,
+            "alvo": 1044.0,
+            "peso": 10
+        }
+    },
+    "1082": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 71.0,
+            "max": 107.0,
+            "alvo": 89.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 110.0,
+            "max": 165.0,
+            "alvo": 137.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 604.0,
+            "max": 906.0,
+            "alvo": 755.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 906.0,
+            "max": 1359.0,
+            "alvo": 1132.5,
+            "peso": 10
+        }
+    },
+    "1083": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 74.0,
+            "max": 112.0,
+            "alvo": 93.0,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 120.0,
+            "max": 186.0,
+            "alvo": 153.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 427.0,
+            "max": 641.0,
+            "alvo": 534.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 584.0,
+            "max": 876.0,
+            "alvo": 730.0,
+            "peso": 10
+        }
+    },
+    "1084": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 81.0,
+            "max": 126.0,
+            "alvo": 103.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 124.0,
+            "max": 186.0,
+            "alvo": 155.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 504.0,
+            "max": 754.0,
+            "alvo": 629.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 666.0,
+            "max": 996.0,
+            "alvo": 831.0,
+            "peso": 10
+        }
+    },
+    "9845": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 60.0,
+            "max": 89.0,
+            "alvo": 74.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 101.0,
+            "max": 151.0,
+            "alvo": 126.0,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 472.0,
+            "max": 708.0,
+            "alvo": 590.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 762.0,
+            "max": 1143.0,
+            "alvo": 952.5,
+            "peso": 10
+        }
+    },
+    "25463": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 58.0,
+            "max": 87.0,
+            "alvo": 72.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 104.0,
+            "max": 156.0,
+            "alvo": 130.0,
+            "peso": 10
+        }
+    },
+    "1085": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 180.0,
+        "alta_Ts2": {
+            "min": 70.0,
+            "max": 87.0,
+            "alvo": 78.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 111.0,
+            "max": 136.0,
+            "alvo": 123.5,
+            "peso": 10
+        },
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 281.0,
+            "max": 421.0,
+            "alvo": 351.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 783.0,
+            "max": 1174.0,
+            "alvo": 978.5,
+            "peso": 10
+        },
+        "alta_Viscosidade": {
+            "min": 19.0,
+            "max": 25.0,
+            "alvo": 22.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 19.0,
+            "max": 25.0,
+            "alvo": 22.0,
+            "peso": 10
+        }
+    },
+    "7873": {
+        "alta_temp_padrao": 185.0,
+        "alta_tempo_total": 240.0,
+        "alta_Ts2": {
+            "min": 59.0,
+            "max": 88.0,
+            "alvo": 73.5,
+            "peso": 10
+        },
+        "alta_T90": {
+            "min": 135.0,
+            "max": 202.0,
+            "alvo": 168.5,
+            "peso": 10
+        }
+    },
+    "26362": {
+        "baixa_temp_padrao": 150.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 300.0,
+            "max": 480.0,
+            "alvo": 390.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1020.0,
+            "max": 1320.0,
+            "alvo": 1170.0,
+            "peso": 10
+        }
+    },
+    "3163": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 155.0,
+            "max": 232.0,
+            "alvo": 193.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 251.0,
+            "max": 376.0,
+            "alvo": 313.5,
+            "peso": 10
+        }
+    },
+    "8358": {
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 660.0,
+            "max": 840.0,
+            "alvo": 750.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 1080.0,
+            "max": 1380.0,
+            "alvo": 1230.0,
+            "peso": 10
+        }
+    },
+    "3165": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 202.0,
+            "max": 303.0,
+            "alvo": 252.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 722.0,
+            "max": 1083.0,
+            "alvo": 902.5,
+            "peso": 10
+        }
+    },
+    "3164": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 900.0,
+        "baixa_Ts2": {
+            "min": 104.0,
+            "max": 156.0,
+            "alvo": 130.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 390.0,
+            "max": 512.0,
+            "alvo": 451.0,
+            "peso": 10
+        }
+    },
+    "8271": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 340.0,
+            "max": 510.0,
+            "alvo": 425.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 801.0,
+            "max": 1202.0,
+            "alvo": 1001.5,
+            "peso": 10
+        }
+    },
+    "1055": {
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 243.0,
+            "max": 364.0,
+            "alvo": 303.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 755.0,
+            "max": 1132.0,
+            "alvo": 943.5,
+            "peso": 10
+        }
+    },
+    "978": {
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 363.0,
+            "max": 544.0,
+            "alvo": 453.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 828.0,
+            "max": 1003.0,
+            "alvo": 915.5,
+            "peso": 10
+        }
+    },
+    "983": {
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 286.0,
+            "max": 429.0,
+            "alvo": 357.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 742.0,
+            "max": 1113.0,
+            "alvo": 927.5,
+            "peso": 10
+        }
+    },
+    "11794": {
+        "baixa_temp_padrao": 135.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 371.0,
+            "max": 557.0,
+            "alvo": 464.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 669.0,
+            "max": 1003.0,
+            "alvo": 836.0,
+            "peso": 10
+        }
+    },
+    "18263": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 1200.0,
+        "baixa_Ts2": {
+            "min": 416.0,
+            "max": 624.0,
+            "alvo": 520.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 710.0,
+            "max": 1066.0,
+            "alvo": 888.0,
+            "peso": 10
+        }
+    },
+    "3167": {
+        "baixa_temp_padrao": 165.0,
+        "baixa_tempo_total": 600.0,
+        "baixa_Ts2": {
+            "min": 87.0,
+            "max": 106.0,
+            "alvo": 96.5,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 251.0,
+            "max": 306.0,
+            "alvo": 278.5,
+            "peso": 10
+        }
+    },
+    "1857": {
+        "baixa_temp_padrao": 145.0,
+        "baixa_tempo_total": 1800.0,
+        "baixa_Ts2": {
+            "min": 436.0,
+            "max": 654.0,
+            "alvo": 545.0,
+            "peso": 10
+        },
+        "baixa_T90": {
+            "min": 795.0,
+            "max": 1193.0,
+            "alvo": 994.0,
+            "peso": 10
+        }
+    },
+    "17246": {
+        "alta_Viscosidade": {
+            "min": 29.0,
+            "max": 33.0,
+            "alvo": 31.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 29.0,
+            "max": 33.0,
+            "alvo": 31.0,
+            "peso": 10
+        }
+    },
+    "24767": {
+        "alta_Viscosidade": {
+            "min": 30.0,
+            "max": 34.0,
+            "alvo": 32.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 30.0,
+            "max": 34.0,
+            "alvo": 32.0,
+            "peso": 10
+        }
+    },
+    "7580": {
+        "alta_Viscosidade": {
+            "min": 30.0,
+            "max": 39.0,
+            "alvo": 34.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 30.0,
+            "max": 39.0,
+            "alvo": 34.5,
+            "peso": 10
+        }
+    },
+    "10537": {
+        "alta_Viscosidade": {
+            "min": 30.0,
+            "max": 39.0,
+            "alvo": 34.5,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 30.0,
+            "max": 39.0,
+            "alvo": 34.5,
+            "peso": 10
+        }
+    },
+    "2285": {
+        "alta_Viscosidade": {
+            "min": 45.0,
+            "max": 55.0,
+            "alvo": 50.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 45.0,
+            "max": 55.0,
+            "alvo": 50.0,
+            "peso": 10
+        }
+    },
+    "26002": {
+        "alta_Viscosidade": {
+            "min": 45.0,
+            "max": 55.0,
+            "alvo": 50.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 45.0,
+            "max": 55.0,
+            "alvo": 50.0,
+            "peso": 10
+        }
+    },
+    "28079": {
+        "alta_Viscosidade": {
+            "min": 55.0,
+            "max": 65.0,
+            "alvo": 60.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 55.0,
+            "max": 65.0,
+            "alvo": 60.0,
+            "peso": 10
+        }
+    },
+    "1801": {
+        "alta_Viscosidade": {
+            "min": 60.0,
+            "max": 70.0,
+            "alvo": 65.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 60.0,
+            "max": 70.0,
+            "alvo": 65.0,
+            "peso": 10
+        }
+    },
+    "24296": {
+        "alta_Viscosidade": {
+            "min": 50.0,
+            "max": 60.0,
+            "alvo": 55.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 50.0,
+            "max": 60.0,
+            "alvo": 55.0,
+            "peso": 10
+        }
+    },
+    "24297": {
+        "alta_Viscosidade": {
+            "min": 50.0,
+            "max": 60.0,
+            "alvo": 55.0,
+            "peso": 10
+        },
+        "baixa_Viscosidade": {
+            "min": 50.0,
+            "max": 60.0,
+            "alvo": 55.0,
             "peso": 10
         }
     }
