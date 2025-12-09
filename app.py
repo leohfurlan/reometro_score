@@ -16,8 +16,8 @@ from services.config_manager import salvar_configuracao
 # acesse os mesmos objetos que o ETL usa.
 from services.etl_service import (
     processar_carga_dados, 
-    carregar_referencias_estaticas, 
-    _CATALOGO_CODIGO as CATALOGO_POR_CODIGO
+    carregar_referencias_estaticas,
+    get_catalogo_codigo  # <--- Nova função importada
 )
 
 from connection import connect_to_database
@@ -211,6 +211,8 @@ def dashboard():
 # 4. ROTAS DE CONFIGURAÇÃO (ADMIN)
 # ==========================================
 
+# No arquivo app.py
+
 @app.route('/config')
 @login_required
 def pagina_config():
@@ -218,19 +220,76 @@ def pagina_config():
         flash("Acesso negado. Apenas administradores podem alterar configurações.", "warning")
         return redirect(url_for('dashboard'))
     
-    query = request.args.get('q', '').upper()
-    produtos = []
+    # 1. Parâmetros da URL (Filtros, Paginação e Ordenação)
+    query = request.args.get('q', '').strip().upper()
+    filtro_tipo = request.args.get('tipo', '')
+    filtro_status = request.args.get('status', '')
+    page = request.args.get('page', 1, type=int)
+    sort_by = request.args.get('sort', 'descricao') # Padrão: por descrição
+    order = request.args.get('order', 'asc')        # Padrão: A-Z
+    LIMIT = 20
+
+    # 2. Obtém catálogo
+    CATALOGO_ATUAL = get_catalogo_codigo()
+    produtos_filtrados = []
+
+    # 3. Filtragem
+    for p in CATALOGO_ATUAL.values():
+        # Filtro Texto
+        if query and (query not in str(p.cod_sankhya) and query not in p.descricao.upper()):
+            continue
+        # Filtro Tipo
+        if filtro_tipo and p.tipo != filtro_tipo:
+            continue
+        # Filtro Status
+        if filtro_status:
+            tem_conteudo = (
+                (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
+                (p.parametros and len(p.parametros) > 0)
+            )
+            if filtro_status == 'OK' and not tem_conteudo: continue
+            if filtro_status == 'PENDENTE' and tem_conteudo: continue
+
+        produtos_filtrados.append(p)
     
-    # Usa CATALOGO_POR_CODIGO importado do etl_processor
-    if not query: 
-        produtos = list(CATALOGO_POR_CODIGO.values())[:50]
+    # 4. Ordenação Dinâmica
+    reverse = (order == 'desc')
+    
+    if sort_by == 'cod':
+        produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
+    elif sort_by == 'status':
+        # Ordena quem tem config primeiro ou por último
+        def get_status_sort(p):
+            return (
+                (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
+                (p.parametros and len(p.parametros) > 0)
+            )
+        produtos_filtrados.sort(key=get_status_sort, reverse=reverse)
     else:
-        for p in CATALOGO_POR_CODIGO.values():
-            if query in str(p.cod_sankhya) or query in p.descricao.upper():
-                produtos.append(p)
-                if len(produtos) > 50: break
-                
-    return render_template('config.html', produtos=produtos, query=query)
+        # Padrão: Descrição
+        produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
+
+    # 5. Paginação
+    total_itens = len(produtos_filtrados)
+    total_paginas = math.ceil(total_itens / LIMIT)
+    page = max(1, min(page, total_paginas)) if total_paginas > 0 else 1
+    
+    start = (page - 1) * LIMIT
+    end = start + LIMIT
+    produtos_paginados = produtos_filtrados[start:end]
+
+    return render_template(
+        'config.html', 
+        produtos=produtos_paginados,
+        query=query,
+        filtro_tipo=filtro_tipo,
+        filtro_status=filtro_status,
+        pagina_atual=page,
+        total_paginas=total_paginas,
+        total_itens=total_itens,
+        sort_by=sort_by,
+        order=order
+    )
 
 @app.route('/salvar_config', methods=['POST'])
 @login_required

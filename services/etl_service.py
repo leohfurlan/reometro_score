@@ -356,3 +356,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
         'ultimo_update': datetime.now(),
         'total_registros_brutos': len(resultados_brutos)
     }
+
+def get_catalogo_codigo():
+    """Retorna a referência atualizada do catálogo de códigos."""
+    return _CATALOGO_CODIGO
