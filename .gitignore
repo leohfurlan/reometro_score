@@ -11,6 +11,10 @@ testes/
 planilhas/
 criar_admin.py
 obsoletos/
+config_massas.json
+de_para_massas.json
 *.json
 .gitignore
 *.pdf
+*.xlsx
+*.xls

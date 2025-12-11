@@ -6,38 +6,38 @@
         "baixa_tempo_total": 1500.0,
         "alta_Ts2": {
             "min": 49.0,
-            "max": 73.0,
             "alvo": 61.0,
-            "peso": 10
+            "max": 73.0,
+            "peso": 8
         },
         "alta_T90": {
             "min": 79.0,
-            "max": 124.0,
             "alvo": 101.5,
-            "peso": 10
+            "max": 124.0,
+            "peso": 6
         },
         "alta_Viscosidade": {
             "min": 56.0,
-            "max": 70.0,
             "alvo": 63.0,
+            "max": 70.0,
             "peso": 10
         },
         "baixa_Ts2": {
             "min": 540.0,
-            "max": 780.0,
             "alvo": 660.0,
-            "peso": 10
+            "max": 780.0,
+            "peso": 8
         },
         "baixa_T90": {
             "min": 1080.0,
-            "max": 1260.0,
             "alvo": 1170.0,
-            "peso": 10
+            "max": 1260.0,
+            "peso": 6
         },
         "baixa_Viscosidade": {
             "min": 56.0,
-            "max": 70.0,
             "alvo": 63.0,
+            "max": 70.0,
             "peso": 10
         }
     },

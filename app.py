@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from models.usuario import db, Usuario
+from cache_manager import CacheManager
 
 from datetime import datetime
 import math
@@ -48,16 +49,10 @@ def load_user(user_id):
 # ==========================================
 print("\n=== REOSCORE V13 (MODULARIZED) ===")
 
-# Inicializa as referências estáticas (Catálogos, Lotes, Configs)
 carregar_referencias_estaticas()
 
-# Cache em memória para exibição rápida
-CACHE_GLOBAL = {
-    'dados': [],            
-    'materiais': [],        
-    'ultimo_update': None,
-    'total_registros_brutos': 0
-}
+# SUBSTITUIÇÃO: Inicializa o gerenciador com TTL de 30 min e Max 500MB
+cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
 # ==========================================
 # 2. ROTAS DE AUTENTICAÇÃO
@@ -104,33 +99,42 @@ def criar_admin():
 @app.route('/atualizar_dados')
 @login_required
 def rota_atualizar():
-    """Rota disparada pelo botão manual para forçar o ETL."""
     try:
         resultado = processar_carga_dados()
         
         if resultado:
-            CACHE_GLOBAL.update(resultado)
-            flash(f"Dados atualizados com sucesso! {len(CACHE_GLOBAL['dados'])} registros carregados.", "success")
+            # USA O SET DO GERENCIADOR
+            cache_service.set(resultado)
+            
+            # Pega estatísticas para mostrar ao usuário (Opcional)
+            stats = cache_service.get_stats()
+            flash(f"Dados atualizados! {stats['registros']} registros. ({stats['tamanho_mb']} MB)", "success")
         else:
-            flash("Erro ao atualizar dados. Verifique a conexão com o Banco de Dados.", "danger")
+            flash("Erro ao atualizar dados.", "danger")
             
     except Exception as e:
-        flash(f"Erro crítico durante atualização: {str(e)}", "danger")
+        flash(f"Erro crítico: {str(e)}", "danger")
 
     return redirect(url_for('dashboard'))
 
 @app.route('/')
 @login_required
 def dashboard():
-    # Se cache vazio, força primeira carga
-    if CACHE_GLOBAL['ultimo_update'] is None:
-        print("--- Cache vazio. Iniciando carga automática... ---")
+    # Tenta pegar dados do cache
+    dados_cache = cache_service.get()
+
+    # Se cache vazio ou expirado, força carga
+    if dados_cache is None:
+        print("--- Cache expirado ou vazio. Iniciando carga... ---")
         resultado = processar_carga_dados()
         if resultado:
-            CACHE_GLOBAL.update(resultado)
-    
-    # Trabalha com cópia da lista para filtragem
-    ensaios_filtrados = list(CACHE_GLOBAL['dados'])
+            cache_service.set(resultado)
+            dados_cache = resultado # Usa o resultado fresco
+        else:
+            dados_cache = {'dados': [], 'materiais': [], 'ultimo_update': None} # Fallback vazio
+
+    # Trabalha com a lista vinda do cache seguro
+    ensaios_filtrados = list(dados_cache['dados'])
     total_geral = len(ensaios_filtrados)
     
     # --- FILTROS DE VIEW (Controller) ---
@@ -198,10 +202,10 @@ def dashboard():
         'ensaios': ensaios_paginados, 'kpi': kpi,
         'total_registros_filtrados': total_filtrado, 'total_geral': total_geral,
         'pagina_atual': page, 'total_paginas': total_paginas,
-        'materiais_filtro': CACHE_GLOBAL['materiais'],
+        'materiais_filtro': dados_cache['materiais'],
         'search_term': search, 'material_filter': f_mat, 'codigo_filter': f_cod, 'acao_filter': f_acao, 'tipo_ensaio_filter': f_tipo,
         'date_start': d_start, 'date_end': d_end, 'sort_by': sort_by, 'order': order,
-        'ultimo_update': CACHE_GLOBAL['ultimo_update']
+        'ultimo_update': dados_cache['ultimo_update']
     }
     
     if request.headers.get('HX-Request'): return render_template('tabela_dados.html', **context)
@@ -367,6 +371,7 @@ def salvar_config():
 @app.route('/api/grafico')
 @login_required
 def api_grafico():
+    dados_cache = cache_service.get()
     ids_str = request.args.get('ids', '')
     if not ids_str: return jsonify({})
 
@@ -378,7 +383,7 @@ def api_grafico():
     all_ids_to_fetch = []
     map_id_to_parent = {} 
 
-    for cached in CACHE_GLOBAL['dados']:
+    for cached in dados_cache['dados']:
         if cached.id_ensaio in selected_ids:
             for sub_id in cached.ids_agrupados:
                 all_ids_to_fetch.append(sub_id)
