@@ -12,14 +12,48 @@ import os
 from config import Config
 from services.config_manager import salvar_configuracao
 
-# --- NOVA IMPORTAÇÃO: SERVIÇO DE ETL ---
-# Importamos a variável _CATALOGO_CODIGO para que a tela de Config 
-# acesse os mesmos objetos que o ETL usa.
+# --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
     carregar_referencias_estaticas,
-    get_catalogo_codigo  # <--- Nova função importada
+    get_catalogo_codigo
 )
+
+# --- NOVA IMPORTAÇÃO: SHAREPOINT LOADER ---
+try:
+    from sharepoint_loader import baixar_excel_sharepoint
+except ImportError:
+    baixar_excel_sharepoint = None
+    print("⚠️ Aviso: 'sharepoint_loader.py' não encontrado. O download automático será desativado.")
+
+# Caminho local padrão para o cache baixado do SharePoint
+CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
+
+def preparar_planilha_sharepoint(forcar_download=False):
+    """
+    Garante que a planilha venha do SharePoint e define CAMINHO_REG403
+    apontando para o arquivo cacheado localmente.
+    """
+    if not baixar_excel_sharepoint:
+        return None
+
+    caminho_cache = os.path.abspath(CACHE_PLANILHA_SHAREPOINT)
+
+    # Se já temos um cache e não foi solicitado força de download, reutiliza.
+    if not forcar_download and os.path.exists(caminho_cache) and os.path.getsize(caminho_cache) > 0:
+        os.environ["CAMINHO_REG403"] = caminho_cache
+        return caminho_cache
+
+    try:
+        caminho_baixado = baixar_excel_sharepoint(nome_destino=CACHE_PLANILHA_SHAREPOINT)
+        if caminho_baixado:
+            caminho_abs = os.path.abspath(caminho_baixado)
+            os.environ["CAMINHO_REG403"] = caminho_abs
+            return caminho_abs
+    except Exception as e:
+        print(f"⚠️ Falha ao baixar planilha do SharePoint: {e}")
+
+    return None
 
 from connection import connect_to_database
 
@@ -49,9 +83,16 @@ def load_user(user_id):
 # ==========================================
 print("\n=== REOSCORE V13 (MODULARIZED) ===")
 
+# Certifica que o ETL vai usar somente a planilha baixada do SharePoint
+caminho_sharepoint_inicial = preparar_planilha_sharepoint(forcar_download=False)
+if caminho_sharepoint_inicial:
+    print(f"   > Planilha SharePoint configurada em: {caminho_sharepoint_inicial}")
+else:
+    print("⚠️ Aviso: Planilha do SharePoint não configurada. Use 'Atualizar Dados' para sincronizar.")
+
 carregar_referencias_estaticas()
 
-# SUBSTITUIÇÃO: Inicializa o gerenciador com TTL de 30 min e Max 500MB
+# Inicializa o gerenciador com TTL de 30 min e Max 500MB
 cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
 # ==========================================
@@ -100,19 +141,34 @@ def criar_admin():
 @login_required
 def rota_atualizar():
     try:
+        # --- PASSO 1: TENTATIVA DE DOWNLOAD VIA SHAREPOINT ---
+        if baixar_excel_sharepoint:
+            print("--- ☁️ Iniciando Sync com SharePoint ---")
+            caminho_baixado = preparar_planilha_sharepoint(forcar_download=True)
+            
+            if caminho_baixado:
+                flash("✅ Planilha baixada do SharePoint com sucesso!", "success")
+            else:
+                flash("⚠️ Falha no download do SharePoint (verifique logs). Usando cache anterior.", "warning")
+        else:
+            print("ℹ️ SharePoint Loader não disponível. Pulando download.")
+        # -----------------------------------------------------
+
+        # --- PASSO 2: EXECUÇÃO DO ETL (BANCO + PLANILHA) ---
         resultado = processar_carga_dados()
         
         if resultado:
-            # USA O SET DO GERENCIADOR
+            # Atualiza o cache na memória
             cache_service.set(resultado)
             
-            # Pega estatísticas para mostrar ao usuário (Opcional)
+            # Pega estatísticas para feedback
             stats = cache_service.get_stats()
-            flash(f"Dados atualizados! {stats['registros']} registros. ({stats['tamanho_mb']} MB)", "success")
+            flash(f"Dados processados! {stats['registros']} registros carregados. ({stats['tamanho_mb']} MB)", "info")
         else:
-            flash("Erro ao atualizar dados.", "danger")
+            flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
     except Exception as e:
+        print(f"❌ Erro Crítico na Rota Atualizar: {e}")
         flash(f"Erro crítico: {str(e)}", "danger")
 
     return redirect(url_for('dashboard'))
@@ -126,18 +182,20 @@ def dashboard():
     # Se cache vazio ou expirado, força carga
     if dados_cache is None:
         print("--- Cache expirado ou vazio. Iniciando carga... ---")
+        # Nota: Na carga automática ao abrir, não forçamos o download do SharePoint para ser mais rápido.
+        # O download ocorre apenas no botão "Atualizar Dados".
         resultado = processar_carga_dados()
         if resultado:
             cache_service.set(resultado)
-            dados_cache = resultado # Usa o resultado fresco
+            dados_cache = resultado 
         else:
-            dados_cache = {'dados': [], 'materiais': [], 'ultimo_update': None} # Fallback vazio
+            dados_cache = {'dados': [], 'materiais': [], 'ultimo_update': None} 
 
     # Trabalha com a lista vinda do cache seguro
     ensaios_filtrados = list(dados_cache['dados'])
     total_geral = len(ensaios_filtrados)
     
-    # --- FILTROS DE VIEW (Controller) ---
+    # --- FILTROS DE VIEW ---
     search = request.args.get('search', '').strip().upper()
     f_mat = request.args.get('material_filter', '')
     f_cod = request.args.get('codigo_filter', '').strip()
@@ -215,8 +273,6 @@ def dashboard():
 # 4. ROTAS DE CONFIGURAÇÃO (ADMIN)
 # ==========================================
 
-# No arquivo app.py
-
 @app.route('/config')
 @login_required
 def pagina_config():
@@ -224,28 +280,22 @@ def pagina_config():
         flash("Acesso negado. Apenas administradores podem alterar configurações.", "warning")
         return redirect(url_for('dashboard'))
     
-    # 1. Parâmetros da URL (Filtros, Paginação e Ordenação)
     query = request.args.get('q', '').strip().upper()
     filtro_tipo = request.args.get('tipo', '')
     filtro_status = request.args.get('status', '')
     page = request.args.get('page', 1, type=int)
-    sort_by = request.args.get('sort', 'descricao') # Padrão: por descrição
-    order = request.args.get('order', 'asc')        # Padrão: A-Z
+    sort_by = request.args.get('sort', 'descricao') 
+    order = request.args.get('order', 'asc')
     LIMIT = 20
 
-    # 2. Obtém catálogo
     CATALOGO_ATUAL = get_catalogo_codigo()
     produtos_filtrados = []
 
-    # 3. Filtragem
     for p in CATALOGO_ATUAL.values():
-        # Filtro Texto
         if query and (query not in str(p.cod_sankhya) and query not in p.descricao.upper()):
             continue
-        # Filtro Tipo
         if filtro_tipo and p.tipo != filtro_tipo:
             continue
-        # Filtro Status
         if filtro_status:
             tem_conteudo = (
                 (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
@@ -256,32 +306,25 @@ def pagina_config():
 
         produtos_filtrados.append(p)
     
-    # 4. Ordenação Dinâmica
     reverse = (order == 'desc')
     
     if sort_by == 'cod':
         produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
     elif sort_by == 'status':
-        # CORREÇÃO AQUI: Força o retorno a ser um booleano (True/False)
         def get_status_sort(p):
             tem_perfil = False
             if p.perfis:
-                # Verifica se existe e converte para bool
                 if p.perfis.get('alta') or p.perfis.get('baixa'):
                     tem_perfil = True
-            
             tem_param = False
             if p.parametros and len(p.parametros) > 0:
                 tem_param = True
-                
             return tem_perfil or tem_param
 
         produtos_filtrados.sort(key=get_status_sort, reverse=reverse)
     else:
-        # Padrão: Descrição
         produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
 
-    # 5. Paginação
     total_itens = len(produtos_filtrados)
     total_paginas = math.ceil(total_itens / LIMIT)
     page = max(1, min(page, total_paginas)) if total_paginas > 0 else 1
@@ -311,13 +354,11 @@ def salvar_config():
 
     cod = request.form.get('cod_sankhya')
     
-    # Funções auxiliares de conversão
     def f(val): return float(val.replace(',', '.')) if val and val.strip() else 0.0
     def i(val): return int(val) if val and val.strip() else 0
     
     specs = {}
     
-    # 1. Captura as Temperaturas Padrão e tempo alvo
     t_alta = request.form.get('alta_temp_padrao')
     t_baixa = request.form.get('baixa_temp_padrao')
     tempo_alta = request.form.get('alta_tempo_total')
@@ -328,7 +369,6 @@ def salvar_config():
     if tempo_alta and tempo_alta.strip(): specs['alta_tempo_total'] = f(tempo_alta)
     if tempo_baixa and tempo_baixa.strip(): specs['baixa_tempo_total'] = f(tempo_baixa)
 
-    # 2. Captura os Parâmetros Fixos
     perfis = ['alta', 'baixa']
     params = ['Ts2', 'T90', 'Viscosidade']
     
@@ -345,7 +385,6 @@ def salvar_config():
                     "min": f(min_v), "alvo": f(alvo_v), "max": f(max_v), "peso": i(peso_v)
                 }
 
-    # 3. Mantém compatibilidade Legacy
     novos_nomes = request.form.getlist('din_nome[]')
     novos_pesos = request.form.getlist('din_peso[]')
     novos_mins = request.form.getlist('din_min[]')
@@ -359,10 +398,7 @@ def salvar_config():
                 "max": f(novos_maxs[idx]), "peso": i(novos_pesos[idx])
             }
             
-    # Salva no arquivo JSON
     salvar_configuracao(cod, specs)
-    
-    # Recarrega as configurações na memória do ETL para aplicar imediatamente
     carregar_referencias_estaticas()
     
     flash(f"Configuração do produto {cod} salva e aplicada!", "success")
@@ -379,7 +415,6 @@ def api_grafico():
     if len(selected_ids) > 10:
         return jsonify({'error': 'Max 10 items.'}), 400
 
-    # 1. Expand IDs (Get Group Partners)
     all_ids_to_fetch = []
     map_id_to_parent = {} 
 
@@ -392,13 +427,11 @@ def api_grafico():
     if not all_ids_to_fetch:
         return jsonify({'error': 'Not found.'}), 404
 
-    # 2. Fetch Data + Temperature (JOIN)
     conn = connect_to_database()
     cursor = conn.cursor()
     
     placeholders = ','.join('?' * len(all_ids_to_fetch))
     
-    # We join with ENSAIO to get the temperature of that specific test run
     query = f'''
         SELECT V.COD_ENSAIO, V.TEMPO, V.TORQUE, E.TEMP_PLATO_INF
         FROM dbo.ENSAIO_VALORES V
@@ -413,7 +446,6 @@ def api_grafico():
     finally:
         conn.close()
 
-    # 3. Structure and Separate
     datasets_reo = {}
     datasets_visc = {}
     materiais = set()
@@ -426,21 +458,16 @@ def api_grafico():
         
         materiais.add(parent.massa.descricao)
         
-        # --- CLASSIFICATION BY TEMPERATURE ---
-        # Strictly apply the rule: 90-115C = Viscosity
         temp = float(c_temp) if c_temp else 0
         is_viscosity = (90 <= temp <= 115)
         
-        # Additional check: If the parent is explicitly VISCOSITY type, trust it
         if getattr(parent, 'tipo_ensaio', '') == 'VISCOSIDADE':
             is_viscosity = True
 
         target_dict = datasets_visc if is_viscosity else datasets_reo
         
         if c_id not in target_dict:
-            # Smart Label: "LOTE (ID)"
             label = f"{parent.lote} (ID: {c_id})"
-            
             target_dict[c_id] = {
                 'label': label,
                 'material': parent.massa.descricao,
@@ -459,7 +486,6 @@ def api_grafico():
         'viscosidade': list(datasets_visc.values()),
         'materiais': list(materiais)
     })
-
 
 if __name__ == '__main__':
     app.run(debug=True)
