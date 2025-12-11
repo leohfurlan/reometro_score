@@ -11,21 +11,24 @@ class Parametro:
 class Massa(Produto):
     def __init__(self, cod_sankhya, descricao):
         super().__init__(cod_sankhya, descricao, tipo="MASSA")
-        # Agora temos dois perfis de parâmetros
+        
+        # Estrutura expandida para suportar especificidades
         self.perfis = {
-            'alta': {},   # Para 185-195°C
-            'baixa': {}   # Para 128-170°C
+            'alta_cinza': {},  # Reômetro Cinza (Antigo Padrão)
+            'alta_preto': {},  # Reômetro Preto (Novo)
+            'baixa': {},       # Viscosidade (Geralmente único)
+            
+            # Mantemos 'alta' genérico para fallback/legacy se não tiver equip definido
+            'alta': {}         
         }
-        # Mantemos um 'padrão' vazio para compatibilidade, se necessário
+        
         self.parametros = {} 
 
     def adicionar_parametro(self, perfil_chave, nome, peso, alvo, minimo, maximo):
-        """
-        perfil_chave: 'alta' ou 'baixa'
-        """
         novo = Parametro(nome, peso, alvo, minimo, maximo)
-        if perfil_chave in self.perfis:
-            self.perfis[perfil_chave][nome] = novo
-        else:
-            # Fallback (comportamento antigo)
-            self.parametros[nome] = novo
+        
+        # Garante que a chave existe
+        if perfil_chave not in self.perfis:
+            self.perfis[perfil_chave] = {}
+            
+        self.perfis[perfil_chave][nome] = novo

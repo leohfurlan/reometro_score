@@ -274,39 +274,81 @@
                             <input type="hidden" name="cod_sankhya" value="{{ prod.cod_sankhya }}">
                             
                             <div class="card mb-3 border-danger border-opacity-25 shadow-sm">
-                                <div class="card-header bg-danger bg-opacity-10 text-danger fw-bold d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-fire me-2"></i>Alta Temperatura (Cura/Batch)</span>
-                                    {% set perfis_alta = prod.perfis.get('alta', {}) if prod.perfis else {} %}
-                                    <div class="d-flex gap-2 align-items-center">
-                                        <small class="text-dark fw-bold">Ref:</small>
-                                        <input type="number" step="1" name="alta_temp_padrao" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
-                                            style="width: 60px;" value="{{ perfis_alta.get('temp_padrao', '') }}">
-                                        <small class="text-dark fw-bold">Tempo:</small>
-                                        <input type="number" step="1" name="alta_tempo_total" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
-                                            style="width: 60px;" value="{{ perfis_alta.get('tempo_total', '') }}">
+                                <div class="card-header bg-danger bg-opacity-10 text-danger fw-bold">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span><i class="fas fa-fire me-2"></i>Alta Temperatura (Cura/Batch)</span>
+                                        <span class="badge bg-white text-danger border border-danger">Pesos Compartilhados</span>
+                                    </div>
+                                    
+                                    <div class="row g-2 align-items-center text-dark small">
+                                        <div class="col-6 border-end border-danger border-opacity-25 pe-2">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="fw-bold text-secondary"><i class="fas fa-robot me-1"></i>CINZA</span>
+                                                <div class="d-flex gap-1">
+                                                    <input type="number" step="1" name="alta_cinza_temp_padrao" class="form-control form-control-sm text-center p-0" 
+                                                        style="width: 40px;" placeholder="°C" value="{{ prod.perfis.get('alta_cinza', {}).get('temp_padrao', '') }}">
+                                                    <input type="number" step="1" name="alta_cinza_tempo_total" class="form-control form-control-sm text-center p-0" 
+                                                        style="width: 40px;" placeholder="s" value="{{ prod.perfis.get('alta_cinza', {}).get('tempo_total', '') }}">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6 ps-2">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="fw-bold text-dark"><i class="fas fa-robot me-1"></i>PRETO</span>
+                                                <div class="d-flex gap-1">
+                                                    <input type="number" step="1" name="alta_preto_temp_padrao" class="form-control form-control-sm text-center p-0" 
+                                                        style="width: 40px;" placeholder="°C" value="{{ prod.perfis.get('alta_preto', {}).get('temp_padrao', '') }}">
+                                                    <input type="number" step="1" name="alta_preto_tempo_total" class="form-control form-control-sm text-center p-0" 
+                                                        style="width: 40px;" placeholder="s" value="{{ prod.perfis.get('alta_preto', {}).get('tempo_total', '') }}">
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
+
                                 <div class="card-body p-2">
-                                    <div class="row g-1 fw-bold text-muted x-small text-center mb-1">
-                                        <div class="col-3 text-start ps-3">Parâmetro</div>
-                                        <div class="col-2">Mín</div>
-                                        <div class="col-2">Alvo</div>
-                                        <div class="col-2">Máx</div>
-                                        <div class="col-3">Peso (0-10)</div>
+                                    <div class="row g-0 fw-bold text-muted x-small text-center mb-1 border-bottom pb-1">
+                                        <div class="col-2 text-start ps-1">Parâmetro</div>
+                                        <div class="col-4 bg-secondary bg-opacity-10 rounded-start"><span class="text-secondary">CINZA (Min/Alvo/Max)</span></div>
+                                        <div class="col-2 border-start border-end">Peso</div>
+                                        <div class="col-4 bg-dark bg-opacity-10 rounded-end"><span class="text-dark">PRETO (Min/Alvo/Max)</span></div>
                                     </div>
+
+                                    {% set p_cinza = prod.perfis.get('alta_cinza', {}) %}
+                                    {% set p_preto = prod.perfis.get('alta_preto', {}) %}
+                                    
+                                    {% if not p_cinza and prod.perfis.get('alta') %}
+                                        {% set p_cinza = prod.perfis.get('alta') %}
+                                    {% endif %}
+
                                     {% for param in ['Ts2', 'T90', 'Viscosidade'] %}
-                                    {% set p_val = perfis_alta.get(param) %}
-                                    <div class="row g-1 mb-2 align-items-center">
-                                        <div class="col-3 ps-3 fw-bold text-secondary">{{ param }}</div>
-                                        <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="alta_{{ param }}_min" value="{{ p_val.minimo if p_val else '' }}"></div>
-                                        <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center bg-warning bg-opacity-10 fw-bold" name="alta_{{ param }}_alvo" value="{{ p_val.alvo if p_val else '' }}"></div>
-                                        <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="alta_{{ param }}_max" value="{{ p_val.maximo if p_val else '' }}"></div>
-                                        <div class="col-3"><input type="number" min="0" max="10" class="form-control form-control-sm text-center text-primary fw-bold" name="alta_{{ param }}_peso" value="{{ p_val.peso if p_val else 10 }}"></div>
-                                    </div>
+                                        {% set val_c = p_cinza.get(param) %}
+                                        {% set val_p = p_preto.get(param) %}
+                                        {% set peso_atual = val_c.peso if val_c else (val_p.peso if val_p else 10) %}
+
+                                        <div class="row g-0 mb-2 align-items-center border-bottom pb-1">
+                                            <div class="col-2 fw-bold text-secondary ps-1 small">{{ param }}</div>
+                                            
+                                            <div class="col-4 d-flex gap-1 px-1 bg-secondary bg-opacity-10 py-1">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0" name="alta_cinza_{{ param }}_min" value="{{ val_c.minimo if val_c else '' }}" placeholder="Min">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0 fw-bold" name="alta_cinza_{{ param }}_alvo" value="{{ val_c.alvo if val_c else '' }}" placeholder="Alvo">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0" name="alta_cinza_{{ param }}_max" value="{{ val_c.maximo if val_c else '' }}" placeholder="Max">
+                                            </div>
+
+                                            <div class="col-2 px-1 text-center">
+                                                <input type="number" min="0" max="10" class="form-control form-control-sm text-center text-primary fw-bold" name="alta_{{ param }}_peso" value="{{ peso_atual }}">
+                                            </div>
+
+                                            <div class="col-4 d-flex gap-1 px-1 bg-dark bg-opacity-10 py-1">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0" name="alta_preto_{{ param }}_min" value="{{ val_p.minimo if val_p else '' }}" placeholder="Min">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0 fw-bold" name="alta_preto_{{ param }}_alvo" value="{{ val_p.alvo if val_p else '' }}" placeholder="Alvo">
+                                                <input type="number" step="0.01" class="form-control form-control-sm text-center p-0" name="alta_preto_{{ param }}_max" value="{{ val_p.maximo if val_p else '' }}" placeholder="Max">
+                                            </div>
+                                        </div>
                                     {% endfor %}
                                 </div>
                             </div>
-
+                            
                             <div class="card mb-3 border-primary border-opacity-25 shadow-sm">
                                 <div class="card-header bg-primary bg-opacity-10 text-primary fw-bold d-flex justify-content-between">
                                     <span><i class="fas fa-snowflake me-2"></i>Baixa Temperatura (Mistura)</span>

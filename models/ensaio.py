@@ -43,32 +43,46 @@ class Ensaio:
 
     def identificar_perfil(self):
         """
-        Seleciona o perfil de parâmetros com base na temperatura medida.
-        Retorna o dicionário bruto (pode conter temp_padrao) e o nome do perfil escolhido.
+        Seleciona o perfil de parâmetros com base na temperatura e no EQUIPAMENTO.
         """
         temp = self.temp_plato or 0
-
-        # Se não houver perfis, mantém compatibilidade com o comportamento antigo
-        if not hasattr(self.massa, 'perfis'):
-            return self.massa.parametros or {}, "Padrão (Legacy)"
-
-        perfil_escolhido = None
+        
+        # 1. Determina se é Alta ou Baixa pela temperatura
+        tipo_base = None
         if temp >= 175:
-            perfil_escolhido = 'alta'
+            tipo_base = 'alta'
         elif 120 <= temp < 175:
-            perfil_escolhido = 'baixa'
+            tipo_base = 'baixa'
+        else:
+            # Fallback para viscosidade ou baixa temperatura
+            tipo_base = 'baixa' if temp < 120 else 'alta'
 
-        if perfil_escolhido and self.massa.perfis.get(perfil_escolhido):
-            nome = "Alta Temperatura" if perfil_escolhido == 'alta' else "Baixa Temperatura"
-            return self.massa.perfis[perfil_escolhido], nome
+        # 2. Se for ALTA, refina pelo Equipamento (Cinza vs Preto)
+        if tipo_base == 'alta':
+            equip = self.equipamento_planilha # 'CINZA', 'PRETO' ou None
+            
+            if equip == 'PRETO':
+                if self.massa.perfis.get('alta_preto'):
+                    return self.massa.perfis['alta_preto'], "Alta (Preto)"
+            
+            elif equip == 'CINZA':
+                if self.massa.perfis.get('alta_cinza'):
+                    return self.massa.perfis['alta_cinza'], "Alta (Cinza)"
+            
+            # Fallback se não tiver equipamento definido ou perfil específico vazio
+            # Tenta pegar Cinza como padrão, depois Preto, depois Genérico
+            if self.massa.perfis.get('alta_cinza'):
+                return self.massa.perfis['alta_cinza'], "Alta (Padrão/Cinza)"
+            if self.massa.perfis.get('alta_preto'):
+                return self.massa.perfis['alta_preto'], "Alta (Padrão/Preto)"
+            if self.massa.perfis.get('alta'):
+                return self.massa.perfis['alta'], "Alta (Legacy)"
 
-        # Fallback: usa primeiro perfil configurado ou o legado genérico
-        for chave, dados in self.massa.perfis.items():
-            if dados:
-                nome = "Alta Temperatura" if chave == 'alta' else "Baixa Temperatura"
-                return dados, nome
+        # 3. Se for BAIXA, retorna perfil de baixa
+        if self.massa.perfis.get('baixa'):
+            return self.massa.perfis['baixa'], "Baixa Temperatura"
 
-        return self.massa.parametros or {}, "Indefinido (Fallback)"
+        return self.massa.parametros or {}, "Indefinido"
 
     def calcular_score(self):
         soma_pesos = 0

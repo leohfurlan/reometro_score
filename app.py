@@ -362,6 +362,8 @@ def salvar_regras():
     salvar_regras_acao(novas_regras)
     flash("Regras de ação globais atualizadas!", "success")
     return redirect(url_for('pagina_config'))
+
+
 @app.route('/salvar_config', methods=['POST'])
 @login_required
 def salvar_config():
@@ -370,54 +372,102 @@ def salvar_config():
 
     cod = request.form.get('cod_sankhya')
     
-    def f(val): return float(val.replace(',', '.')) if val and val.strip() else 0.0
+    def f(val): return float(val.replace(',', '.')) if val and val.strip() else None
     def i(val): return int(val) if val and val.strip() else 0
     
     specs = {}
     
-    t_alta = request.form.get('alta_temp_padrao')
-    t_baixa = request.form.get('baixa_temp_padrao')
-    tempo_alta = request.form.get('alta_tempo_total')
-    tempo_baixa = request.form.get('baixa_tempo_total')
+    # --- 1. CAPTURA DE CABEÇALHO (TEMP/TEMPO) ---
+    # Captura Cinza
+    t_cinza = f(request.form.get('alta_cinza_temp_padrao'))
+    tempo_cinza = f(request.form.get('alta_cinza_tempo_total'))
     
-    if t_alta and t_alta.strip(): specs['alta_temp_padrao'] = f(t_alta)
-    if t_baixa and t_baixa.strip(): specs['baixa_temp_padrao'] = f(t_baixa)
-    if tempo_alta and tempo_alta.strip(): specs['alta_tempo_total'] = f(tempo_alta)
-    if tempo_baixa and tempo_baixa.strip(): specs['baixa_tempo_total'] = f(tempo_baixa)
+    # Captura Preto
+    t_preto = f(request.form.get('alta_preto_temp_padrao'))
+    tempo_preto = f(request.form.get('alta_preto_tempo_total'))
+    
+    # REGRA DE CÓPIA (Cabeçalho)
+    # Se Cinza tem e Preto não -> Preto recebe Cinza
+    if t_cinza and not t_preto: t_preto = t_cinza
+    if tempo_cinza and not tempo_preto: tempo_preto = tempo_cinza
+    
+    # Se Preto tem e Cinza não -> Cinza recebe Preto (vice-versa)
+    if t_preto and not t_cinza: t_cinza = t_preto
+    if tempo_preto and not tempo_cinza: tempo_cinza = tempo_preto
 
-    perfis = ['alta', 'baixa']
+    # Salva Alta
+    if t_cinza: specs['alta_cinza_temp_padrao'] = t_cinza
+    if tempo_cinza: specs['alta_cinza_tempo_total'] = tempo_cinza
+    if t_preto: specs['alta_preto_temp_padrao'] = t_preto
+    if tempo_preto: specs['alta_preto_tempo_total'] = tempo_preto
+
+    # Salva Baixa (Simples)
+    t_baixa = f(request.form.get('baixa_temp_padrao'))
+    tempo_baixa = f(request.form.get('baixa_tempo_total'))
+    if t_baixa: specs['baixa_temp_padrao'] = t_baixa
+    if tempo_baixa: specs['baixa_tempo_total'] = tempo_baixa
+
+    # --- 2. CAPTURA DE PARÂMETROS (LIMITES) ---
     params = ['Ts2', 'T90', 'Viscosidade']
     
-    for perfil in perfis:
-        for p in params:
-            prefix = f"{perfil}_{p}"
-            min_v = request.form.get(f"{prefix}_min")
-            alvo_v = request.form.get(f"{prefix}_alvo")
-            max_v = request.form.get(f"{prefix}_max")
-            peso_v = request.form.get(f"{prefix}_peso")
+    for p in params:
+        # Peso é compartilhado (vem de um input só)
+        peso_v = i(request.form.get(f"alta_{p}_peso"))
+        
+        # --- LÓGICA ALTA (CINZA vs PRETO) ---
+        # Leitura Cinza
+        min_c = f(request.form.get(f"alta_cinza_{p}_min"))
+        alvo_c = f(request.form.get(f"alta_cinza_{p}_alvo"))
+        max_c = f(request.form.get(f"alta_cinza_{p}_max"))
+        
+        # Leitura Preto
+        min_p = f(request.form.get(f"alta_preto_{p}_min"))
+        alvo_p = f(request.form.get(f"alta_preto_{p}_alvo"))
+        max_p = f(request.form.get(f"alta_preto_{p}_max"))
+        
+        # REGRA DE CÓPIA (Limites)
+        # Se configurou Cinza mas esqueceu Preto -> Copia
+        if (min_c or alvo_c or max_c) and not (min_p or alvo_p or max_p):
+            min_p, alvo_p, max_p = min_c, alvo_c, max_c
             
-            if min_v or alvo_v or max_v:
-                specs[prefix] = {
-                    "min": f(min_v), "alvo": f(alvo_v), "max": f(max_v), "peso": i(peso_v)
-                }
+        # Se configurou Preto mas esqueceu Cinza -> Copia
+        elif (min_p or alvo_p or max_p) and not (min_c or alvo_c or max_c):
+            min_c, alvo_c, max_c = min_p, alvo_p, max_p
 
-    novos_nomes = request.form.getlist('din_nome[]')
-    novos_pesos = request.form.getlist('din_peso[]')
-    novos_mins = request.form.getlist('din_min[]')
-    novos_alvos = request.form.getlist('din_alvo[]')
-    novos_maxs = request.form.getlist('din_max[]')
-    
-    for idx, nome in enumerate(novos_nomes):
-        if nome.strip():
-            specs[nome] = {
-                "min": f(novos_mins[idx]), "alvo": f(novos_alvos[idx]),
-                "max": f(novos_maxs[idx]), "peso": i(novos_pesos[idx])
+        # Gravação Cinza
+        if min_c is not None or alvo_c is not None or max_c is not None:
+            specs[f"alta_cinza_{p}"] = {
+                "min": min_c if min_c is not None else 0, 
+                "alvo": alvo_c if alvo_c is not None else 0, 
+                "max": max_c if max_c is not None else 0, 
+                "peso": peso_v
             }
             
+        # Gravação Preto
+        if min_p is not None or alvo_p is not None or max_p is not None:
+            specs[f"alta_preto_{p}"] = {
+                "min": min_p if min_p is not None else 0, 
+                "alvo": alvo_p if alvo_p is not None else 0, 
+                "max": max_p if max_p is not None else 0, 
+                "peso": peso_v
+            }
+
+        # --- LÓGICA BAIXA (Mantida Simples) ---
+        min_b = f(request.form.get(f"baixa_{p}_min"))
+        alvo_b = f(request.form.get(f"baixa_{p}_alvo"))
+        max_b = f(request.form.get(f"baixa_{p}_max"))
+        peso_b = i(request.form.get(f"baixa_{p}_peso"))
+        
+        if min_b is not None or alvo_b is not None or max_b is not None:
+            specs[f"baixa_{p}"] = {
+                "min": min_b if min_b is not None else 0, "alvo": alvo_b if alvo_b is not None else 0,
+                "max": max_b if max_b is not None else 0, "peso": peso_b
+            }
+
     salvar_configuracao(cod, specs)
     carregar_referencias_estaticas()
     
-    flash(f"Configuração do produto {cod} salva e aplicada!", "success")
+    flash(f"Configuração do produto {cod} salva (Sincronizada Cinza/Preto)!", "success")
     return redirect(url_for('pagina_config', q=cod))
 
 @app.route('/api/grafico')

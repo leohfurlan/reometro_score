@@ -38,29 +38,30 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
             produto = catalogo_objetos[cod_int]
             
             # Limpa configurações anteriores
-            if hasattr(produto, 'perfis'):
-                produto.perfis = {'alta': {}, 'baixa': {}}
-            if hasattr(produto, 'parametros'):
-                produto.parametros = {} 
+            produto.perfis = {'alta_cinza': {}, 'alta_preto': {}, 'baixa': {}, 'alta': {}}
+            produto.parametros = {} 
                 
             for chave_param, valores in specs.items():
                 
-                # Detecta se pertence a um perfil (alta_ ou baixa_)
-                perfil = 'alta' if chave_param.startswith('alta_') else 'baixa' if chave_param.startswith('baixa_') else None
+                # --- DETECÇÃO DE PERFIL ATUALIZADA ---
+                perfil = None
+                
+                # Prioridade para os específicos
+                if chave_param.startswith('alta_cinza_'): perfil = 'alta_cinza'
+                elif chave_param.startswith('alta_preto_'): perfil = 'alta_preto'
+                elif chave_param.startswith('alta_'): perfil = 'alta' # Legacy
+                elif chave_param.startswith('baixa_'): perfil = 'baixa'
                 
                 if perfil:
-                    # Remove o prefixo para obter o nome real (ex: "alta_Ts2" -> "Ts2")
+                    # Remove o prefixo para obter o nome real (ex: "alta_cinza_Ts2" -> "Ts2")
                     nome_real = chave_param.replace(f"{perfil}_", "")
                     
-                    # Caso Especial: É a temperatura padrão do perfil (valor float)
-                    if nome_real == "temp_padrao":
-                        produto.perfis[perfil]['temp_padrao'] = valores
-                        continue
-                    if nome_real == "tempo_total":
-                        produto.perfis[perfil]['tempo_total'] = valores
+                    # Caso Especial: Temperatura/Tempo Padrão
+                    if nome_real in ["temp_padrao", "tempo_total"]:
+                        produto.perfis[perfil][nome_real] = valores
                         continue
 
-                    # Caso Padrão: É um objeto Parametro (dict)
+                    # Caso Padrão: Objeto Parametro
                     if isinstance(valores, dict):
                         produto.adicionar_parametro(
                             perfil_chave=perfil,
@@ -70,17 +71,13 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
                             minimo=valores.get('min', 0),
                             maximo=valores.get('max', 0)
                         )
-                else:
-                    # Compatibilidade Legacy (sem prefixo vai para 'parametros' genérico)
-                    if isinstance(valores, dict) and hasattr(produto, 'parametros'):
-                        produto.parametros[chave_param] = Parametro(
-                            nome=chave_param,
-                            peso=valores.get('peso', 10),
-                            alvo=valores.get('alvo', 0),
-                            minimo=valores.get('min', 0),
-                            maximo=valores.get('max', 0)
-                        )
             
+            # Fallback Inteligente: Se tiver 'alta' (legacy) mas não 'alta_cinza', copia
+            if produto.perfis.get('alta') and not produto.perfis.get('alta_cinza'):
+                produto.perfis['alta_cinza'] = produto.perfis['alta'].copy()
+            if produto.perfis.get('alta') and not produto.perfis.get('alta_preto'):
+                produto.perfis['alta_preto'] = produto.perfis['alta'].copy()
+
             count += 1
     
     print(f"✅ Configurações aplicadas em {count} produtos.")
