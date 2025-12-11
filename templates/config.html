@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Configuracao de Massas - ReoScore{% endblock %}
+{% block title %}Configurações do Sistema - ReoScore{% endblock %}
 
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-cogs me-2"></i>Configuracoes de Massas</h2>
-        <p class="text-muted small">Defina os parametros de qualidade e pesos para calculo do Score.</p>
+        <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-cogs me-2"></i>Painel de Configurações</h2>
+        <p class="text-muted small">Gerencie especificações de materiais e regras globais de decisão.</p>
     </div>
     
     <a href="{{ url_for('dashboard') }}" class="btn btn-success shadow-sm">
@@ -15,170 +15,243 @@
     </a>
 </div>
 
-<div class="card p-4 mb-4 shadow-sm border-0">
-    <form method="GET" action="/config">
-        <input type="hidden" name="sort" value="{{ sort_by }}">
-        <input type="hidden" name="order" value="{{ order }}">
-        
-        <div class="row g-3">
-            <div class="col-md-5">
-                <label class="form-label small fw-bold text-muted">Buscar Produto</label>
-                <div class="input-group">
-                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" class="form-control border-start-0 ps-0" placeholder="Nome ou Código..." value="{{ query }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label small fw-bold text-muted">Tipo de Material</label>
-                <select name="tipo" class="form-select" onchange="this.form.submit()">
-                    <option value="">Todos</option>
-                    <option value="MASSA" {% if filtro_tipo == 'MASSA' %}selected{% endif %}>Massas</option>
-                    <option value="MATERIA_PRIMA" {% if filtro_tipo == 'MATERIA_PRIMA' %}selected{% endif %}>Matérias Primas</option>
-                    <option value="DISSOLUCAO" {% if filtro_tipo == 'DISSOLUCAO' %}selected{% endif %}>Dissoluções</option>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label small fw-bold text-muted">Status Configuração</label>
-                <select name="status" class="form-select" onchange="this.form.submit()">
-                    <option value="">Todos</option>
-                    <option value="OK" {% if filtro_status == 'OK' %}selected{% endif %}>✅ Configurados</option>
-                    <option value="PENDENTE" {% if filtro_status == 'PENDENTE' %}selected{% endif %}>⚠️ Pendentes (Sem Specs)</option>
-                </select>
-            </div>
-            <div class="col-md-1 d-flex align-items-end">
-                <button class="btn btn-primary w-100 fw-bold" type="submit"><i class="fas fa-filter"></i></button>
-            </div>
-        </div>
-        {% if query or filtro_tipo or filtro_status %}
-        <div class="mt-2 text-end">
-            <a href="{{ url_for('pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
-        </div>
-        {% endif %}
-    </form>
-</div>
+<ul class="nav nav-tabs mb-4" id="configTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active fw-bold" id="materiais-tab" data-bs-toggle="tab" data-bs-target="#materiais" type="button" role="tab">
+            <i class="fas fa-flask me-2"></i>Materiais (Specs)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="regras-tab" data-bs-toggle="tab" data-bs-target="#regras" type="button" role="tab">
+            <i class="fas fa-gavel me-2"></i>Regras de Ação (Globais)
+        </button>
+    </li>
+</ul>
 
-<div class="table-responsive shadow-sm border rounded bg-white">
-    <table class="table table-striped table-hover align-middle text-nowrap mb-0">
-        <thead class="bg-light sticky-top">
-            <tr>
-                {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status} %}
+<div class="tab-content" id="configTabsContent">
+    
+    <div class="tab-pane fade show active" id="materiais" role="tabpanel">
+        <div class="card p-4 mb-4 shadow-sm border-0">
+            <form method="GET" action="/config">
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="order" value="{{ order }}">
                 
-                <th class="resizable-col" style="width: 80px;">
-                    <a href="{{ url_for('pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
-                        Cód. <i class="fas fa-sort small ms-1"></i>
-                    </a>
-                </th>
-                
-                <th class="resizable-col">
-                    <a href="{{ url_for('pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
-                        Descrição do Material <i class="fas fa-sort small ms-1"></i>
-                    </a>
-                </th>
-                
-                <th class="resizable-col">Perfis Ativos</th>
-                
-                <th class="resizable-col">
-                    <a href="{{ url_for('pagina_config', sort='status', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
-                        Status <i class="fas fa-sort small ms-1"></i>
-                    </a>
-                </th>
-                
-                <th class="text-end pe-4">Ação</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for prod in produtos %}
-            <tr>
-                <td class="fw-bold text-muted text-center">{{ prod.cod_sankhya }}</td>
-                
-                <td>
-                    <div class="fw-bold truncate-responsive" title="{{ prod.descricao }}" style="max-width: 450px;">
-                        {{ prod.descricao }}
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label small fw-bold text-muted">Buscar Produto</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" name="q" class="form-control border-start-0 ps-0" placeholder="Nome ou Código..." value="{{ query }}">
+                        </div>
                     </div>
-                    {% if prod.tipo != 'MASSA' %}
-                        <div class="text-muted small" style="font-size: 0.75em;">Tipo: {{ prod.tipo }}</div>
-                    {% endif %}
-                </td>
-                
-                <td>
-                    {% if prod.perfis is defined %}
-                        {% if prod.perfis.get('alta') %}<span class="badge bg-danger bg-opacity-10 text-danger border border-danger me-1">Alta</span>{% endif %}
-                        {% if prod.perfis.get('baixa') %}<span class="badge bg-primary bg-opacity-10 text-primary border border-primary">Baixa</span>{% endif %}
-                        {% if not prod.perfis.get('alta') and not prod.perfis.get('baixa') %}<span class="text-muted small">-</span>{% endif %}
-                    {% else %}
-                        <span class="text-muted small">-</span>
-                    {% endif %}
-                </td>
-                
-                <td>
-                    {% set tem_alta = prod.perfis and prod.perfis.get('alta') %}
-                    {% set tem_baixa = prod.perfis and prod.perfis.get('baixa') %}
-                    {% set tem_params = prod.parametros and prod.parametros|length > 0 %}
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Tipo de Material</label>
+                        <select name="tipo" class="form-select" onchange="this.form.submit()">
+                            <option value="">Todos</option>
+                            <option value="MASSA" {% if filtro_tipo == 'MASSA' %}selected{% endif %}>Massas</option>
+                            <option value="MATERIA_PRIMA" {% if filtro_tipo == 'MATERIA_PRIMA' %}selected{% endif %}>Matérias Primas</option>
+                            <option value="DISSOLUCAO" {% if filtro_tipo == 'DISSOLUCAO' %}selected{% endif %}>Dissoluções</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Status Configuração</label>
+                        <select name="status" class="form-select" onchange="this.form.submit()">
+                            <option value="">Todos</option>
+                            <option value="OK" {% if filtro_status == 'OK' %}selected{% endif %}>✅ Configurados</option>
+                            <option value="PENDENTE" {% if filtro_status == 'PENDENTE' %}selected{% endif %}>⚠️ Pendentes (Sem Specs)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1 d-flex align-items-end">
+                        <button class="btn btn-primary w-100 fw-bold" type="submit"><i class="fas fa-filter"></i></button>
+                    </div>
+                </div>
+                {% if query or filtro_tipo or filtro_status %}
+                <div class="mt-2 text-end">
+                    <a href="{{ url_for('pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
+                </div>
+                {% endif %}
+            </form>
+        </div>
 
-                    {% if tem_alta or tem_baixa or tem_params %}
-                        <span class="badge bg-success text-white"><i class="fas fa-check me-1"></i> Configurado</span>
-                    {% else %}
-                        <span class="badge bg-light text-secondary border">Pendente</span>
+        <div class="table-responsive shadow-sm border rounded bg-white">
+            <table class="table table-striped table-hover align-middle text-nowrap mb-0">
+                <thead class="bg-light sticky-top">
+                    <tr>
+                        {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status} %}
+                        <th class="resizable-col" style="width: 80px;">
+                            <a href="{{ url_for('pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                                Cód. <i class="fas fa-sort small ms-1"></i>
+                            </a>
+                        </th>
+                        <th class="resizable-col">
+                            <a href="{{ url_for('pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                                Descrição do Material <i class="fas fa-sort small ms-1"></i>
+                            </a>
+                        </th>
+                        <th class="resizable-col">Perfis Ativos</th>
+                        <th class="resizable-col">Status</th>
+                        <th class="text-end pe-4">Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for prod in produtos %}
+                    <tr>
+                        <td class="fw-bold text-muted text-center">{{ prod.cod_sankhya }}</td>
+                        <td>
+                            <div class="fw-bold truncate-responsive" title="{{ prod.descricao }}" style="max-width: 450px;">
+                                {{ prod.descricao }}
+                            </div>
+                            {% if prod.tipo != 'MASSA' %}
+                                <div class="text-muted small" style="font-size: 0.75em;">Tipo: {{ prod.tipo }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if prod.perfis is defined %}
+                                {% if prod.perfis.get('alta') %}<span class="badge bg-danger bg-opacity-10 text-danger border border-danger me-1">Alta</span>{% endif %}
+                                {% if prod.perfis.get('baixa') %}<span class="badge bg-primary bg-opacity-10 text-primary border border-primary">Baixa</span>{% endif %}
+                                {% if not prod.perfis.get('alta') and not prod.perfis.get('baixa') %}<span class="text-muted small">-</span>{% endif %}
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set tem_alta = prod.perfis and prod.perfis.get('alta') %}
+                            {% set tem_baixa = prod.perfis and prod.perfis.get('baixa') %}
+                            {% set tem_params = prod.parametros and prod.parametros|length > 0 %}
+
+                            {% if tem_alta or tem_baixa or tem_params %}
+                                <span class="badge bg-success text-white"><i class="fas fa-check me-1"></i> Configurado</span>
+                            {% else %}
+                                <span class="badge bg-light text-secondary border">Pendente</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-3">
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
+                                <i class="fas fa-edit me-1"></i> Editar
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if produtos|length == 0 %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted bg-white">
+                            <i class="fas fa-search fa-2x mb-3 opacity-25"></i><br>
+                            Nenhum produto encontrado.
+                        </td>
+                    </tr>
                     {% endif %}
-                </td>
-                
-                <td class="text-end pe-3">
-                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
-                        <i class="fas fa-edit me-1"></i> Editar
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
-            
-            {% if produtos|length == 0 %}
-            <tr>
-                <td colspan="5" class="text-center py-5 text-muted bg-white">
-                    <i class="fas fa-search fa-2x mb-3 opacity-25"></i><br>
-                    Nenhum produto encontrado com os filtros atuais.
-                </td>
-            </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination-container d-flex justify-content-between align-items-center bg-white border border-top-0 rounded-bottom p-2 mb-5">
+            <div class="small text-muted ms-2">Total: <strong>{{ total_itens }}</strong> registros</div>
+            {% if total_paginas > 1 %}
+            <nav>
+                <ul class="pagination pagination-sm mb-0 align-items-center">
+                    {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status, 'sort': sort_by, 'order': order} %}
+                    <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
+                        <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual-1, **args) }}"><i class="fas fa-angle-left"></i></a>
+                    </li>
+                    <li class="page-item d-flex align-items-center mx-2">
+                        <span class="small text-muted me-2">Pág.</span>
+                        <form action="/config" method="GET" style="display:inline;">
+                            {% for k, v in args.items() if k != 'page' %}
+                                <input type="hidden" name="{{ k }}" value="{{ v }}">
+                            {% endfor %}
+                            <input type="number" name="page" class="form-control form-control-sm page-input text-center" 
+                                value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" style="width: 50px;" onchange="this.form.submit()">
+                        </form>
+                        <span class="small text-muted ms-2">de {{ total_paginas }}</span>
+                    </li>
+                    <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
+                        <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual+1, **args) }}"><i class="fas fa-angle-right"></i></a>
+                    </li>
+                </ul>
+            </nav>
             {% endif %}
-        </tbody>
-    </table>
-</div>
-
-<div class="pagination-container d-flex justify-content-between align-items-center bg-white border border-top-0 rounded-bottom p-2 mb-5">
-    <div class="small text-muted ms-2">
-        Total: <strong>{{ total_itens }}</strong> registros
+        </div>
     </div>
 
-    {% if total_paginas > 1 %}
-    <nav>
-        <ul class="pagination pagination-sm mb-0 align-items-center">
-            {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status, 'sort': sort_by, 'order': order} %}
-            
-            <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
-                <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual-1, **args) }}">
-                    <i class="fas fa-angle-left"></i>
-                </a>
-            </li>
+    <div class="tab-pane fade" id="regras" role="tabpanel">
+        <div class="alert alert-info d-flex align-items-center small shadow-sm border-0 bg-info bg-opacity-10 text-info-emphasis">
+            <i class="fas fa-info-circle fa-2x me-3 opacity-50"></i>
+            <div>
+                <strong>Como funciona:</strong> O sistema avalia as regras de cima para baixo (do maior Score para o menor). 
+                A primeira regra que atender aos requisitos (Score mínimo atingido E condição de viscosidade) será aplicada.
+            </div>
+        </div>
 
-            <li class="page-item d-flex align-items-center mx-2">
-                <span class="small text-muted me-2">Pág.</span>
-                <form action="/config" method="GET" style="display:inline;">
-                    {% for k, v in args.items() if k != 'page' %}
-                        <input type="hidden" name="{{ k }}" value="{{ v }}">
-                    {% endfor %}
-                    <input type="number" name="page" class="form-control form-control-sm page-input text-center" 
-                           value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" 
-                           style="width: 50px;" onchange="this.form.submit()">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-0">
+                <form id="formRegras" method="POST" action="{{ url_for('salvar_regras') }}">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light text-secondary small text-uppercase">
+                                <tr>
+                                    <th style="width: 50px;" class="text-center">#</th>
+                                    <th style="width: 25%;">Nome da Regra</th>
+                                    <th style="width: 15%;" class="text-center">Score Mínimo (%)</th>
+                                    <th style="width: 15%;" class="text-center">Exige Visc. Real?</th>
+                                    <th style="width: 25%;">Texto da Ação (Resultado)</th>
+                                    <th style="width: 15%;">Cor da Etiqueta</th>
+                                    <th style="width: 50px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="listaRegras">
+                                {% for regra in regras_acao %}
+                                <tr class="regra-row">
+                                    <td class="text-center text-muted fw-bold index-cell">{{ loop.index }}</td>
+                                    <td>
+                                        <input type="text" name="nome[]" class="form-control form-control-sm fw-bold border-0 bg-transparent" value="{{ regra.nome }}" required>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="0.1" min="0" max="100" name="min_score[]" class="form-control text-center fw-bold text-primary" value="{{ regra.min_score }}" required>
+                                            <span class="input-group-text border-start-0 bg-white text-muted">%</span>
+                                        </div>
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="form-check d-flex justify-content-center">
+                                            <input class="form-check-input" type="checkbox" name="exige_visc_real" value="{{ loop.index0 }}" {% if regra.exige_visc_real %}checked{% endif %}>
+                                        </div>
+                                        <small class="text-muted x-small" style="font-size: 0.65em;">(Não aceita média)</small>
+                                    </td>
+                                    <td>
+                                        <input type="text" name="acao[]" class="form-control form-control-sm" value="{{ regra.acao }}" required>
+                                    </td>
+                                    <td>
+                                        <select name="cor[]" class="form-select form-select-sm border-0 bg-light">
+                                            <option value="success" class="text-success fw-bold" {% if regra.cor=='success' %}selected{% endif %}>Verde (Aprovado)</option>
+                                            <option value="warning" class="text-warning fw-bold" {% if regra.cor=='warning' %}selected{% endif %}>Amarelo (Atenção)</option>
+                                            <option value="dark" class="text-dark fw-bold" {% if regra.cor=='dark' %}selected{% endif %}>Preto (Mistura)</option>
+                                            <option value="danger" class="text-danger fw-bold" {% if regra.cor=='danger' %}selected{% endif %}>Vermelho (Reprova)</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-outline-danger btn-sm border-0 opacity-50 hover-opacity-100" onclick="removerLinha(this)">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="p-3 bg-light border-top text-center d-flex justify-content-between align-items-center">
+                        <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="adicionarRegra()">
+                            <i class="fas fa-plus me-1"></i> Adicionar Nova Regra
+                        </button>
+                        <button type="submit" class="btn btn-success btn-sm px-4 fw-bold shadow-sm">
+                            <i class="fas fa-save me-2"></i> Salvar Regras de Ação
+                        </button>
+                    </div>
                 </form>
-                <span class="small text-muted ms-2">de {{ total_paginas }}</span>
-            </li>
+            </div>
+        </div>
+    </div>
 
-            <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
-                <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual+1, **args) }}">
-                    <i class="fas fa-angle-right"></i>
-                </a>
-            </li>
-        </ul>
-    </nav>
-    {% endif %}
 </div>
 
 {% endblock %}
@@ -203,22 +276,14 @@
                             <div class="card mb-3 border-danger border-opacity-25 shadow-sm">
                                 <div class="card-header bg-danger bg-opacity-10 text-danger fw-bold d-flex justify-content-between align-items-center">
                                     <span><i class="fas fa-fire me-2"></i>Alta Temperatura (Cura/Batch)</span>
-                                    
                                     {% set perfis_alta = prod.perfis.get('alta', {}) if prod.perfis else {} %}
-                                    
                                     <div class="d-flex gap-2 align-items-center">
-                                        {% if perfis_alta.get('temp_padrao') or perfis_alta.get('tempo_total') %}
-                                            <small class="text-dark fw-bold">Ref:</small>
-                                            <input type="number" step="1" name="alta_temp_padrao" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
-                                                style="width: 60px;" value="{{ perfis_alta.get('temp_padrao', '') }}">
-                                            <small class="text-dark fw-bold">Tempo:</small>
-                                            <input type="number" step="1" name="alta_tempo_total" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
-                                                style="width: 60px;" value="{{ perfis_alta.get('tempo_total', '') }}">
-                                        {% else %}
-                                            <span class="badge bg-white text-muted border">Sem Reometria</span>
-                                            <input type="number" name="alta_temp_padrao" class="d-none" placeholder="°C">
-                                            <input type="number" name="alta_tempo_total" class="d-none" placeholder="s">
-                                        {% endif %}
+                                        <small class="text-dark fw-bold">Ref:</small>
+                                        <input type="number" step="1" name="alta_temp_padrao" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
+                                            style="width: 60px;" value="{{ perfis_alta.get('temp_padrao', '') }}">
+                                        <small class="text-dark fw-bold">Tempo:</small>
+                                        <input type="number" step="1" name="alta_tempo_total" class="form-control form-control-sm border-0 bg-white text-center fw-bold" 
+                                            style="width: 60px;" value="{{ perfis_alta.get('tempo_total', '') }}">
                                     </div>
                                 </div>
                                 <div class="card-body p-2">
@@ -275,32 +340,6 @@
                                     {% endfor %}
                                 </div>
                             </div>
-
-                            <div class="card border-0 bg-transparent">
-                                <div class="card-header bg-transparent border-0 px-0 d-flex justify-content-between">
-                                    <span class="fw-bold text-secondary small"><i class="fas fa-random me-1"></i> Parâmetros Dinâmicos (Legado)</span>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="addParamRow('containerParams{{ prod.cod_sankhya }}')">
-                                        <i class="fas fa-plus small"></i> Add
-                                    </button>
-                                </div>
-                                <div class="card-body p-0" id="containerParams{{ prod.cod_sankhya }}">
-                                    {% for nome, p in prod.parametros.items() %}
-                                        {% if nome not in ['Ts2', 'T90', 'Viscosidade'] %}
-                                        <div class="row mb-2 align-items-center param-row g-1">
-                                            <div class="col-3"><input type="text" class="form-control form-control-sm" name="din_nome[]" value="{{ nome }}"></div>
-                                            <div class="col-2"><input type="number" class="form-control form-control-sm text-center" name="din_min[]" value="{{ p.minimo }}"></div>
-                                            <div class="col-2"><input type="number" class="form-control form-control-sm text-center bg-warning bg-opacity-10" name="din_alvo[]" value="{{ p.alvo }}"></div>
-                                            <div class="col-2"><input type="number" class="form-control form-control-sm text-center" name="din_max[]" value="{{ p.maximo }}"></div>
-                                            <div class="col-3 d-flex gap-1">
-                                                <input type="number" class="form-control form-control-sm text-center" name="din_peso[]" value="{{ p.peso }}">
-                                                <button type="button" class="btn btn-outline-danger btn-sm px-2" onclick="this.closest('.param-row').remove()"><i class="fas fa-times"></i></button>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    {% endfor %}
-                                </div>
-                            </div>
-
                         </div>
                         <div class="modal-footer bg-light">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -313,20 +352,60 @@
     {% endfor %}
 
     <script>
-    function addParamRow(containerId) {
-        const container = document.getElementById(containerId);
-        const html = `
-        <div class="row mb-2 align-items-center param-row g-1">
-            <div class="col-3"><input type="text" class="form-control form-control-sm" name="din_nome[]" placeholder="Nome" required></div>
-            <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="din_min[]" placeholder="Min"></div>
-            <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center bg-warning bg-opacity-10" name="din_alvo[]" placeholder="Alvo"></div>
-            <div class="col-2"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="din_max[]" placeholder="Max"></div>
-            <div class="col-3 d-flex gap-1">
-                <input type="number" min="0" max="10" class="form-control form-control-sm text-center" name="din_peso[]" value="5">
-                <button type="button" class="btn btn-outline-danger btn-sm px-2" onclick="this.closest('.param-row').remove()"><i class="fas fa-times"></i></button>
-            </div>
-        </div>`;
-        container.insertAdjacentHTML('beforeend', html);
-    }
+        // Funções para a aba de Regras
+        function removerLinha(btn) {
+            const row = btn.closest('tr');
+            if(document.querySelectorAll('.regra-row').length > 1) {
+                row.remove();
+                reindexar();
+            } else {
+                alert("É necessário ter pelo menos uma regra padrão.");
+            }
+        }
+
+        function reindexar() {
+            const rows = document.querySelectorAll('.regra-row');
+            rows.forEach((row, index) => {
+                row.querySelector('.index-cell').textContent = index + 1;
+                // Importante: atualiza o value do checkbox para manter sincronia
+                row.querySelector('input[type="checkbox"]').value = index;
+            });
+        }
+
+        function adicionarRegra() {
+            const tbody = document.getElementById('listaRegras');
+            const index = tbody.querySelectorAll('tr').length;
+            
+            const html = `
+            <tr class="regra-row">
+                <td class="text-center text-muted fw-bold index-cell">${index + 1}</td>
+                <td><input type="text" name="nome[]" class="form-control form-control-sm fw-bold border-0 bg-transparent" placeholder="Nova Regra"></td>
+                <td>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step="0.1" name="min_score[]" class="form-control text-center fw-bold text-primary" value="0">
+                        <span class="input-group-text border-start-0 bg-white text-muted">%</span>
+                    </div>
+                </td>
+                <td class="text-center">
+                    <div class="form-check d-flex justify-content-center">
+                        <input class="form-check-input" type="checkbox" name="exige_visc_real" value="${index}">
+                    </div>
+                </td>
+                <td><input type="text" name="acao[]" class="form-control form-control-sm" value="NOVA AÇÃO"></td>
+                <td>
+                    <select name="cor[]" class="form-select form-select-sm border-0 bg-light">
+                        <option value="success" class="text-success fw-bold">Verde</option>
+                        <option value="warning" class="text-warning fw-bold">Amarelo</option>
+                        <option value="dark" class="text-dark fw-bold">Preto</option>
+                        <option value="danger" class="text-danger fw-bold" selected>Vermelho</option>
+                    </select>
+                </td>
+                <td>
+                    <button type="button" class="btn btn-outline-danger btn-sm border-0 opacity-50 hover-opacity-100" onclick="removerLinha(this)"><i class="fas fa-trash"></i></button>
+                </td>
+            </tr>`;
+            
+            tbody.insertAdjacentHTML('beforeend', html);
+        }
     </script>
 {% endblock %}

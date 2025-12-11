@@ -1,5 +1,5 @@
 from models.massa import Massa, Parametro
-
+from services.config_manager import carregar_regras_acao
 
 class Ensaio:
     def __init__(self, id_ensaio, massa_objeto: Massa, valores_medidos, lote, batch,
@@ -162,29 +162,40 @@ class Ensaio:
 
     def determinar_acao(self):
         """
-        Regras de decisao:
-        - PRIME: Score >= 85 e viscosidade real.
-        - LIBERAR: Score >= 75 ou (Score >= 85 com viscosidade media).
-        - RESSALVA: Score >= 70 ou falta de dados.
+        Avalia as regras carregadas do JSON em ordem decrescente de Score.
+        A primeira regra que for satisfeita define a ação.
         """
-        tem_viscosidade = self.origem_viscosidade != "N/A"
-        eh_media_lote = ("MÇ¸dia" in self.origem_viscosidade) or ("Media" in self.origem_viscosidade)
+        # Carrega regras (o config_manager já ordena pelo maior score primeiro)
+        regras = carregar_regras_acao()
+        
+        # Dados do ensaio
         score = self.score_final
+        tem_viscosidade = (self.origem_viscosidade != "N/A")
+        eh_media = ("Média" in self.origem_viscosidade or "Media" in self.origem_viscosidade)
+        viscosidade_real = (tem_viscosidade and not eh_media)
 
-        if score >= 85 and tem_viscosidade and not eh_media_lote:
-            self.acao_recomendada = "LIBERAR - MASSA PRIME"
-        elif score >= 85 and tem_viscosidade and eh_media_lote:
-            self.acao_recomendada = "LIBERAR"
-        elif score >= 85 and not tem_viscosidade:
-            self.acao_recomendada = "LIBERAR COM RESSALVA (SEM DADO DE VISCOSIDADE)"
-        elif score >= 75:
-            self.acao_recomendada = "LIBERAR"
-        elif score >= 70:
-            self.acao_recomendada = "LIBERAR COM RESSALVA - AVALIAR COM ENGENHARIA"
-        elif score > 68:
-            self.acao_recomendada = "CORTAR E MISTURAR"
-        else:
-            self.acao_recomendada = "REPROVAR"
+        self.acao_recomendada = "REPROVAR" # Fallback padrão
+
+        for regra in regras:
+            min_score = regra.get('min_score', 0)
+            exige_real = regra.get('exige_visc_real', False)
+            acao_texto = regra.get('acao', 'REPROVAR')
+
+            # Verifica Score
+            if score >= min_score:
+                # Verifica condição de Viscosidade
+                if exige_real:
+                    if viscosidade_real:
+                        self.acao_recomendada = acao_texto
+                        return # Encontrou, para (regra mais alta ganha)
+                    else:
+                        # Score bateu, mas exige visc real e não tem.
+                        # Pula para a próxima regra (provavelmente uma sem exigência de visc)
+                        continue 
+                else:
+                    # Não exige viscosidade real, então passa
+                    self.acao_recomendada = acao_texto
+                    return
 
     @property
     def batch_int(self):

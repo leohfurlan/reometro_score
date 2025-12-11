@@ -11,12 +11,14 @@ import os
 # Configurações e Modelos
 from config import Config
 from services.config_manager import salvar_configuracao
+from services.config_manager import carregar_regras_acao, salvar_regras_acao
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
     carregar_referencias_estaticas,
-    get_catalogo_codigo
+    get_catalogo_codigo,
+    _MAPA_GRUPOS  # <--- ADICIONE ESTA IMPORTAÇÃO
 )
 
 # --- NOVA IMPORTAÇÃO: SHAREPOINT LOADER ---
@@ -277,9 +279,13 @@ def dashboard():
 @login_required
 def pagina_config():
     if current_user.role != 'admin':
-        flash("Acesso negado. Apenas administradores podem alterar configurações.", "warning")
+        flash("Acesso negado.", "warning")
         return redirect(url_for('dashboard'))
     
+    # 1. Carrega Regras para a segunda aba
+    regras_acao = carregar_regras_acao()
+
+    # 2. Lógica existente de filtros e paginação de Materiais
     query = request.args.get('q', '').strip().upper()
     filtro_tipo = request.args.get('tipo', '')
     filtro_status = request.args.get('status', '')
@@ -292,10 +298,8 @@ def pagina_config():
     produtos_filtrados = []
 
     for p in CATALOGO_ATUAL.values():
-        if query and (query not in str(p.cod_sankhya) and query not in p.descricao.upper()):
-            continue
-        if filtro_tipo and p.tipo != filtro_tipo:
-            continue
+        if query and (query not in str(p.cod_sankhya) and query not in p.descricao.upper()): continue
+        if filtro_tipo and p.tipo != filtro_tipo: continue
         if filtro_status:
             tem_conteudo = (
                 (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
@@ -303,27 +307,15 @@ def pagina_config():
             )
             if filtro_status == 'OK' and not tem_conteudo: continue
             if filtro_status == 'PENDENTE' and tem_conteudo: continue
-
         produtos_filtrados.append(p)
     
     reverse = (order == 'desc')
-    
-    if sort_by == 'cod':
-        produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
+    if sort_by == 'cod': produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
     elif sort_by == 'status':
         def get_status_sort(p):
-            tem_perfil = False
-            if p.perfis:
-                if p.perfis.get('alta') or p.perfis.get('baixa'):
-                    tem_perfil = True
-            tem_param = False
-            if p.parametros and len(p.parametros) > 0:
-                tem_param = True
-            return tem_perfil or tem_param
-
+            return (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or (p.parametros and len(p.parametros) > 0)
         produtos_filtrados.sort(key=get_status_sort, reverse=reverse)
-    else:
-        produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
+    else: produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
 
     total_itens = len(produtos_filtrados)
     total_paginas = math.ceil(total_itens / LIMIT)
@@ -336,16 +328,40 @@ def pagina_config():
     return render_template(
         'config.html', 
         produtos=produtos_paginados,
-        query=query,
-        filtro_tipo=filtro_tipo,
-        filtro_status=filtro_status,
-        pagina_atual=page,
-        total_paginas=total_paginas,
-        total_itens=total_itens,
-        sort_by=sort_by,
-        order=order
+        regras_acao=regras_acao, # <--- Enviando regras para o template
+        query=query, filtro_tipo=filtro_tipo, filtro_status=filtro_status,
+        pagina_atual=page, total_paginas=total_paginas, total_itens=total_itens,
+        sort_by=sort_by, order=order
     )
 
+@app.route('/salvar_regras', methods=['POST'])
+@login_required
+def salvar_regras():
+    if current_user.role != 'admin': return redirect(url_for('dashboard'))
+
+    # Coleta dados das listas do formulário
+    nomes = request.form.getlist('nome[]')
+    scores = request.form.getlist('min_score[]')
+    acoes = request.form.getlist('acao[]')
+    cores = request.form.getlist('cor[]')
+    marcados = request.form.getlist('exige_visc_real') 
+    
+    novas_regras = []
+    for i in range(len(nomes)):
+        # Verifica se o índice atual está na lista de checkboxes marcados
+        eh_marcado = str(i) in marcados
+        novas_regras.append({
+            "id": i+1,
+            "nome": nomes[i],
+            "min_score": float(scores[i]) if scores[i] else 0,
+            "exige_visc_real": eh_marcado,
+            "acao": acoes[i],
+            "cor": cores[i]
+        })
+        
+    salvar_regras_acao(novas_regras)
+    flash("Regras de ação globais atualizadas!", "success")
+    return redirect(url_for('pagina_config'))
 @app.route('/salvar_config', methods=['POST'])
 @login_required
 def salvar_config():
@@ -411,29 +427,40 @@ def api_grafico():
     ids_str = request.args.get('ids', '')
     if not ids_str: return jsonify({})
 
-    selected_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
-    if len(selected_ids) > 10:
-        return jsonify({'error': 'Max 10 items.'}), 400
+    # 1. IDs das LINHAS selecionadas (Checkboxes)
+    selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
+    
+    if len(selected_parent_ids) > 10:
+        return jsonify({'error': 'Selecione no máximo 10 linhas.'}), 400
 
     all_ids_to_fetch = []
     map_id_to_parent = {} 
 
+    # 2. Apenas os IDs explicitamente selecionados (por linha)
     for cached in dados_cache['dados']:
-        if cached.id_ensaio in selected_ids:
-            for sub_id in cached.ids_agrupados:
-                all_ids_to_fetch.append(sub_id)
-                map_id_to_parent[sub_id] = cached
+        if cached.id_ensaio in selected_parent_ids:
+            all_ids_to_fetch.append(cached.id_ensaio)
+            map_id_to_parent[cached.id_ensaio] = cached
 
     if not all_ids_to_fetch:
-        return jsonify({'error': 'Not found.'}), 404
+        return jsonify({'error': 'Nenhum dado encontrado.'}), 404
 
+    # 3. Busca Dados Brutos + COD_GRUPO para classificação precisa
     conn = connect_to_database()
     cursor = conn.cursor()
     
     placeholders = ','.join('?' * len(all_ids_to_fetch))
     
+    # [Diagrama do Processo de Classificação]
+    #     
+    # ADICIONAMOS 'E.COD_GRUPO' NA QUERY PARA SABER A MÁQUINA EXATA
     query = f'''
-        SELECT V.COD_ENSAIO, V.TEMPO, V.TORQUE, E.TEMP_PLATO_INF
+        SELECT 
+            V.COD_ENSAIO, 
+            V.TEMPO, 
+            V.TORQUE, 
+            E.TEMP_PLATO_INF,
+            E.COD_GRUPO
         FROM dbo.ENSAIO_VALORES V
         JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
         WHERE V.COD_ENSAIO IN ({placeholders})
@@ -446,28 +473,49 @@ def api_grafico():
     finally:
         conn.close()
 
+    # 4. Processamento e Separação Rigorosa
     datasets_reo = {}
     datasets_visc = {}
     materiais = set()
     
     for row in rows:
-        c_id, c_time, c_val, c_temp = row
+        c_id, c_time, c_val, c_temp, c_grupo = row
         
         parent = map_id_to_parent.get(c_id)
         if not parent: continue
         
         materiais.add(parent.massa.descricao)
         
-        temp = float(c_temp) if c_temp else 0
-        is_viscosity = (90 <= temp <= 115)
+        # --- AVALIAÇÃO INDIVIDUAL (Reometria vs Viscosidade) ---
+        # Prioridade 1: O que diz o mapa de equipamentos? (Mais seguro)
+        dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
+        tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
         
-        if getattr(parent, 'tipo_ensaio', '') == 'VISCOSIDADE':
+        is_viscosity = False
+        
+        if tipo_maquina == 'VISCOSIMETRO':
             is_viscosity = True
+        elif tipo_maquina == 'REOMETRO':
+            is_viscosity = False
+        else:
+            # Prioridade 2: Fallback pela Temperatura (se a máquina não estiver mapeada)
+            temp = float(c_temp) if c_temp else 0
+            if 90 <= temp <= 115:
+                is_viscosity = True
+            elif temp >= 120:
+                is_viscosity = False
+            else:
+                # Prioridade 3: Fallback pelo pai (último caso)
+                pai_tipo = getattr(parent, 'tipo_ensaio', '').upper()
+                is_viscosity = (pai_tipo == 'VISCOSIDADE')
 
+        # Seleciona o dicionário correto
         target_dict = datasets_visc if is_viscosity else datasets_reo
         
         if c_id not in target_dict:
+            # Label ex: "LOTE 123 (ID: 456)"
             label = f"{parent.lote} (ID: {c_id})"
+            
             target_dict[c_id] = {
                 'label': label,
                 'material': parent.massa.descricao,
@@ -476,7 +524,8 @@ def api_grafico():
                 'fill': False,
                 'pointRadius': 0,
                 'borderWidth': 2,
-                'tension': 0.4
+                'tension': 0.4,
+                'dataset_temp': float(c_temp) if c_temp else 0
             }
         
         target_dict[c_id]['data'].append({'x': float(c_time), 'y': float(c_val)})
@@ -486,6 +535,8 @@ def api_grafico():
         'viscosidade': list(datasets_visc.values()),
         'materiais': list(materiais)
     })
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
