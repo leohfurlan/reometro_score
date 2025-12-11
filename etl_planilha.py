@@ -87,6 +87,14 @@ def carregar_dicionario_lotes():
                     # Se mesmo assim não achar, pula a aba
                     continue
 
+                # --- NOVA LÓGICA: Captura da Coluna REOMETRO ---
+                # Procura por colunas que contenham "REOMETRO" (ex: "REOMETRO (ALTA)")
+                col_equip = None
+                for col in df.columns:
+                    if "REOMETRO" in col and "ALTA" in col:
+                        col_equip = col
+                        break
+
                 # Limpeza dos dados
                 df = df.dropna(subset=['LOTE', 'MASSA'])
                 df['LOTE'] = df['LOTE'].astype(str).str.strip().str.upper()
@@ -95,9 +103,24 @@ def carregar_dicionario_lotes():
                 # Filtra lixo (lotes com menos de 3 caracteres)
                 df = df[df['LOTE'].str.len() > 2] 
                 
-                # Transforma em dicionário { LOTE: MASSA } e atualiza o mapa principal
-                dict_aba = pd.Series(df.MASSA.values, index=df.LOTE).to_dict()
-                mapa_lote_massa.update(dict_aba)
+                # Itera para montar o dicionário rico
+                for _, row in df.iterrows():
+                    lote = str(row['LOTE']).strip().upper()
+                    if len(lote) < 3: continue
+                    
+                    massa = str(row['MASSA']).strip()
+                    
+                    # Captura o equipamento se a coluna existir e tiver valor
+                    equip = None
+                    if col_equip and pd.notna(row[col_equip]):
+                        val_equip = str(row[col_equip]).strip().upper()
+                        if "CINZA" in val_equip: equip = "CINZA"
+                        elif "PRETO" in val_equip: equip = "PRETO"
+                    
+                    mapa_lote_massa[lote] = {
+                        'massa': massa,
+                        'equipamento': equip
+                    }
                 
             except Exception as e:
                 print(f"⚠️ Aviso na aba '{aba}': {e}")

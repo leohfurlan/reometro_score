@@ -241,7 +241,8 @@ def processar_carga_dados(data_corte='2025-07-01'):
         
         # --- LÓGICA DE IDENTIFICAÇÃO ---
         produto = None
-        
+        equip_planilha = None # <--- Variável para capturar Cinza/Preto
+
         # Busca tipo da máquina no mapa carregado do DB
         dados_grupo = _MAPA_GRUPOS.get(grupo, {})
         tipo_equip = dados_grupo.get('tipo', 'INDEFINIDO')
@@ -250,8 +251,19 @@ def processar_carga_dados(data_corte='2025-07-01'):
         usar_cod = (tipo_equip != "VISCOSIMETRO") 
         
         if lote_final:
-            nome_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
-            if nome_planilha: produto = match_nome_inteligente(nome_planilha)
+            # AGORA O GET RETORNA UM DICIONÁRIO { 'massa': ..., 'equipamento': ... }
+            dados_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
+            
+            if dados_planilha:
+                # Compatibilidade: verifica se é dict novo ou string antiga (caso ETL falhe)
+                if isinstance(dados_planilha, dict):
+                    nome_massa = dados_planilha.get('massa')
+                    equip_planilha = dados_planilha.get('equipamento')
+                else:
+                    nome_massa = dados_planilha # Fallback
+                
+                if nome_massa: 
+                    produto = match_nome_inteligente(nome_massa)
         
         if not produto:
             produto = match_nome_inteligente(amostra)
@@ -261,12 +273,18 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
-                'ids_ensaio': [], 'massa': produto, 'lote_visivel': chave_lote,
-                'batch': chave_batch, 'data': row['DATA'],
+                'ids_ensaio': [], 'massa': produto, 
+                'lote_visivel': chave_lote, 'batch': chave_batch, 
+                'data': row['DATA'],
                 'ts2': None, 't90': None, 'visc': None,
                 'temps': [], 'tempos_max': [], 'tempo_max': None,
-                'grupos': set()
+                'grupos': set(),
+                'equip_planilha': equip_planilha # <--- Armazena no agrupamento
             }
+        
+        # Se encontrou equipamento agora e antes não tinha, atualiza
+        if equip_planilha and not dados_agrupados[chave_unica]['equip_planilha']:
+            dados_agrupados[chave_unica]['equip_planilha'] = equip_planilha
         
         reg = dados_agrupados[chave_unica]
         reg['ids_ensaio'].append(row['COD_ENSAIO'])
@@ -334,7 +352,8 @@ def processar_carga_dados(data_corte='2025-07-01'):
             cod_grupo=grupo_id,
             tempo_maximo=dados.get('tempo_max') or 0,
             tempos_max=list(dados.get('tempos_max') or []),
-            ids_agrupados=list(dados['ids_ensaio'])
+            ids_agrupados=list(dados['ids_ensaio']),
+            equipamento_planilha=dados.get('equip_planilha') 
         )
         
         # Se quiser guardar o nome do grupo no objeto Ensaio para mostrar na tela:

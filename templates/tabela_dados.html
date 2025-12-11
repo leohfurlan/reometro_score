@@ -56,7 +56,27 @@
                 </td>
                 <td class="col-temp">
                     {% set temp_display = ensaio.temp_plato_display %}
-                    {% if temp_display %}{{ temp_display }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    {% if temp_display %}
+                        {{ temp_display }}
+                        
+                        {# --- NOVO INDICADOR DE REÔMETRO --- #}
+                        {% if ensaio.equipamento_planilha %}
+                            <div class="mt-1">
+                                {% if ensaio.equipamento_planilha == 'CINZA' %}
+                                    <span class="badge bg-secondary border border-dark text-white" style="font-size: 0.65em;" title="Regra: Reômetro Cinza">
+                                        <i class="fas fa-robot me-1"></i>CINZA
+                                    </span>
+                                {% elif ensaio.equipamento_planilha == 'PRETO' %}
+                                    <span class="badge bg-dark text-white border border-secondary" style="font-size: 0.65em;" title="Regra: Reômetro Preto">
+                                        <i class="fas fa-robot me-1"></i>PRETO
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
                 </td>
                 <td class="col-ts2 {{ 'text-danger fw-bold' if ensaio.ts2_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('Ts2', 0)) }}</td>
                 <td class="col-t90 {{ 'text-danger fw-bold' if ensaio.t90_fora else '' }}">{{ "%.1f"|format(ensaio.valores_medidos.get('T90', 0)) }}</td>

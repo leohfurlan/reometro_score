@@ -5,7 +5,8 @@ class Ensaio:
     def __init__(self, id_ensaio, massa_objeto: Massa, valores_medidos, lote, batch,
                  data_hora=None, origem_viscosidade="N/A",
                  temp_plato=0, temps_plato=None, cod_grupo=0, tempo_maximo=0,
-                 tempos_max=None, ids_agrupados=None):
+                 tempos_max=None, ids_agrupados=None,
+                 equipamento_planilha=None):
         self.id_ensaio = id_ensaio
         self.massa = massa_objeto
         self.valores_medidos = valores_medidos
@@ -28,6 +29,7 @@ class Ensaio:
         self.tempo_max_lista = tempos_max if tempos_max is not None else ([] if tempo_maximo == 0 else [tempo_maximo])
         self.tempo_configurado = None
         self.ids_agrupados = ids_agrupados if ids_agrupados is not None else [id_ensaio]
+        self.equipamento_planilha = equipamento_planilha # 'CINZA', 'PRETO' ou None
 
         self.score_final = 0
         self.detalhes_score = []
