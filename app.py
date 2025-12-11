@@ -473,119 +473,159 @@ def salvar_config():
 @app.route('/api/grafico')
 @login_required
 def api_grafico():
-    dados_cache = cache_service.get()
-    ids_str = request.args.get('ids', '')
-    if not ids_str: return jsonify({})
-
-    # 1. IDs das LINHAS selecionadas (Checkboxes)
-    selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
-    
-    if len(selected_parent_ids) > 10:
-        return jsonify({'error': 'Selecione no máximo 10 linhas.'}), 400
-
-    all_ids_to_fetch = []
-    map_id_to_parent = {} 
-
-    # 2. Apenas os IDs explicitamente selecionados (por linha)
-    for cached in dados_cache['dados']:
-        if cached.id_ensaio in selected_parent_ids:
-            all_ids_to_fetch.append(cached.id_ensaio)
-            map_id_to_parent[cached.id_ensaio] = cached
-
-    if not all_ids_to_fetch:
-        return jsonify({'error': 'Nenhum dado encontrado.'}), 404
-
-    # 3. Busca Dados Brutos + COD_GRUPO para classificação precisa
-    conn = connect_to_database()
-    cursor = conn.cursor()
-    
-    placeholders = ','.join('?' * len(all_ids_to_fetch))
-    
-    # [Diagrama do Processo de Classificação]
-    #     
-    # ADICIONAMOS 'E.COD_GRUPO' NA QUERY PARA SABER A MÁQUINA EXATA
-    query = f'''
-        SELECT 
-            V.COD_ENSAIO, 
-            V.TEMPO, 
-            V.TORQUE, 
-            E.TEMP_PLATO_INF,
-            E.COD_GRUPO
-        FROM dbo.ENSAIO_VALORES V
-        JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
-        WHERE V.COD_ENSAIO IN ({placeholders})
-        ORDER BY V.COD_ENSAIO, V.TEMPO
-    '''
-    
     try:
-        cursor.execute(query, all_ids_to_fetch)
-        rows = cursor.fetchall()
-    finally:
-        conn.close()
+        dados_cache = cache_service.get()
+        if not dados_cache:
+            return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
 
-    # 4. Processamento e Separação Rigorosa
-    datasets_reo = {}
-    datasets_visc = {}
-    materiais = set()
-    
-    for row in rows:
-        c_id, c_time, c_val, c_temp, c_grupo = row
+        ids_str = request.args.get('ids', '')
+        if not ids_str: return jsonify({})
+
+        # 1. IDs das LINHAS selecionadas (Pais)
+        selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
         
-        parent = map_id_to_parent.get(c_id)
-        if not parent: continue
+        if len(selected_parent_ids) > 10:
+            return jsonify({'error': 'Selecione no máximo 10 linhas.'}), 400
+
+        all_ids_to_fetch = set() # Usar Set para evitar duplicidade
+        map_id_to_parent = {} 
+
+        print(f"DEBUG: Solicitados IDs Pais: {selected_parent_ids}")
+
+        # 2. Expandir para pegar TODOS os IDs do agrupamento
+        count_found = 0
+        for cached in dados_cache['dados']:
+            # Força int para comparação segura
+            cached_id = int(cached.id_ensaio)
+            
+            if cached_id in selected_parent_ids:
+                count_found += 1
+                
+                # Pega a lista de IDs agrupados. Se não existir, usa o próprio ID
+                ids_filhos = getattr(cached, 'ids_agrupados', [])
+                if not ids_filhos:
+                    ids_filhos = [cached_id]
+                
+                # Garante que todos sejam inteiros e mapeia
+                for child_id in ids_filhos:
+                    c_id_int = int(child_id)
+                    all_ids_to_fetch.add(c_id_int)
+                    map_id_to_parent[c_id_int] = cached # Mapeia Filho -> Objeto Pai
+
+        print(f"DEBUG: IDs reais para buscar no banco (Filhos): {all_ids_to_fetch}")
+
+        if not all_ids_to_fetch:
+            print("DEBUG: Nenhum ID encontrado no cache.")
+            return jsonify({'error': 'IDs não encontrados no cache.'}), 404
+
+        # 3. Busca Dados Brutos
+        conn = connect_to_database()
+        cursor = conn.cursor()
         
-        materiais.add(parent.massa.descricao)
+        # Query segura com placeholders
+        lista_ids = list(all_ids_to_fetch)
+        placeholders = ','.join('?' * len(lista_ids))
         
-        # --- AVALIAÇÃO INDIVIDUAL (Reometria vs Viscosidade) ---
-        # Prioridade 1: O que diz o mapa de equipamentos? (Mais seguro)
-        dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
-        tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
+        # Nota: Usamos V.TEMPO e V.TORQUE (Verifique se no seu banco é V.TORQUE ou outro nome)
+        query = f'''
+            SELECT 
+                V.COD_ENSAIO, 
+                V.TEMPO, 
+                V.TORQUE, 
+                E.TEMP_PLATO_INF,
+                E.COD_GRUPO
+            FROM dbo.ENSAIO_VALORES V
+            JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
+            WHERE V.COD_ENSAIO IN ({placeholders})
+            ORDER BY V.COD_ENSAIO, V.TEMPO
+        '''
         
-        is_viscosity = False
+        try:
+            cursor.execute(query, lista_ids)
+            rows = cursor.fetchall()
+            print(f"DEBUG: Linhas retornadas do SQL: {len(rows)}")
+        except Exception as e:
+            print(f"ERRO SQL: {e}")
+            return jsonify({'error': f'Erro no Banco de Dados: {str(e)}'}), 500
+        finally:
+            conn.close()
+
+        if not rows:
+            return jsonify({'error': 'Nenhum ponto de curva encontrado no banco para estes IDs.'}), 404
+
+        # 4. Processamento
+        datasets_reo = {}
+        datasets_visc = {}
+        materiais = set()
         
-        if tipo_maquina == 'VISCOSIMETRO':
-            is_viscosity = True
-        elif tipo_maquina == 'REOMETRO':
+        for row in rows:
+            c_id = int(row[0]) # ID do ensaio (Filho)
+            c_time = float(row[1])
+            c_val = float(row[2])
+            c_temp = float(row[3]) if row[3] else 0
+            c_grupo = row[4]
+            
+            # AQUI ESTAVA O ERRO: O map precisa encontrar o ID
+            parent = map_id_to_parent.get(c_id)
+            
+            if not parent: 
+                # Se não achou, tenta achar pelo ID do pai se o agrupamento falhou
+                continue
+            
+            materiais.add(parent.massa.descricao)
+            
+            # --- LÓGICA DE CLASSIFICAÇÃO ---
+            dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
+            tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
+            
             is_viscosity = False
-        else:
-            # Prioridade 2: Fallback pela Temperatura (se a máquina não estiver mapeada)
-            temp = float(c_temp) if c_temp else 0
-            if 90 <= temp <= 115:
+            
+            # Prioridade 1: Mapa de Equipamentos
+            if tipo_maquina == 'VISCOSIMETRO':
                 is_viscosity = True
-            elif temp >= 120:
+            elif tipo_maquina == 'REOMETRO':
                 is_viscosity = False
             else:
-                # Prioridade 3: Fallback pelo pai (último caso)
-                pai_tipo = getattr(parent, 'tipo_ensaio', '').upper()
-                is_viscosity = (pai_tipo == 'VISCOSIDADE')
+                # Prioridade 2: Temperatura (Fallback)
+                if 90 <= c_temp <= 115: is_viscosity = True
+                elif c_temp >= 120: is_viscosity = False
+                else:
+                    # Prioridade 3: Tipo definido no Pai
+                    pai_tipo = getattr(parent, 'tipo_ensaio', '').upper()
+                    is_viscosity = (pai_tipo == 'VISCOSIDADE')
 
-        # Seleciona o dicionário correto
-        target_dict = datasets_visc if is_viscosity else datasets_reo
-        
-        if c_id not in target_dict:
-            # Label ex: "LOTE 123 (ID: 456)"
-            label = f"{parent.lote} (ID: {c_id})"
+            target_dict = datasets_visc if is_viscosity else datasets_reo
             
-            target_dict[c_id] = {
-                'label': label,
-                'material': parent.massa.descricao,
-                'data': [],
-                'borderColor': '', 
-                'fill': False,
-                'pointRadius': 0,
-                'borderWidth': 2,
-                'tension': 0.4,
-                'dataset_temp': float(c_temp) if c_temp else 0
-            }
+            # Chave única para o dataset: ID do filho
+            if c_id not in target_dict:
+                # Label Solicitada: CÓDIGO - LOTE - BATCH
+                cod_s = parent.massa.cod_sankhya if parent.massa else '??'
+                lote_s = parent.lote
+                batch_s = parent.batch if parent.batch else '0'
+                
+                label = f"{cod_s} - {lote_s} - {batch_s}"
+                
+                target_dict[c_id] = {
+                    'label': label,
+                    'material': parent.massa.descricao,
+                    'data': [],
+                    'pointRadius': 0,
+                    'borderWidth': 2,
+                    'tension': 0.4,
+                    'fill': False
+                }
+            
+            target_dict[c_id]['data'].append({'x': c_time, 'y': c_val})
+
+        return jsonify({
+            'reometria': list(datasets_reo.values()),
+            'viscosidade': list(datasets_visc.values()),
+            'materiais': list(materiais)
+        })
         
-        target_dict[c_id]['data'].append({'x': float(c_time), 'y': float(c_val)})
-
-    return jsonify({
-        'reometria': list(datasets_reo.values()),
-        'viscosidade': list(datasets_visc.values()),
-        'materiais': list(materiais)
-    })
-
+    except Exception as e:
+        print(f"ERRO GERAL API: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

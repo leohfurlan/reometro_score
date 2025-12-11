@@ -327,11 +327,20 @@
                         <h5 class="modal-title fw-bold"><i class="fas fa-chart-area me-2"></i>Comparativo de Curvas</h5>
                         <p class="mb-0 small text-muted" id="modalMateriaisTitle">...</p>
                     </div>
+                    <div class="ms-auto me-3 d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="toggleGraficoSelection(true)">
+                            <i class="fas fa-check-double me-1"></i> Marcar Todos
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleGraficoSelection(false)">
+                            <i class="fas fa-eraser me-1"></i> Limpar
+                        </button>
+                    </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
+                
                 <div class="modal-body">
                     
-                    <div id="containerReo" class="mb-4">
+                    <div id="containerReo" class="mb-4" style="display: none;">
                         <h6 class="text-primary fw-bold border-bottom pb-2">
                             <i class="fas fa-fire-alt me-2"></i>Curvas de Reometria (Torque)
                         </h6>
@@ -340,7 +349,7 @@
                         </div>
                     </div>
 
-                    <div id="containerVisc">
+                    <div id="containerVisc" style="display: none;">
                         <h6 class="text-success fw-bold border-bottom pb-2">
                             <i class="fas fa-water me-2"></i>Curvas de Viscosidade (Mooney)
                         </h6>
@@ -350,6 +359,7 @@
                     </div>
 
                     <div id="msgVazio" class="text-center text-muted py-5 d-none">
+                        <i class="fas fa-chart-line fa-3x mb-3 opacity-25"></i><br>
                         Nenhum dado de curva encontrado para os itens selecionados.
                     </div>
 

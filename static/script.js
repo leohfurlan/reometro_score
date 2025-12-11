@@ -307,8 +307,13 @@ async function abrirGraficoComparativo() {
         const response = await fetch(`/api/grafico?ids=${selecionados.join(',')}`);
         const data = await response.json();
 
+        if (!response.ok) {
+            // Lança erro com a mensagem vinda da API ou uma genérica
+            throw new Error(data.error || "Erro desconhecido ao comunicar com o servidor");
+        }
+
         if (data.error) {
-            alert("Erro: " + data.error);
+            alert("Aviso do Servidor: " + data.error);
             return;
         }
 
@@ -335,7 +340,7 @@ async function abrirGraficoComparativo() {
 
     } catch (err) {
         console.error(err);
-        alert("Erro ao carregar dados do gráfico.");
+        alert("Erro ao carregar dados do gráfico: " + err.message);
     }
 }
 
@@ -406,6 +411,25 @@ function criarGraficoBase(canvasId, chartInstance, datasets, yLabel) {
             }
         }
     });
+}
+
+// 4. Função para Marcar/Desmarcar todas as curvas no gráfico (NOVO)
+function toggleGraficoSelection(visible) {
+    const updateChartVisibility = (chartInstance) => {
+        if (!chartInstance) return;
+        const setHidden = !visible;
+        chartInstance.data.datasets.forEach(ds => {
+            ds.hidden = setHidden;
+        });
+        chartInstance.update();
+    };
+
+    if (typeof chartInstanceReo !== 'undefined' && chartInstanceReo) {
+        updateChartVisibility(chartInstanceReo);
+    }
+    if (typeof chartInstanceVisc !== 'undefined' && chartInstanceVisc) {
+        updateChartVisibility(chartInstanceVisc);
+    }
 }
 
 if (document.readyState === 'loading') {
