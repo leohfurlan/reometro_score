@@ -40,11 +40,26 @@
                 <td class="col-data">{% if ensaio.data_hora %}{{ ensaio.data_hora.strftime('%d/%m/%y') }}<div class="text-muted small" style="font-size: 0.7em;">{{ ensaio.data_hora.strftime('%H:%M') }}</div>{% else %}-{% endif %}</td>
                 
                 <td class="col-material">
-                    <div class="fw-bold truncate-responsive" title="{{ ensaio.massa.descricao }}">
-                        {{ ensaio.massa.descricao }}
-                    </div>
-                    <div class="text-muted small" style="font-size: 0.75em;">
-                        Cód: {{ ensaio.massa.cod_sankhya }}
+                    <div class="d-flex align-items-center">
+                        <div class="me-2" style="width: 20px; text-align: center;">
+                            {% if ensaio.metodo_identificacao == 'MANUAL' %}
+                                <i class="fas fa-user-check text-primary" data-bs-toggle="tooltip" title="Ensinado Manualmente"></i>
+                            {% elif ensaio.metodo_identificacao == 'LOTE' %}
+                                <i class="fas fa-link text-success" data-bs-toggle="tooltip" title="Identificado via Lote (Confiável)"></i>
+                            {% elif ensaio.metodo_identificacao == 'TEXTO' %}
+                                <i class="fas fa-magic text-warning" data-bs-toggle="tooltip" title="Match por Texto/Fuzzy (Verificar)"></i>
+                            {% else %}
+                                <i class="fas fa-exclamation-triangle text-danger" data-bs-toggle="tooltip" title="Não Identificado / Fantasma"></i>
+                            {% endif %}
+                        </div>
+                        <div>
+                            <div class="fw-bold truncate-responsive" title="{{ ensaio.massa.descricao }}">
+                                {{ ensaio.massa.descricao }}
+                            </div>
+                            <div class="text-muted small" style="font-size: 0.75em;">
+                                Cód: {{ ensaio.massa.cod_sankhya }}
+                            </div>
+                        </div>
                     </div>
                 </td>
 
@@ -59,7 +74,7 @@
                     {% if temp_display %}
                         {{ temp_display }}
                         
-                        {# --- NOVO INDICADOR DE REÔMETRO --- #}
+                        {# --- INDICADOR DE REÔMETRO (CINZA/PRETO) --- #}
                         {% if ensaio.equipamento_planilha %}
                             <div class="mt-1">
                                 {% if ensaio.equipamento_planilha == 'CINZA' %}

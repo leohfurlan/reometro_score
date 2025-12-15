@@ -23,10 +23,14 @@
             </div>
             <div class="list-group list-group-flush">
                 <a href="{{ url_for('dashboard') }}" 
-                   class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'dashboard' else '' }}">
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'dashboard' else '' }}">
                     <i class="fas fa-vial me-2"></i> Controle de Qualidade
                 </a>
-                
+
+                <a href="{{ url_for('pagina_auditoria') }}" 
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_auditoria' else '' }}">
+                    <i class="fas fa-chalkboard-teacher me-2"></i> Ensinar Sistema
+                </a>
                 <a href="#" class="list-group-item list-group-item-action">
                     <i class="fas fa-boxes me-2"></i> Estoque de MP
                 </a>

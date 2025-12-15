@@ -12,6 +12,7 @@ import os
 from config import Config
 from services.config_manager import salvar_configuracao
 from services.config_manager import carregar_regras_acao, salvar_regras_acao
+from services.learning_service import ensinar_lote
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
@@ -626,6 +627,109 @@ def api_grafico():
     except Exception as e:
         print(f"ERRO GERAL API: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/auditoria')
+@login_required
+def pagina_auditoria():
+    # 1. Recuperação Rápida do Cache (Sem ir ao Banco)
+    dados_cache = cache_service.get()
+    if not dados_cache:
+        flash("Cache vazio. Atualize os dados primeiro.", "warning")
+        return redirect(url_for('dashboard'))
+    
+    ensaios = dados_cache['dados']
+    materiais = dados_cache['materiais']
+
+    # --- FILTROS ---
+    f_data = request.args.get('data', '')
+    f_status = request.args.get('status', '')
+    f_busca = request.args.get('busca', '').upper().strip()
+    
+    # Paginação
+    page = request.args.get('page', 1, type=int)
+    per_page = 50  # Exibe 50 itens por vez (leve para o navegador)
+
+    lista_exibicao = []
+    
+    # --- APLICAÇÃO DOS FILTROS ---
+    # (Filtragem em memória é muito rápida, o gargalo é o HTML)
+    for e in ensaios:
+        # Filtro Data
+        if f_data and e.data_hora.strftime('%Y-%m-%d') != f_data:
+            continue
+            
+        # Filtro Status
+        if f_status and e.metodo_identificacao != f_status:
+            continue
+        
+        # Filtro Busca (Lote Limpo ou Original)
+        # Verifica se o termo está no lote visualizado
+        if f_busca and f_busca not in str(e.lote).upper():
+            continue
+
+        # Lógica Padrão: Se sem filtros, esconde os "LOTE" (Verdes) para focar no erro
+        if not f_status and not f_busca and not f_data:
+            if e.metodo_identificacao == 'LOTE': 
+                continue
+
+        lista_exibicao.append(e)
+
+    # --- ORDENAÇÃO ---
+    # Vermelho (0) -> Amarelo (1) -> Azul (2) -> Verde (3)
+    peso = {'FANTASMA': 0, 'TEXTO': 1, 'MANUAL': 2, 'LOTE': 3}
+    lista_exibicao.sort(key=lambda x: (peso.get(x.metodo_identificacao, 9), x.data_hora), reverse=False)
+
+    # --- PAGINAÇÃO (O Corte) ---
+    total_registros = len(lista_exibicao)
+    total_paginas = math.ceil(total_registros / per_page)
+    
+    # Garante que a página esteja dentro dos limites
+    page = max(1, min(page, total_paginas)) if total_paginas > 0 else 1
+    
+    start = (page - 1) * per_page
+    end = start + per_page
+    ensaios_paginados = lista_exibicao[start:end]
+
+    return render_template(
+        'auditoria.html', 
+        ensaios=ensaios_paginados, 
+        materiais=materiais,
+        # Metadados da Paginação
+        pagina_atual=page,
+        total_paginas=total_paginas,
+        total_registros=total_registros,
+        # Filtros (para manter na navegação)
+        request_args=request.args
+    )
+
+@app.route('/salvar_correcao', methods=['POST'])
+@login_required
+def salvar_correcao():
+    # 1. Captura dados
+    lote_original_key = request.form.get('lote_original_key', '').strip() # Strip aqui é vital!
+    novo_lote_real = request.form.get('novo_lote', '').strip()            # Strip aqui também!
+    nova_massa = request.form.get('massa')
+    
+    if not lote_original_key or not nova_massa:
+        flash("Dados inválidos.", "danger")
+        return redirect(url_for('pagina_auditoria'))
+    
+    # 2. Definição do Lote Final
+    # Se o usuário deixou em branco, usamos a chave original (mas limpa)
+    lote_para_salvar = novo_lote_real if novo_lote_real else lote_original_key
+
+    # 3. Salva
+    if ensinar_lote(lote_original_key, lote_para_salvar, nova_massa):
+        flash(f"Correção salva! '{lote_original_key}' -> Lote '{lote_para_salvar}'.", "success")
+        
+        # IMPORTANTE: Invalidar cache para forçar recarga visual imediata
+        # Se você tiver um método cache_service.invalidate(), chame-o aqui.
+        # Caso contrário, o usuário precisa clicar em "Recarregar Dados" manualmente.
+    else:
+        flash("Erro ao salvar.", "danger")
+        
+    return redirect(url_for('pagina_auditoria'))
 
 
 if __name__ == '__main__':

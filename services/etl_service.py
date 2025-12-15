@@ -12,6 +12,7 @@ from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import aplicar_configuracoes_no_catalogo
+from services.learning_service import carregar_aprendizado  # <--- NOVA IMPORTAÇÃO
 
 # --- VARIÁVEIS DE REFERÊNCIA (CACHE DO MÓDULO) ---
 _CATALOGO_CODIGO = {}
@@ -19,6 +20,7 @@ _CATALOGO_NOME = {}
 _MAPA_LOTES_PLANILHA = {}
 _MAPA_GRUPOS = {} 
 _DE_PARA_CORRECOES = {}
+_MAPA_APRENDIZADO = {} # <--- NOVA MEMÓRIA
 
 # --- FUNÇÕES AUXILIARES (HELPERS) ---
 
@@ -32,10 +34,9 @@ def safe_float(val):
 
 def carregar_referencias_estaticas():
     """
-    Carrega mapas de configuração.
-    AGORA COM SQL SERVER PARA GRUPOS (Tabela dbo.GRUPO)!
+    Carrega mapas de configuração, incluindo o novo Aprendizado Manual.
     """
-    global _CATALOGO_CODIGO, _CATALOGO_NOME, _MAPA_LOTES_PLANILHA, _MAPA_GRUPOS, _DE_PARA_CORRECOES
+    global _CATALOGO_CODIGO, _CATALOGO_NOME, _MAPA_LOTES_PLANILHA, _MAPA_GRUPOS, _DE_PARA_CORRECOES, _MAPA_APRENDIZADO
     
     print("--- 🔄 ETL: Carregando referências estáticas... ---")
     
@@ -49,7 +50,7 @@ def carregar_referencias_estaticas():
     # 2. Carrega Planilha de Lotes (Local/SharePoint)
     _MAPA_LOTES_PLANILHA = carregar_dicionario_lotes()
     
-    # 3. [ATUALIZADO] Mapa de Grupos via SQL Server (Tabela dbo.GRUPO)
+    # 3. Mapa de Grupos via SQL Server
     print("   > Carregando Grupos de Máquinas do SQL Server...")
     _MAPA_GRUPOS = {}
     conn = None
@@ -57,13 +58,8 @@ def carregar_referencias_estaticas():
         conn = connect_to_database()
         cursor = conn.cursor()
         
-        # --- QUERY AJUSTADA PARA SUA TABELA REAL ---
         query_grupos = '''
-        SELECT 
-            COD_GRUPO, 
-            NOME,    
-            MAQUINA  
-        FROM dbo.GRUPO
+        SELECT COD_GRUPO, NOME, MAQUINA FROM dbo.GRUPO
         '''
         
         cursor.execute(query_grupos)
@@ -72,45 +68,22 @@ def carregar_referencias_estaticas():
         for row in rows:
             c_grupo = row[0]
             c_nome = str(row[1]).strip().upper()
-            c_maquina = row[2] # Pode vir como int (1, 3) ou string
+            c_maquina = row[2] 
             
             tipo_normalizado = "INDEFINIDO"
             str_maquina = str(c_maquina).strip()
             
-            # Lógica baseada na sua informação:
-            # Máquina 1 = Reômetro
-            # Máquina 3 = Viscosímetro
-            
-            if str_maquina == '1': 
-                tipo_normalizado = "REOMETRO"
-            elif str_maquina == '3': 
-                tipo_normalizado = "VISCOSIMETRO"
-            # Fallback pelo nome se o código da máquina estiver vazio ou diferente
-            elif "VISC" in c_nome: 
-                tipo_normalizado = "VISCOSIMETRO"
-            elif "REO" in c_nome or "MDR" in c_nome:
-                tipo_normalizado = "REOMETRO"
+            if str_maquina == '1': tipo_normalizado = "REOMETRO"
+            elif str_maquina == '3': tipo_normalizado = "VISCOSIMETRO"
+            elif "VISC" in c_nome: tipo_normalizado = "VISCOSIMETRO"
+            elif "REO" in c_nome or "MDR" in c_nome: tipo_normalizado = "REOMETRO"
                 
-            _MAPA_GRUPOS[c_grupo] = {
-                'tipo': tipo_normalizado,
-                'descricao': c_nome
-            }
+            _MAPA_GRUPOS[c_grupo] = {'tipo': tipo_normalizado, 'descricao': c_nome}
             
         print(f"   ✅ {len(_MAPA_GRUPOS)} grupos carregados da tabela dbo.GRUPO.")
         
     except Exception as e:
         print(f"⚠️ Erro ao carregar Grupos do SQL: {e}")
-        # Fallback (opcional): Tenta ler o Excel antigo se o banco falhar
-        if os.path.exists("mapa_tipo_equipamentos.xlsx"):
-            print("   -> Usando mapa_tipo_equipamentos.xlsx como backup.")
-            try:
-                df_g = pd.read_excel("mapa_tipo_equipamentos.xlsx")
-                for _, row in df_g.iterrows():
-                    _MAPA_GRUPOS[row['COD_GRUPO']] = {
-                        'tipo': row['TIPO SUGERIDO'], 
-                        'descricao': 'VIA EXCEL (BACKUP)'
-                    }
-            except: pass
     finally:
         if conn: conn.close()
 
@@ -121,6 +94,10 @@ def carregar_referencias_estaticas():
             with open("de_para_massas.json", 'r', encoding='utf-8') as f:
                 _DE_PARA_CORRECOES = json.load(f)
         except: pass
+
+    # 5. Aprendizado Manual (Prioridade Máxima)
+    _MAPA_APRENDIZADO = carregar_aprendizado()
+    print(f"   🧠 Memória carregada: {len(_MAPA_APRENDIZADO)} lotes ensinados manualmente.")
 
 def extrair_lote_da_string(texto_sujo):
     if not texto_sujo: return None, None
@@ -160,41 +137,28 @@ def match_nome_inteligente(texto_bruto):
     return None
 
 def classificar_tipo_ensaio(ensaio, temp_plato):
-    """
-    Define se é ALTA, BAIXA ou VISCOSIDADE.
-    """
-    # 1. Tenta pegar a definição oficial do Grupo (Se o banco tiver a info correta)
     dados_grupo = _MAPA_GRUPOS.get(ensaio.cod_grupo)
     if dados_grupo:
         tipo_oficial = dados_grupo.get('tipo', 'INDEFINIDO')
-        if tipo_oficial == 'VISCOSIMETRO':
-            return 'VISCOSIDADE'
-        if tipo_oficial == 'REOMETRO':
-            # Se for Reômetro, ainda precisamos saber se é Alta ou Baixa
-            pass 
+        if tipo_oficial == 'VISCOSIMETRO': return 'VISCOSIDADE'
+        if tipo_oficial == 'REOMETRO': pass 
     
-    # 2. Definição por Nome do Perfil (Ex: "Viscosidade Mooney")
     nome_perfil = getattr(ensaio, 'nome_perfil_usado', '') or ''
     nome_up = nome_perfil.upper()
     if "VISC" in nome_up or "MOONEY" in nome_up: return "VISCOSIDADE"
     if "ALTA" in nome_up: return "ALTA"
     if "BAIXA" in nome_up: return "BAIXA"
 
-    # 3. Definição por Temperatura (Heurística)
     temp = temp_plato or 0
-    
-    if temp >= 175: return "ALTA"          # Reometria (Cura Rápida)
-    if 120 <= temp < 175: return "BAIXA"   # Reometria (Scorch)
-    if 90 <= temp < 120: return "VISCOSIDADE" # <--- CORREÇÃO: Faixa típica Mooney (100°C)
-    
-    # Fallback: Se não caiu em nada, assume Reometria (Alta) para não quebrar
+    if temp >= 175: return "ALTA"
+    if 120 <= temp < 175: return "BAIXA"
+    if 90 <= temp < 120: return "VISCOSIDADE"
     return "ALTA"
 
 
 # --- LÓGICA PRINCIPAL ---
 
 def processar_carga_dados(data_corte='2025-07-01'):
-    # Garante que as referências existam (Lazy Loading)
     if not _CATALOGO_CODIGO:
         carregar_referencias_estaticas()
 
@@ -231,45 +195,90 @@ def processar_carga_dados(data_corte='2025-07-01'):
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
         
-        lote_final, _ = extrair_lote_da_string(lote_orig)
-        if not lote_final: lote_final, _ = extrair_lote_da_string(amostra)
+        # 1. Normalização Agressiva para a CHAVE DE BUSCA
+        # Remove espaços extras nas pontas e converte para maiúsculo
+        key_lote_orig = str(lote_orig).strip().upper()
+       
+        produto = None
+        equip_planilha = None
+        metodo_id = "FANTASMA"
         
-        chave_lote = lote_final if lote_final else str(lote_orig).strip().upper()
+        # Variáveis finais (padrão)
+        lote_final = None
+        chave_lote = key_lote_orig # Se não achar nada, usa o original (sujo)
+
+        dados_grupo = _MAPA_GRUPOS.get(grupo, {})
+        tipo_equip = dados_grupo.get('tipo', 'INDEFINIDO')
+        usar_cod = (tipo_equip != "VISCOSIMETRO") 
+
+        # --- [PRIORIDADE 0] MEMÓRIA DE APRENDIZADO (CORREÇÃO TOTAL) ---
+        match_aprendido = _MAPA_APRENDIZADO.get(key_lote_orig)
+        
+        if match_aprendido:
+            # Sobrescreve com o que o usuário ensinou
+            lote_final = match_aprendido.get('lote_real')
+            nome_massa_aprendida = match_aprendido.get('massa')
+            
+            # Atualiza a chave de agrupamento para o lote limpo/correto
+            chave_lote = lote_final
+            
+            produto = match_nome_inteligente(nome_massa_aprendida)
+            if produto:
+                metodo_id = "MANUAL" # 🔵 Ensinado pelo usuário
+        
+        else:
+            # --- [PRIORIDADE 1] BUSCA AUTOMÁTICA (Planilha / Regex) ---
+            lote_final, _ = extrair_lote_da_string(lote_orig)
+            if not lote_final: lote_final, _ = extrair_lote_da_string(amostra)
+            
+            if lote_final:
+                chave_lote = lote_final # Usa o lote limpo
+                
+                dados_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
+                
+                if dados_planilha:
+                    # Lógica de Ano (Correção de Colisão)
+                    if isinstance(dados_planilha, dict) and 'massa' not in dados_planilha:
+                        try:
+                            data_ensaio = row['DATA']
+                            ano_ensaio = str(data_ensaio.year) if hasattr(data_ensaio, 'year') else str(pd.to_datetime(data_ensaio).year)
+                        except:
+                            ano_ensaio = str(datetime.now().year)
+                        
+                        item_ano = dados_planilha.get(ano_ensaio)
+                        if not item_ano:
+                            try:
+                                anos_ordenados = sorted(dados_planilha.keys())
+                                if anos_ordenados: item_ano = dados_planilha[anos_ordenados[-1]]
+                            except: pass
+                        
+                        if item_ano: dados_planilha = item_ano
+
+                    # Extração dos dados
+                    if isinstance(dados_planilha, dict):
+                        nome_massa = dados_planilha.get('massa')
+                        equip_planilha = dados_planilha.get('equipamento')
+                    else:
+                        nome_massa = dados_planilha
+                    
+                    if nome_massa: 
+                        produto = match_nome_inteligente(nome_massa)
+                        if produto:
+                            metodo_id = "LOTE" # ✅ Identificado via Planilha
+            
+            # --- [PRIORIDADE 2] BUSCA POR TEXTO (FALLBACK) ---
+            if not produto:
+                produto = match_nome_inteligente(amostra)
+                if not produto and usar_cod: 
+                    produto = match_nome_inteligente(row['CODIGO_REO'])
+                
+                if produto:
+                    metodo_id = "TEXTO" # ⚠️ Identificado via Fuzzy/Texto
+
+        # --- AGRUPAMENTO ---
         try: chave_batch = int(row['BATCH'])
         except: chave_batch = 0
         chave_unica = (chave_lote, chave_batch)
-        
-        # --- LÓGICA DE IDENTIFICAÇÃO ---
-        produto = None
-        equip_planilha = None # <--- Variável para capturar Cinza/Preto
-
-        # Busca tipo da máquina no mapa carregado do DB
-        dados_grupo = _MAPA_GRUPOS.get(grupo, {})
-        tipo_equip = dados_grupo.get('tipo', 'INDEFINIDO')
-        
-        # Se for viscosímetro (Máquina 3), ignorar código do reômetro
-        usar_cod = (tipo_equip != "VISCOSIMETRO") 
-        
-        if lote_final:
-            # AGORA O GET RETORNA UM DICIONÁRIO { 'massa': ..., 'equipamento': ... }
-            dados_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
-            
-            if dados_planilha:
-                # Compatibilidade: verifica se é dict novo ou string antiga (caso ETL falhe)
-                if isinstance(dados_planilha, dict):
-                    nome_massa = dados_planilha.get('massa')
-                    equip_planilha = dados_planilha.get('equipamento')
-                else:
-                    nome_massa = dados_planilha # Fallback
-                
-                if nome_massa: 
-                    produto = match_nome_inteligente(nome_massa)
-        
-        if not produto:
-            produto = match_nome_inteligente(amostra)
-            if not produto and usar_cod: 
-                produto = match_nome_inteligente(row['CODIGO_REO'])
-        # -------------------------------
 
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
@@ -279,14 +288,18 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 'ts2': None, 't90': None, 'visc': None,
                 'temps': [], 'tempos_max': [], 'tempo_max': None,
                 'grupos': set(),
-                'equip_planilha': equip_planilha # <--- Armazena no agrupamento
+                'equip_planilha': equip_planilha,
+                'metodo_id': metodo_id
             }
         
-        # Se encontrou equipamento agora e antes não tinha, atualiza
-        if equip_planilha and not dados_agrupados[chave_unica]['equip_planilha']:
-            dados_agrupados[chave_unica]['equip_planilha'] = equip_planilha
-        
+        # Atualiza se encontrou melhor info (ex: equipamento)
         reg = dados_agrupados[chave_unica]
+        if equip_planilha and not reg['equip_planilha']: reg['equip_planilha'] = equip_planilha
+        
+        # Atualiza método se melhorou (FANTASMA -> MANUAL/LOTE)
+        if reg['metodo_id'] == "FANTASMA" and metodo_id != "FANTASMA":
+            reg['metodo_id'] = metodo_id
+            
         reg['ids_ensaio'].append(row['COD_ENSAIO'])
         reg['grupos'].add(grupo)
         if not reg['massa'] and produto: reg['massa'] = produto
@@ -356,8 +369,8 @@ def processar_carga_dados(data_corte='2025-07-01'):
             equipamento_planilha=dados.get('equip_planilha') 
         )
         
-        # Se quiser guardar o nome do grupo no objeto Ensaio para mostrar na tela:
-        # novo_ensaio.nome_grupo = _MAPA_GRUPOS.get(grupo_id, {}).get('descricao', '---')
+        # --- ATRIBUIÇÃO DO MÉTODO DE IDENTIFICAÇÃO ---
+        novo_ensaio.metodo_identificacao = dados.get('metodo_id', 'FANTASMA')
         
         novo_ensaio.calcular_score()
         novo_ensaio.tipo_ensaio = classificar_tipo_ensaio(novo_ensaio, temp_princ)
@@ -377,5 +390,4 @@ def processar_carga_dados(data_corte='2025-07-01'):
     }
 
 def get_catalogo_codigo():
-    """Retorna a referência atualizada do catálogo de códigos."""
     return _CATALOGO_CODIGO
