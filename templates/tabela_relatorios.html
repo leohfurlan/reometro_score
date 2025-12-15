@@ -1,0 +1,164 @@
+<div class="table-responsive bg-white shadow-sm rounded border">
+    <table class="table table-hover align-middle mb-0">
+        <thead class="bg-light text-secondary small text-uppercase">
+            <tr>
+                <th style="width: 40px;"></th>
+                
+                <th>
+                    <a href="#" hx-get="{{ url_for('pagina_relatorios', sort='cod', order='asc' if order=='desc' else 'desc', search=search_term) }}" 
+                       hx-target="#tabela-relatorios-container" hx-push-url="true" class="text-decoration-none text-secondary">
+                        Cód <i class="fas fa-sort{{ '-down' if sort_by=='cod' and order=='desc' else '-up' if sort_by=='cod' else '' }} ms-1"></i>
+                    </a>
+                </th>
+                <th>
+                    <a href="#" hx-get="{{ url_for('pagina_relatorios', sort='nome', order='asc' if order=='desc' else 'desc', search=search_term) }}" 
+                       hx-target="#tabela-relatorios-container" hx-push-url="true" class="text-decoration-none text-secondary">
+                        Descrição da Massa <i class="fas fa-sort{{ '-down' if sort_by=='nome' and order=='desc' else '-up' if sort_by=='nome' else '' }} ms-1"></i>
+                    </a>
+                </th>
+                
+                <th class="text-center">Lotes</th>
+                
+                <th class="text-center">
+                    <a href="#" hx-get="{{ url_for('pagina_relatorios', sort='aprovacao', order='asc' if order=='desc' else 'desc', search=search_term) }}" 
+                       hx-target="#tabela-relatorios-container" hx-push-url="true" class="text-decoration-none text-secondary">
+                        Aprovação <i class="fas fa-sort{{ '-down' if sort_by=='aprovacao' and order=='desc' else '-up' if sort_by=='aprovacao' else '' }} ms-1"></i>
+                    </a>
+                </th>
+                <th class="text-center">
+                    <a href="#" hx-get="{{ url_for('pagina_relatorios', sort='score', order='asc' if order=='desc' else 'desc', search=search_term) }}" 
+                       hx-target="#tabela-relatorios-container" hx-push-url="true" class="text-decoration-none text-secondary">
+                        Score Médio <i class="fas fa-sort{{ '-down' if sort_by=='score' and order=='desc' else '-up' if sort_by=='score' else '' }} ms-1"></i>
+                    </a>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in relatorio %}
+            <tr class="cursor-pointer" data-bs-toggle="collapse" data-bs-target="#row-{{ loop.index }}" aria-expanded="false">
+                <td class="text-center text-muted"><i class="fas fa-chevron-right small transition-icon"></i></td>
+                <td class="fw-bold text-muted">{{ item.cod }}</td>
+                <td class="fw-bold text-dark">{{ item.nome }}</td>
+                
+                <td class="text-center"><span class="badge bg-white text-dark border">{{ item.qtd_lotes_unicos }}</span></td>
+                
+                <td class="text-center">
+                    {% set taxa = item.kpi.taxa_aprovacao %}
+                    <span class="badge {% if taxa >= 95 %}bg-success{% elif taxa >= 80 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                        {{ "%.1f"|format(taxa) }}%
+                    </span>
+                </td>
+                
+                <td class="text-center">
+                    <div class="d-flex align-items-center justify-content-center">
+                        <div class="progress flex-grow-1 me-2" style="height: 6px; max-width: 60px;">
+                            <div class="progress-bar {% if item.kpi.score_medio >= 85 %}bg-success{% else %}bg-warning{% endif %}" 
+                                 role="progressbar" style="width: {{ item.kpi.score_medio }}%"></div>
+                        </div>
+                        <span class="small fw-bold">{{ "%.0f"|format(item.kpi.score_medio) }}</span>
+                    </div>
+                </td>
+            </tr>
+
+            <tr class="collapse bg-light border-bottom" id="row-{{ loop.index }}">
+                <td colspan="6" class="p-4">
+                    <div class="row g-4 align-items-start">
+                        
+                        <div class="col-md-2 border-end pe-4">
+                            <h6 class="text-secondary x-small fw-bold mb-3 text-uppercase">Ações</h6>
+                            <a href="{{ url_for('detalhes_lotes_massa', cod_sankhya=item.cod) }}" 
+                            class="btn btn-outline-primary w-100 btn-sm mb-2">
+                                <i class="fas fa-list-ul me-2"></i> Ver Lista de Lotes
+                            </a>
+                            <div class="text-muted x-small text-center mt-2">
+                                Base: {{ item.kpi.total_batches }} ensaios
+                            </div>
+                        </div>
+
+                        <div class="col-md-5 border-end px-4">
+                            <div class="d-flex align-items-center mb-3">
+                                <h6 class="text-danger x-small fw-bold mb-0 me-2">ALTA TEMPERATURA (CURA)</h6>
+                                {% if item.medias_gerais.qtd_alta == 0 %}
+                                    <span class="badge bg-light text-muted border">Sem dados</span>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <div class="p-2 bg-white rounded border shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-muted x-small fw-bold">Média Ts2</span>
+                                            <i class="fas fa-fire text-danger opacity-25"></i>
+                                        </div>
+                                        <div class="fs-5 fw-bold text-dark mt-1">
+                                            {{ "%.2f"|format(item.medias_gerais.alta_ts2) if item.medias_gerais.alta_ts2 else '--' }} <small class="fs-6 text-muted">s</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="p-2 bg-white rounded border shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-muted x-small fw-bold">Média T90</span>
+                                            <i class="fas fa-clock text-danger opacity-25"></i>
+                                        </div>
+                                        <div class="fs-5 fw-bold text-dark mt-1">
+                                            {{ "%.2f"|format(item.medias_gerais.alta_t90) if item.medias_gerais.alta_t90 else '--' }} <small class="fs-6 text-muted">s</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-5 ps-4">
+                            <div class="d-flex align-items-center mb-3">
+                                <h6 class="text-primary x-small fw-bold mb-0 me-2">BAIXA TEMP / VISCOSIDADE</h6>
+                            </div>
+
+                            <div class="row g-2">
+                                <div class="col-4">
+                                    <div class="p-2 bg-white rounded border shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-muted x-small fw-bold">Ts2 (Bx)</span>
+                                        </div>
+                                        <div class="fs-5 fw-bold text-dark mt-1">
+                                            {{ "%.2f"|format(item.medias_gerais.baixa_ts2) if item.medias_gerais.baixa_ts2 else '--' }}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 bg-white rounded border shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-muted x-small fw-bold">T90 (Bx)</span>
+                                        </div>
+                                        <div class="fs-5 fw-bold text-dark mt-1">
+                                            {{ "%.2f"|format(item.medias_gerais.baixa_t90) if item.medias_gerais.baixa_t90 else '--' }}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 bg-white rounded border shadow-sm border-start border-4 border-info">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-muted x-small fw-bold">Visc.</span>
+                                            <i class="fas fa-water text-info opacity-50"></i>
+                                        </div>
+                                        <div class="fs-5 fw-bold text-dark mt-1">
+                                            {{ "%.1f"|format(item.medias_gerais.visc) if item.medias_gerais.visc else '--' }} <small class="fs-6 text-muted" style="font-size: 0.6em;">MU</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<style>
+    .transition-icon { transition: transform 0.2s; }
+    tr[aria-expanded="true"] .transition-icon { transform: rotate(90deg); }
+    .cursor-pointer { cursor: pointer; }
+</style>

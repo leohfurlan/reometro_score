@@ -7,12 +7,14 @@ from cache_manager import CacheManager
 from datetime import datetime
 import math
 import os
+import statistics 
 
 # Configurações e Modelos
 from config import Config
-from services.config_manager import salvar_configuracao
-from services.config_manager import carregar_regras_acao, salvar_regras_acao
+from services.config_manager import carregar_regras_acao, salvar_regras_acao, salvar_configuracao
 from services.learning_service import ensinar_lote
+from services.report_service import gerar_estrutura_relatorio
+
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
@@ -480,54 +482,42 @@ def api_grafico():
             return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
 
         ids_str = request.args.get('ids', '')
+        modo_lote = request.args.get('mode', '') == 'lote' 
+        
         if not ids_str: return jsonify({})
 
-        # 1. IDs das LINHAS selecionadas (Pais)
+        # 1. IDs das LINHAS selecionadas
         selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
         
-        if len(selected_parent_ids) > 10:
-            return jsonify({'error': 'Selecione no máximo 10 linhas.'}), 400
+        # Limite dinâmico
+        limite = 100 if modo_lote else 10
+        
+        if len(selected_parent_ids) > limite:
+            return jsonify({'error': f'Muitos dados ({len(selected_parent_ids)}). Limite é {limite}.'}), 400
 
-        all_ids_to_fetch = set() # Usar Set para evitar duplicidade
+        all_ids_to_fetch = set()
         map_id_to_parent = {} 
 
-        print(f"DEBUG: Solicitados IDs Pais: {selected_parent_ids}")
-
-        # 2. Expandir para pegar TODOS os IDs do agrupamento
-        count_found = 0
+        # 2. Expandir IDs
         for cached in dados_cache['dados']:
-            # Força int para comparação segura
             cached_id = int(cached.id_ensaio)
-            
             if cached_id in selected_parent_ids:
-                count_found += 1
-                
-                # Pega a lista de IDs agrupados. Se não existir, usa o próprio ID
-                ids_filhos = getattr(cached, 'ids_agrupados', [])
-                if not ids_filhos:
-                    ids_filhos = [cached_id]
-                
-                # Garante que todos sejam inteiros e mapeia
+                ids_filhos = getattr(cached, 'ids_agrupados', []) or [cached_id]
                 for child_id in ids_filhos:
                     c_id_int = int(child_id)
                     all_ids_to_fetch.add(c_id_int)
-                    map_id_to_parent[c_id_int] = cached # Mapeia Filho -> Objeto Pai
-
-        print(f"DEBUG: IDs reais para buscar no banco (Filhos): {all_ids_to_fetch}")
+                    map_id_to_parent[c_id_int] = cached
 
         if not all_ids_to_fetch:
-            print("DEBUG: Nenhum ID encontrado no cache.")
             return jsonify({'error': 'IDs não encontrados no cache.'}), 404
 
-        # 3. Busca Dados Brutos
+        # 3. Busca SQL
         conn = connect_to_database()
         cursor = conn.cursor()
         
-        # Query segura com placeholders
         lista_ids = list(all_ids_to_fetch)
         placeholders = ','.join('?' * len(lista_ids))
         
-        # Nota: Usamos V.TEMPO e V.TORQUE (Verifique se no seu banco é V.TORQUE ou outro nome)
         query = f'''
             SELECT 
                 V.COD_ENSAIO, 
@@ -541,91 +531,74 @@ def api_grafico():
             ORDER BY V.COD_ENSAIO, V.TEMPO
         '''
         
-        try:
-            cursor.execute(query, lista_ids)
-            rows = cursor.fetchall()
-            print(f"DEBUG: Linhas retornadas do SQL: {len(rows)}")
-        except Exception as e:
-            print(f"ERRO SQL: {e}")
-            return jsonify({'error': f'Erro no Banco de Dados: {str(e)}'}), 500
-        finally:
-            conn.close()
+        cursor.execute(query, lista_ids)
+        rows = cursor.fetchall()
+        conn.close()
 
         if not rows:
-            return jsonify({'error': 'Nenhum ponto de curva encontrado no banco para estes IDs.'}), 404
+            return jsonify({'error': 'Nenhum ponto de curva encontrado.'}), 404
 
         # 4. Processamento
         datasets_reo = {}
         datasets_visc = {}
-        materiais = set()
         
         for row in rows:
-            c_id = int(row[0]) # ID do ensaio (Filho)
+            c_id = int(row[0])
             c_time = float(row[1])
             c_val = float(row[2])
             c_temp = float(row[3]) if row[3] else 0
             c_grupo = row[4]
             
-            # AQUI ESTAVA O ERRO: O map precisa encontrar o ID
             parent = map_id_to_parent.get(c_id)
+            if not parent: continue
             
-            if not parent: 
-                # Se não achou, tenta achar pelo ID do pai se o agrupamento falhou
-                continue
-            
-            materiais.add(parent.massa.descricao)
-            
-            # --- LÓGICA DE CLASSIFICAÇÃO ---
+            # Classificação
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
             tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
             
             is_viscosity = False
             
-            # Prioridade 1: Mapa de Equipamentos
-            if tipo_maquina == 'VISCOSIMETRO':
-                is_viscosity = True
-            elif tipo_maquina == 'REOMETRO':
-                is_viscosity = False
+            if tipo_maquina == 'VISCOSIMETRO': is_viscosity = True
+            elif tipo_maquina == 'REOMETRO': is_viscosity = False
             else:
-                # Prioridade 2: Temperatura (Fallback)
                 if 90 <= c_temp <= 115: is_viscosity = True
                 elif c_temp >= 120: is_viscosity = False
-                else:
-                    # Prioridade 3: Tipo definido no Pai
-                    pai_tipo = getattr(parent, 'tipo_ensaio', '').upper()
-                    is_viscosity = (pai_tipo == 'VISCOSIDADE')
+                else: is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
 
             target_dict = datasets_visc if is_viscosity else datasets_reo
             
-            # Chave única para o dataset: ID do filho
             if c_id not in target_dict:
-                # Label Solicitada: CÓDIGO - LOTE - BATCH
                 cod_s = parent.massa.cod_sankhya if parent.massa else '??'
-                lote_s = parent.lote
                 batch_s = parent.batch if parent.batch else '0'
+                label = f"{cod_s} - Batch {batch_s}"
                 
-                label = f"{cod_s} - {lote_s} - {batch_s}"
-                
+                # --- NOVO: Classificação do Subtipo para o Filtro ---
+                temp_type = 'GERAL'
+                if not is_viscosity:
+                    temp_type = 'ALTA' if c_temp >= 175 else 'BAIXA'
+                # ----------------------------------------------------
+
                 target_dict[c_id] = {
                     'label': label,
-                    'material': parent.massa.descricao,
+                    'tempType': temp_type, # <--- Enviando para o Frontend
                     'data': [],
                     'pointRadius': 0,
                     'borderWidth': 2,
                     'tension': 0.4,
-                    'fill': False
+                    'fill': False,
+                    # Cores dinâmicas
+                    'borderColor': '#dc3545' if temp_type == 'ALTA' else '#0d6efd'
                 }
             
             target_dict[c_id]['data'].append({'x': c_time, 'y': c_val})
 
         return jsonify({
             'reometria': list(datasets_reo.values()),
-            'viscosidade': list(datasets_visc.values()),
-            'materiais': list(materiais)
+            'viscosidade': list(datasets_visc.values())
         })
         
     except Exception as e:
-        print(f"ERRO GERAL API: {e}")
+        print(f"ERRO API: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -730,6 +703,176 @@ def salvar_correcao():
         flash("Erro ao salvar.", "danger")
         
     return redirect(url_for('pagina_auditoria'))
+
+
+# ==========================================
+# ROTAS NOVAS (RELATÓRIOS E GESTÃO)
+# ==========================================
+
+@app.route('/relatorios')
+@login_required
+def pagina_relatorios():
+    dados_cache = cache_service.get()
+    if not dados_cache: return redirect(url_for('dashboard'))
+    
+    # Captura filtros
+    busca = request.args.get('search', '').strip()
+    sort_by = request.args.get('sort', 'nome')
+    order = request.args.get('order', 'asc')
+
+    relatorio_estruturado = gerar_estrutura_relatorio(
+        dados_cache['dados'], busca=busca, ordenar_por=sort_by, ordem=order
+    )
+    
+    context = {
+        'relatorio': relatorio_estruturado,
+        'ultimo_update': dados_cache['ultimo_update'],
+        'total_massas': len(relatorio_estruturado),
+        'search_term': busca, 'sort_by': sort_by, 'order': order
+    }
+
+    if request.headers.get('HX-Request'):
+        return render_template('tabela_relatorios.html', **context)
+    
+    return render_template('relatorios.html', **context)
+
+# Rota da Lista de Lotes (Agora com Filtros e Ordenação)
+@app.route('/relatorios/detalhes/<int:cod_sankhya>')
+@login_required
+def detalhes_lotes_massa(cod_sankhya):
+    dados_cache = cache_service.get()
+    if not dados_cache: return redirect(url_for('dashboard'))
+    
+    # Filtra os dados brutos
+    lista_filtrada = [e for e in dados_cache['dados'] if e.massa.cod_sankhya == cod_sankhya]
+    
+    # Gera a árvore (com os novos KPIs de lote)
+    relatorio = gerar_estrutura_relatorio(lista_filtrada)
+    if not relatorio: return "Material não encontrado ou sem dados."
+    
+    massa_node = relatorio[0]
+    
+    # --- Lógica de Ordenação e Filtro da Lista de Lotes ---
+    lotes_lista = list(massa_node['lotes'].values())
+    
+    sort_by = request.args.get('sort', 'data')
+    order = request.args.get('order', 'desc')
+    search_lote = request.args.get('search', '').upper()
+    
+    # Filtro de Busca
+    if search_lote:
+        lotes_lista = [l for l in lotes_lista if search_lote in str(l['numero']).upper()]
+    
+    # Ordenação
+    reverse = (order == 'desc')
+    if sort_by == 'data':
+        lotes_lista.sort(key=lambda x: x['data_recente'], reverse=reverse)
+    elif sort_by == 'lote':
+        lotes_lista.sort(key=lambda x: x['numero'], reverse=reverse)
+    elif sort_by == 'score':
+        lotes_lista.sort(key=lambda x: x['kpi_lote']['score_medio'], reverse=reverse)
+    elif sort_by == 'qtd':
+        lotes_lista.sort(key=lambda x: x['kpi_lote']['total'], reverse=reverse)
+
+    context = {
+        'massa': massa_node,
+        'lotes': lotes_lista,
+        'sort_by': sort_by,
+        'order': order,
+        'search_term': search_lote
+    }
+
+    # Se for HTMX, retorna só o tbody
+    if request.headers.get('HX-Request'):
+        return render_template('partial_lista_lotes.html', **context)
+
+    return render_template('lista_lotes.html', **context)
+
+
+@app.route('/relatorios/lote/<int:cod_sankhya>/<path:numero_lote>')
+@login_required
+def detalhe_lote_view(cod_sankhya, numero_lote):
+    dados_cache = cache_service.get()
+    if not dados_cache: return "Cache vazio."
+    
+    # 1. Recupera Ensaios do Lote
+    ensaios_do_lote = [
+        e for e in dados_cache['dados'] 
+        if e.massa.cod_sankhya == cod_sankhya and str(e.lote) == str(numero_lote)
+    ]
+    
+    if not ensaios_do_lote: return "Lote não encontrado."
+
+    # 2. Lógica de Ordenação da Tabela
+    sort_by = request.args.get('sort', 'batch') # Padrão: Batch
+    order = request.args.get('order', 'asc')    # Padrão: Crescente
+    reverse = (order == 'desc')
+
+    def safe_sort_key(obj, attr, default=0):
+        val = getattr(obj, attr, default)
+        return val if val is not None else default
+
+    if sort_by == 'id':
+        ensaios_do_lote.sort(key=lambda x: x.id_ensaio, reverse=reverse)
+    elif sort_by == 'hora':
+        ensaios_do_lote.sort(key=lambda x: x.data_hora, reverse=reverse)
+    elif sort_by == 'batch':
+        # Tenta converter para int para ordenar corretamente (1, 2, 10 e não 1, 10, 2)
+        def batch_key(x):
+            try: return int(x.batch)
+            except: return 0
+        ensaios_do_lote.sort(key=batch_key, reverse=reverse)
+    elif sort_by == 'temp':
+        ensaios_do_lote.sort(key=lambda x: x.temp_plato, reverse=reverse)
+    elif sort_by == 'score':
+        ensaios_do_lote.sort(key=lambda x: x.score_final, reverse=reverse)
+
+    # 3. Gera Árvore para KPIs (Score Geral, Aprovação)
+    arvore = gerar_estrutura_relatorio(ensaios_do_lote)
+    dados_lote = arvore[0]['lotes'][numero_lote]
+    dados_massa = arvore[0]
+
+    # 4. Cálculo Robusto de Médias (Corrigindo Viscosidade Zerada)
+    coleta = {
+        'alta': {'Ts2': [], 'T90': []},
+        'baixa': {'Ts2': [], 'T90': []},
+        'visc': []
+    }
+
+    for e in ensaios_do_lote:
+        temp = e.temp_plato or 0
+        contexto = 'alta' if temp >= 175 else 'baixa'
+        vals = e.valores_medidos
+        
+        if vals.get('Ts2') and vals['Ts2'] > 0: coleta[contexto]['Ts2'].append(vals['Ts2'])
+        if vals.get('T90') and vals['T90'] > 0: coleta[contexto]['T90'].append(vals['T90'])
+        
+        # Correção aqui: Só adiciona se for maior que 0
+        if vals.get('Viscosidade') and vals['Viscosidade'] > 0.1: 
+            coleta['visc'].append(vals['Viscosidade'])
+
+    def media_segura(lista):
+        return statistics.mean(lista) if lista else 0
+
+    dados_lote['medias_detalhadas'] = {
+        'alta_ts2': media_segura(coleta['alta']['Ts2']),
+        'alta_t90': media_segura(coleta['alta']['T90']),
+        'baixa_ts2': media_segura(coleta['baixa']['Ts2']),
+        'baixa_t90': media_segura(coleta['baixa']['T90']),
+        'visc': media_segura(coleta['visc']),
+        'tem_alta': bool(coleta['alta']['Ts2'] or coleta['alta']['T90']),
+        'tem_baixa': bool(coleta['baixa']['Ts2'] or coleta['baixa']['T90'])
+    }
+
+    return render_template(
+        'detalhe_lote.html', 
+        lote=dados_lote, 
+        massa=dados_massa,
+        ensaios=ensaios_do_lote,
+        # Passamos os params para manter a ordenação nos links
+        sort_by=sort_by,
+        order=order
+    )
 
 
 if __name__ == '__main__':

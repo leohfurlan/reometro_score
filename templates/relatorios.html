@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Relatórios de Gestão - ReoScore{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-chart-line me-2"></i>Gestão de Laboratório</h2>
+            <p class="text-muted small">Indicadores consolidados de Qualidade por Massa e Lote.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Imprimir
+            </button>
+        </div>
+    </div>
+
+    <div class="card mb-4 border-0 shadow-sm bg-light">
+        <div class="card-body py-3">
+            <form hx-get="{{ url_for('pagina_relatorios') }}" 
+                  hx-target="#tabela-relatorios-container" 
+                  hx-trigger="keyup changed delay:500ms, search" 
+                  class="row g-3 align-items-center">
+                
+                <div class="col-md-6">
+                    <label class="form-label small fw-bold text-muted">Filtrar Massas</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                        <input type="search" name="search" class="form-control border-start-0 ps-0" 
+                               placeholder="Digite o nome ou código..." value="{{ search_term }}">
+                    </div>
+                </div>
+                
+                <div class="col-md-6 text-end align-self-end">
+                    <span class="text-muted small me-2">Total listado: <strong class="text-dark">{{ total_massas }}</strong> materiais</span>
+                </div>
+                
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="order" value="{{ order }}">
+            </form>
+        </div>
+    </div>
+
+    <div id="tabela-relatorios-container">
+        {% include 'tabela_relatorios.html' %}
+    </div>
+
+</div>
+{% endblock %}

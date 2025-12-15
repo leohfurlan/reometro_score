@@ -195,10 +195,9 @@ def processar_carga_dados(data_corte='2025-07-01'):
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
         
-        # 1. Normalização Agressiva para a CHAVE DE BUSCA
-        # Remove espaços extras nas pontas e converte para maiúsculo
+        # Chaves para busca
         key_lote_orig = str(lote_orig).strip().upper()
-       
+        
         produto = None
         equip_planilha = None
         metodo_id = "FANTASMA"
@@ -318,17 +317,37 @@ def processar_carga_dados(data_corte='2025-07-01'):
             if not reg['tempo_max']: reg['tempo_max'] = v_max
             if v_max not in reg['tempos_max']: reg['tempos_max'].append(v_max)
 
-    # Médias de Viscosidade
-    medias_visc_por_lote = {}
-    acumulador_lote = {}
+    # --- 📊 NOVO BLOCO: CÁLCULO DE MÉDIAS ESTATÍSTICAS POR LOTE ---
+    acumuladores = {
+        'visc': {},
+        'ts2': {},
+        't90': {}
+    }
+
+    # 1. Coleta os valores de todos os ensaios do mesmo lote (independente do batch)
     for dados in dados_agrupados.values():
         l = dados['lote_visivel']
-        v = dados['visc']
-        if v:
-            if l not in acumulador_lote: acumulador_lote[l] = []
-            acumulador_lote[l].append(v)
-    for l, vals in acumulador_lote.items():
-        medias_visc_por_lote[l] = sum(vals) / len(vals)
+        
+        if dados['visc']:
+            if l not in acumuladores['visc']: acumuladores['visc'][l] = []
+            acumuladores['visc'][l].append(dados['visc'])
+            
+        if dados['ts2']:
+            if l not in acumuladores['ts2']: acumuladores['ts2'][l] = []
+            acumuladores['ts2'][l].append(dados['ts2'])
+
+        if dados['t90']:
+            if l not in acumuladores['t90']: acumuladores['t90'][l] = []
+            acumuladores['t90'][l].append(dados['t90'])
+
+    # 2. Calcula as médias
+    medias_por_lote = {'visc': {}, 'ts2': {}, 't90': {}}
+    for tipo in ['visc', 'ts2', 't90']:
+        for lote, valores in acumuladores[tipo].items():
+            if valores:
+                medias_por_lote[tipo][lote] = sum(valores) / len(valores)
+
+    # -------------------------------------------------------------
 
     lista_final = []
     materiais_set = set()
@@ -337,11 +356,14 @@ def processar_carga_dados(data_corte='2025-07-01'):
         if not dados['massa']: continue
         materiais_set.add(dados['massa'])
         
+        lote_atual = dados['lote_visivel']
+        
+        # Lógica da Viscosidade (Preenchimento de Falta)
         valor_visc = dados['visc']
         origem_visc = "Real" if valor_visc else "N/A"
         
-        if not valor_visc and dados['lote_visivel'] in medias_visc_por_lote:
-            valor_visc = medias_visc_por_lote[dados['lote_visivel']]
+        if not valor_visc and lote_atual in medias_por_lote['visc']:
+            valor_visc = medias_por_lote['visc'][lote_atual]
             origem_visc = "Média (Lote)"
         
         medidas = {}
@@ -356,7 +378,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
             id_ensaio=dados['ids_ensaio'][0],
             massa_objeto=dados['massa'],
             valores_medidos=medidas,
-            lote=dados['lote_visivel'],
+            lote=lote_atual,
             batch=dados['batch'],
             data_hora=dados['data'],
             origem_viscosidade=origem_visc,
@@ -369,8 +391,15 @@ def processar_carga_dados(data_corte='2025-07-01'):
             equipamento_planilha=dados.get('equip_planilha') 
         )
         
-        # --- ATRIBUIÇÃO DO MÉTODO DE IDENTIFICAÇÃO ---
+        # --- ATRIBUIÇÃO DE NOVOS DADOS ---
         novo_ensaio.metodo_identificacao = dados.get('metodo_id', 'FANTASMA')
+        
+        # Injeção das médias para relatórios (mesmo se o ensaio tiver valor real)
+        novo_ensaio.medias_lote = {
+            'Ts2': medias_por_lote['ts2'].get(lote_atual),
+            'T90': medias_por_lote['t90'].get(lote_atual),
+            'Visc': medias_por_lote['visc'].get(lote_atual)
+        }
         
         novo_ensaio.calcular_score()
         novo_ensaio.tipo_ensaio = classificar_tipo_ensaio(novo_ensaio, temp_princ)

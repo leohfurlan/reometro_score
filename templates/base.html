@@ -26,6 +26,11 @@
                 class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'dashboard' else '' }}">
                     <i class="fas fa-vial me-2"></i> Controle de Qualidade
                 </a>
+                
+                <a href="{{ url_for('pagina_relatorios') }}" 
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_relatorios' else '' }}">
+                    <i class="fas fa-chart-bar me-2"></i> Relatórios & Gestão
+                </a>
 
                 <a href="{{ url_for('pagina_auditoria') }}" 
                 class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_auditoria' else '' }}">

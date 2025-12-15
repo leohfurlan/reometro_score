@@ -1,0 +1,24 @@
+{% for lote in lotes %}
+<tr class="cursor-pointer" onclick="window.open('{{ url_for('detalhe_lote_view', cod_sankhya=massa.cod, numero_lote=lote.numero) }}', '_blank')">
+    <td class="fw-bold font-monospace text-dark">{{ lote.numero }}</td>
+    <td class="text-center text-muted">{{ lote.data_recente.strftime('%d/%m/%Y') }}</td>
+    <td class="text-center"><span class="badge bg-light text-dark border">{{ lote.kpi_lote.total }}</span></td>
+    
+    <td class="text-center fw-bold text-secondary border-start">{{ "%.2f"|format(lote.medias.Ts2) if lote.medias.Ts2 else '-' }}</td>
+    <td class="text-center fw-bold text-secondary">{{ "%.2f"|format(lote.medias.T90) if lote.medias.T90 else '-' }}</td>
+    <td class="text-center fw-bold text-secondary">{{ "%.1f"|format(lote.medias.Visc) if lote.medias.Visc else '-' }}</td>
+    
+    <td class="text-center">
+        <div class="d-flex align-items-center justify-content-center">
+            <div class="progress flex-grow-1 me-2" style="height: 6px; max-width: 50px;">
+                <div class="progress-bar {% if lote.kpi_lote.score_medio >= 85 %}bg-success{% else %}bg-warning{% endif %}" 
+                     role="progressbar" style="width: {{ lote.kpi_lote.score_medio }}%"></div>
+            </div>
+            <span class="small fw-bold">{{ "%.0f"|format(lote.kpi_lote.score_medio) }}</span>
+        </div>
+    </td>
+    <td class="text-end pe-3">
+        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-external-link-alt"></i></button>
+    </td>
+</tr>
+{% endfor %}
