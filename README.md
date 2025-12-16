@@ -1,115 +1,151 @@
-# ReoScore v13 - Monitoramento de Qualidade de Massas
+ReoScore v13 - Monitoramento de Qualidade de Massas
 
-O **ReoScore** é um sistema web (Dashboard) desenvolvido para monitorar a qualidade de compostos de borracha em laboratório. Ele integra dados de equipamentos de análise (Reômetros/Viscosímetros) com dados de produção (ERP Sankhya) para calcular automaticamente notas de conformidade.
+O ReoScore é um sistema web (Dashboard) desenvolvido para monitorar a qualidade de compostos de borracha em laboratório. Ele integra dados de equipamentos de análise (Reômetros/Viscosímetros) com dados de produção (ERP Sankhya) para calcular automaticamente notas de conformidade.
 
-## 🚀 Funcionalidades
+🚀 Funcionalidades
 
-- **Monitoramento em Tempo Real:** Leitura de ensaios direto do banco de dados do laboratório (SQL Server).
-- **Cálculo de Score:** Algoritmo que pontua cada ensaio (0 a 100) baseado em especificações técnicas (Ts2, T90, Viscosidade).
-- **Integração ERP:** Conexão com Oracle (Sankhya) para validar códigos e descrições de produtos.
-- **Smart Matching:** Identificação inteligente de produtos via fuzzy logic e dicionários de correção, resolvendo problemas de digitação manual nos equipamentos.
-- **Gestão de Lotes:** Cruzamento automático com planilhas de apontamento de produção (Excel/Rede).
-- **Ferramentas de Auditoria:** Scripts para validação de dados e classificação automática de equipamentos.
+Monitoramento em Tempo Real: Leitura de ensaios direto do banco de dados do laboratório (SQL Server).
 
-## 🛠️ Tecnologias Utilizadas
+Cálculo de Score: Algoritmo que pontua cada ensaio (0 a 100) baseado em especificações técnicas (Ts2, T90, Viscosidade).
 
-- **Backend:** Python 3.10+, Flask
-- **Banco de Dados:** SQL Server (Leitura Lab), Oracle (Leitura ERP), SQLite (Usuários Local)
-- **Manipulação de Dados:** Pandas, SQLAlchemy
-- **Frontend:** HTML5, Bootstrap 5, HTMX
-- **Outros:** OpenPyXL (Excel), PyODBC, OracleDB
+Integração ERP: Conexão com Oracle (Sankhya) para validar códigos e descrições de produtos.
 
-## ⚙️ Pré-requisitos
+Painel de Configurações Unificado:
 
-1.  **Python 3.x** instalado.
-2.  **ODBC Driver 18 for SQL Server** instalado (necessário para conexão com o banco do laboratório).
-3.  **Oracle Instant Client** (caso necessário para a biblioteca `oracledb` no ambiente Windows).
+Materiais (Admin): Gestão de especificações técnicas (Limites e Alvos).
 
-## 📦 Instalação
+Regras de Ação (Admin): Definição global de critérios de aprovação e cores de etiquetas.
 
-1.  Clone o repositório:
-    ```bash
-    git clone https://seu-repositorio/reometro_score.git
-    cd reometro_score
-    ```
+Ensinar Sistema (Todos): Ferramenta de auditoria onde operadores corrigem a identificação de lotes.
 
-2.  Crie um ambiente virtual:
-    ```bash
-    python -m venv venv
-    # Windows:
-    venv\Scripts\activate
-    # Linux/Mac:
-    source venv/bin/activate
-    ```
+Smart Matching & Aprendizado: Identificação inteligente de produtos via fuzzy logic e correções manuais ("Ensinar Sistema") persistidas em banco local.
 
-3.  Instale as dependências:
-    ```bash
-    pip install -r requirements.txt
-    ```
+Auditoria de Alterações: Logs automáticos de quem realizou correções manuais e quando elas ocorreram.
 
-4.  Configure as variáveis de ambiente. Crie um arquivo `.env` na raiz com o seguinte conteúdo (ajuste conforme seu ambiente):
+Gestão de Lotes: Cruzamento automático com planilhas de apontamento de produção (Excel/Rede).
 
-    ```env
-    # Flask
-    FLASK_SECRET_KEY=sua_chave_secreta_aqui
-    DATA_MINIMA_ENSAIOS=2025-07-01
+🛠️ Tecnologias Utilizadas
 
-    # Caminho Planilha de Lotes (Rede)
-    CAMINHO_REG403=C:\Caminho\Para\Arquivo\REG 403.xlsx
+Backend: Python 3.10+, Flask
 
-    # Banco de Dados Lab (SQL Server)
-    SERVER=ip_do_servidor
-    DATABASE=nome_do_banco
-    USERNAME_DB=usuario
-    PASSWORD_DB=senha
-    DSN=ODBC Driver 18 for SQL Server
+Banco de Dados:
 
-    # Banco de Dados ERP (Oracle)
-    ORACLE_LIB_DIR=C:\oracle\instantclient_19_8
-    ORACLE_DB_USER=usuario_oracle
-    ORACLE_DB_PASSWORD=senha_oracle
-    ORACLE_DB_DSN=ip_oracle:1521/servico
-    ```
+SQL Server: Leitura de dados brutos do laboratório.
 
-## 🚀 Execução
+Oracle: Leitura de cadastro de produtos do ERP.
 
-1. Para iniciar o servidor web:
-    ```bash
-    python app.py
-    ```
-O sistema estará acessível em http://127.0.0.1:5000.
+SQLite: Banco local (instance/users_reoscore.db) para gestão de usuários, senhas e regras de aprendizado com logs.
+
+Manipulação de Dados: Pandas, SQLAlchemy
+
+Frontend: HTML5, Bootstrap 5, HTMX
+
+Outros: OpenPyXL (Excel), PyODBC, OracleDB
+
+⚙️ Controle de Acesso e Logs (RBAC)
+
+O sistema possui controle de acesso baseado em funções:
+
+Administradores:
+
+Acesso total ao Painel de Configurações.
+
+Podem editar Specs de Materiais e Regras de Ação.
+
+Podem visualizar e editar a aba "Ensinar Sistema".
+
+Operadores/Usuários:
+
+Acesso restrito no Painel de Configurações.
+
+Visualizam apenas a aba "Ensinar Sistema".
+
+Permite que o operador corrija falhas de identificação de lote no dia a dia.
+
+Auditoria:
+
+Todas as correções manuais feitas na aba "Ensinar Sistema" são gravadas no banco local com o Nome do Usuário e Data/Hora da alteração.
+
+⚙️ Pré-requisitos
+
+Python 3.x instalado.
+
+ODBC Driver 18 for SQL Server instalado (necessário para conexão com o banco do laboratório).
+
+Oracle Instant Client (caso necessário para a biblioteca oracledb no ambiente Windows).
+
+📦 Instalação
+
+Clone o repositório:
+
+git clone https://seu-repositorio/reometro_score.git
+cd reometro_score
 
 
-2. Ferramentas de Manutenção (Pasta /tools)
-Auditoria de Match: Verifica falhas na identificação de produtos.
-    ```bash
-    python tools/etl_match_test.py
-    ```
+Crie um ambiente virtual:
 
-3. Gerar De-Para: Cria planilha para correção de nomes errados.
-    ```bash
-    python tools/ferramenta_gerar_depara.py
-    ```
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
 
-4. Classificar Grupos: Atualiza o mapa de equipamentos (Reômetro vs Viscosímetro).
 
-    ```bash
-    python tools/ferramenta_classificar_grupos.py
-    ```
+Instale as dependências:
 
-## 📂 Estrutura do Projeto
-/models: Classes de negócio (Ensaio, Massa, Usuário).
+pip install -r requirements.txt
 
-/services: Integrações externas (Sankhya, Config Manager).
 
-/templates: Arquivos HTML (Jinja2).
+Configure as variáveis de ambiente. Crie um arquivo .env na raiz com o seguinte conteúdo (ajuste conforme seu ambiente):
 
-/static: CSS e JavaScript.
+# Flask
+FLASK_SECRET_KEY=sua_chave_secreta_aqui
+DATA_MINIMA_ENSAIOS=2025-07-01
 
-/tools: Scripts auxiliares de manutenção e ETL.
+# Caminho Planilha de Lotes (Rede)
+CAMINHO_REG403=C:\Caminho\Para\Arquivo\REG 403.xlsx
 
-app.py: Ponto de entrada da aplicação Flask.
+# Banco de Dados Lab (SQL Server)
+SERVER=ip_do_servidor
+DATABASE=nome_do_banco
+USERNAME_DB=usuario
+PASSWORD_DB=senha
+DSN=ODBC Driver 18 for SQL Server
+
+# Banco de Dados ERP (Oracle)
+ORACLE_LIB_DIR=C:\oracle\instantclient_19_8
+ORACLE_DB_USER=usuario_oracle
+ORACLE_DB_PASSWORD=senha_oracle
+ORACLE_DB_DSN=ip_oracle:1521/servico
+
+
+🚀 Execução
+
+Para iniciar o servidor web:
+
+python app.py
+
+
+Nota: O banco de dados SQLite local (users_reoscore.db) será atualizado automaticamente com as novas tabelas de log na primeira execução.
+
+Acesso: http://127.0.0.1:5000
+
+📂 Estrutura do Projeto
+
+app.py: Ponto de entrada da aplicação Flask e orquestrador de rotas.
 
 etl_planilha.py: Módulo de leitura da planilha de produção.
+
+instance/users_reoscore.db: Banco SQLite local. Armazena usuários e a tabela aprendizado_local (regras de correção + logs de auditoria).
+
+models/: Classes de negócio (Ensaio, Massa, Usuário).
+
+services/: Integrações externas (Sankhya, Config Manager, Learning Service).
+
+templates/: Arquivos HTML (Jinja2).
+
+static/: CSS e JavaScript.
+
+tools/: Scripts auxiliares de manutenção e ETL.
 
 Desenvolvido para uso interno no Laboratório de Qualidade.
