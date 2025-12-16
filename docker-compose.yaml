@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  reoscore:
+    container_name: reoscore_app
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    
+    # Carrega as variáveis do seu arquivo .env local
+    env_file:
+      - .env
+    
+    # Mapeia pastas do container para o seu computador (Persistência)
+    volumes:
+      # Mantém o banco de dados de usuários e logs salvo no seu disco
+      - ./instance:/app/instance
+      
+      # Mantém as configurações de massas e regras salvas
+      - ./config_massas.json:/app/config_massas.json
+      - ./config_regras.json:/app/config_regras.json
+      - ./aprendizado_lotes.json:/app/aprendizado_lotes.json
+      
+      # Opcional: Se quiser que a planilha baixada persista
+      - ./cache_reg403_sharepoint.xlsx:/app/cache_reg403_sharepoint.xlsx
+
+    # Configurações extras de ambiente para garantir compatibilidade
+    environment:
+      - FLASK_ENV=production
+      # Ajuste para Oracle (Thin mode não precisa de lib dir, deixe vazio se possível)
+      - ORACLE_LIB_DIR=

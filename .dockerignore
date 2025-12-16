@@ -1,0 +1,12 @@
+venv/
+.venv/
+pycache/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.log
+.git/
+.gitignore
+*.docx
+*.md
