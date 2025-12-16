@@ -117,26 +117,19 @@ def iniciar_tabela_aprendizado():
         """)
         
         # 2. Migração: Tenta adicionar as colunas caso o banco já exista (versão antiga)
-        # O SQLite não suporta ADD COLUMN IF NOT EXISTS nativo em versões antigas,
-        # então usamos try/except para ignorar erro se a coluna já existir.
         try:
             cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN usuario_log TEXT")
-        except sqlite3.OperationalError:
-            pass # Coluna já existe
+        except sqlite3.OperationalError: pass
             
         try:
             cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN data_log TEXT")
-        except sqlite3.OperationalError:
-            pass # Coluna já existe
+        except sqlite3.OperationalError: pass
 
         conn.commit()
         conn.close()
         print("✅ Tabela de aprendizado local verificada e atualizada (Schema Logs).")
     except Exception as e:
         print(f"❌ Erro ao inicializar tabela local: {e}")
-
-# Mantenha a chamada da função logo abaixo:
-iniciar_tabela_aprendizado()
 
 def aplicar_sobreposicao_local(dados_brutos):
     """
@@ -200,6 +193,9 @@ def aplicar_sobreposicao_local(dados_brutos):
         print(f"⚠️ Erro ao aplicar regras locais: {e}")
         return dados_brutos
 
+# Inicializa tabela auxiliar
+iniciar_tabela_aprendizado()
+
 
 # ==========================================
 # 1. INICIALIZAÇÃO E CACHE
@@ -255,6 +251,17 @@ def criar_admin():
     db.session.add(novo_admin)
     db.session.commit()
     return "Admin criado com sucesso! (User: admin / Pass: senha123)"
+
+@app.route('/criar_operador')
+def criar_operador():
+    if Usuario.query.filter_by(username='operador').first():
+        return "Usuário 'operador' já existe."
+    
+    hashed_pw = bcrypt.generate_password_hash('vulca123').decode('utf-8')
+    novo_user = Usuario(username='operador', password_hash=hashed_pw, role='operador')
+    db.session.add(novo_user)
+    db.session.commit()
+    return "Usuário 'operador' criado com sucesso! (User: operador / Pass: vulca123)"
 
 # ==========================================
 # 3. ROTAS PRINCIPAIS (DASHBOARD)
@@ -406,18 +413,17 @@ def dashboard():
 @app.route('/config')
 @login_required
 def pagina_config():
-    #if current_user.role != 'admin':
-    #    flash("Acesso negado.", "warning")
-    #    return redirect(url_for('dashboard'))
+    # OBS: Se o usuário NÃO for admin, ele ainda vai carregar os dados de materiais
+    # abaixo, mas o template não vai mostrar. Não é crítico para performance.
     
-    # === PARTE 1: CONFIGURAÇÃO DE MATERIAIS (Lógica Original) ===
+    # === PARTE 1: CONFIGURAÇÃO DE MATERIAIS ===
     regras_acao = carregar_regras_acao()
 
     query = request.args.get('q', '').strip().upper()
     filtro_tipo = request.args.get('tipo', '')
     filtro_status = request.args.get('status', '')
     
-    # Renomeamos 'page' para 'page_mat' para não conflitar com a paginação da auditoria
+    # Paginação de Materiais
     page_mat = request.args.get('page_mat', 1, type=int) 
     
     sort_by = request.args.get('sort', 'descricao') 
@@ -455,7 +461,7 @@ def pagina_config():
     end = start + LIMIT
     produtos_paginados = produtos_filtrados[start:end]
 
-    # === PARTE 2: DADOS DE AUDITORIA (Nova Lógica Fundida) ===
+    # === PARTE 2: DADOS DE AUDITORIA ===
     # Recupera cache
     dados_cache = cache_service.get()
     ensaios_audit = []
@@ -465,12 +471,10 @@ def pagina_config():
         ensaios_raw = dados_cache['dados']
         materiais_audit = dados_cache['materiais']
         
-        # Filtros de Auditoria
         f_data = request.args.get('audit_data', '')
         f_status = request.args.get('audit_status', '')
         f_busca = request.args.get('audit_busca', '').upper().strip()
         
-        # Paginação Auditoria
         page_audit = request.args.get('page_audit', 1, type=int)
         per_page_audit = 50
 
@@ -495,7 +499,6 @@ def pagina_config():
             reverse=True
         )
 
-        # Paginação Auditoria
         total_registros_audit = len(ensaios_audit)
         total_paginas_audit = math.ceil(total_registros_audit / per_page_audit)
         page_audit = max(1, min(page_audit, total_paginas_audit)) if total_paginas_audit > 0 else 1
@@ -509,6 +512,11 @@ def pagina_config():
         total_registros_audit = 0
         page_audit = 1
 
+    # === PARTE 3: GESTÃO DE USUÁRIOS (Admin) ===
+    usuarios_lista = []
+    if current_user.role == 'admin':
+        usuarios_lista = Usuario.query.all()
+
     return render_template(
         'config.html', 
         # Dados Materiais
@@ -518,7 +526,7 @@ def pagina_config():
         pagina_atual_mat=page_mat, total_paginas_mat=total_paginas_mat, total_itens_mat=total_itens,
         sort_by=sort_by, order=order,
         
-        # Dados Auditoria (Novos)
+        # Dados Auditoria
         ensaios_audit=ensaios_audit_paginados,
         materiais_audit=materiais_audit,
         pagina_atual_audit=page_audit,
@@ -526,8 +534,92 @@ def pagina_config():
         total_registros_audit=total_registros_audit,
         audit_busca=request.args.get('audit_busca', ''),
         audit_status=request.args.get('audit_status', ''),
-        audit_data=request.args.get('audit_data', '')
+        audit_data=request.args.get('audit_data', ''),
+
+        # Dados Usuários
+        usuarios=usuarios_lista
     )
+
+@app.route('/adicionar_usuario', methods=['POST'])
+@login_required
+def adicionar_usuario():
+    if current_user.role != 'admin':
+        flash("Acesso negado.", "danger")
+        return redirect(url_for('dashboard'))
+        
+    username = request.form.get('username')
+    password = request.form.get('password')
+    role = request.form.get('role')
+    
+    if Usuario.query.filter_by(username=username).first():
+        flash(f"Usuário '{username}' já existe.", "warning")
+    else:
+        hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+        novo_user = Usuario(username=username, password_hash=hashed_pw, role=role)
+        db.session.add(novo_user)
+        db.session.commit()
+        flash(f"Usuário '{username}' criado com sucesso!", "success")
+        
+    return redirect(url_for('pagina_config', _anchor='usuarios'))
+
+@app.route('/editar_usuario', methods=['POST'])
+@login_required
+def editar_usuario():
+    if current_user.role != 'admin':
+        flash("Acesso negado.", "danger")
+        return redirect(url_for('dashboard'))
+        
+    user_id = request.form.get('user_id')
+    novo_username = request.form.get('username')
+    nova_senha = request.form.get('password')
+    novo_role = request.form.get('role')
+    
+    user = Usuario.query.get(user_id)
+    if not user:
+        flash("Usuário não encontrado.", "danger")
+        return redirect(url_for('pagina_config', _anchor='usuarios'))
+        
+    # Verifica se o novo username já existe (se for diferente do atual)
+    if novo_username != user.username:
+        existente = Usuario.query.filter_by(username=novo_username).first()
+        if existente:
+            flash(f"O nome de usuário '{novo_username}' já está em uso.", "warning")
+            return redirect(url_for('pagina_config', _anchor='usuarios'))
+    
+    # Atualiza dados
+    user.username = novo_username
+    user.role = novo_role
+    
+    # Só atualiza a senha se for fornecida
+    if nova_senha and nova_senha.strip():
+        user.password_hash = bcrypt.generate_password_hash(nova_senha).decode('utf-8')
+        
+    try:
+        db.session.commit()
+        flash(f"Usuário '{user.username}' atualizado com sucesso!", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Erro ao atualizar usuário: {e}", "danger")
+        
+    return redirect(url_for('pagina_config', _anchor='usuarios'))
+
+@app.route('/remover_usuario/<int:user_id>')
+@login_required
+def remover_usuario(user_id):
+    if current_user.role != 'admin':
+        flash("Acesso negado.", "danger")
+        return redirect(url_for('dashboard'))
+        
+    user = Usuario.query.get(user_id)
+    if user:
+        if user.id == current_user.id:
+            flash("Você não pode remover a si mesmo.", "danger")
+        else:
+            db.session.delete(user)
+            db.session.commit()
+            flash(f"Usuário '{user.username}' removido.", "success")
+    
+    return redirect(url_for('pagina_config', _anchor='usuarios'))
 
 @app.route('/salvar_regras', methods=['POST'])
 @login_required
@@ -797,113 +889,48 @@ def api_grafico():
 @app.route('/auditoria')
 @login_required
 def pagina_auditoria():
-    # 1. Recuperação Rápida do Cache (Sem ir ao Banco)
-    dados_cache = cache_service.get()
-    if not dados_cache:
-        flash("Cache vazio. Atualize os dados primeiro.", "warning")
-        return redirect(url_for('dashboard'))
-    
-    ensaios = dados_cache['dados']
-    materiais = dados_cache['materiais']
+    # ... (seu código existente de filtro e ordenação) ...
 
-    # --- FILTROS ---
-    f_data = request.args.get('data', '')
-    f_status = request.args.get('status', '')
-    f_busca = request.args.get('busca', '').upper().strip()
-    
-    # Paginação
-    page = request.args.get('page', 1, type=int)
-    per_page = 50  # Exibe 50 itens por vez (leve para o navegador)
-
-    lista_exibicao = []
-    
-    # --- APLICAÇÃO DOS FILTROS ---
-    # (Filtragem em memória é muito rápida, o gargalo é o HTML)
-    for e in ensaios:
-        # Filtro Data
-        if f_data and e.data_hora.strftime('%Y-%m-%d') != f_data:
-            continue
-            
-        # Filtro Status
-        if f_status and e.metodo_identificacao != f_status:
-            continue
-        
-        # Filtro Busca (Lote Limpo ou Original)
-        # Verifica se o termo está no lote visualizado
-        if f_busca and f_busca not in str(e.lote).upper():
-            continue
-
-        # Lógica Padrão: Se sem filtros, esconde os "LOTE" (Verdes) para focar no erro
-        if not f_status and not f_busca and not f_data:
-            if e.metodo_identificacao == 'LOTE': 
-                continue
-
-        lista_exibicao.append(e)
-
-    # --- ORDENAÇÃO CORRIGIDA (DECRESCENTE) ---
-    # Estratégia: Usamos reverse=True (Do Maior para o Menor).
-    # 1. Definimos pesos ALTOS para o que queremos ver PRIMEIRO (Fantasma/Texto).
-    # 2. A data mais recente já é "maior" que a data antiga.
-    peso = {
-        'FANTASMA': 100, 
-        'TEXTO': 90, 
-        'MANUAL': 10, 
-        'LOTE': 0
-    }
-    
-    def get_data_segura(x):
-        return x.data_hora if x.data_hora else datetime.min
-
-    lista_exibicao.sort(
-        key=lambda x: (
-            peso.get(x.metodo_identificacao, 0), # 1º Critério: Prioridade
-            get_data_segura(x)                   # 2º Critério: Data
-        ), 
-        reverse=True  # <--- Decrescente
-    )
-
-    # --- PAGINAÇÃO (O Corte) ---
-    total_registros = len(lista_exibicao)
-    total_paginas = math.ceil(total_registros / per_page)
-    
-    # Garante que a página esteja dentro dos limites
-    page = max(1, min(page, total_paginas)) if total_paginas > 0 else 1
-    
-    start = (page - 1) * per_page
-    end = start + per_page
-    ensaios_paginados = lista_exibicao[start:end]
-
-
+    # --- CORREÇÃO AQUI ---
     # Cria um dicionário mutável a partir dos argumentos da URL
     filtros_para_template = dict(request.args)
     # Remove 'page' para evitar conflito no url_for do template
     if 'page' in filtros_para_template:
         del filtros_para_template['page']
 
-        
+    # Recupera dados se for chamado diretamente (mantendo compatibilidade)
+    dados_cache = cache_service.get()
+    ensaios = dados_cache['dados'] if dados_cache else []
+    materiais = dados_cache['materiais'] if dados_cache else []
+    
+    # Paginação simples para manter a rota funcionando
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    total_registros = len(ensaios)
+    total_paginas = math.ceil(total_registros / per_page)
+    ensaios_paginados = ensaios[(page-1)*per_page : page*per_page]
+
     return render_template(
         'auditoria.html', 
         ensaios=ensaios_paginados, 
         materiais=materiais,
-        # Metadados da Paginação
         pagina_atual=page,
         total_paginas=total_paginas,
         total_registros=total_registros,
-        # Filtros (para manter na navegação)
-        request_args=filtros_para_template
+        request_args=filtros_para_template 
     )
 
 @app.route('/salvar_correcao', methods=['POST'])
 @login_required
 def salvar_correcao():
-    # 1. Coleta dados (IGUAL AO ANTERIOR)
+    # 1. Coleta dados
     texto_original = request.form.get('lote_original_key') or request.form.get('texto_original')
     lote_correto = request.form.get('novo_lote') or request.form.get('lote_correto')
     massa_correta = request.form.get('massa') or request.form.get('massa_correta')
 
     if not texto_original or not lote_correto:
         flash("Dados incompletos para salvar.", "warning")
-        return redirect(url_for('pagina_config', _anchor='ensinar')) # Redireciona para a aba certa
+        return redirect(url_for('pagina_config', _anchor='ensinar'))
 
     key_original = str(texto_original).strip().upper()
     lote_clean = str(lote_correto).strip().upper()

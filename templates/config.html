@@ -7,7 +7,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-cogs me-2"></i>Painel de Configurações</h2>
-        <p class="text-muted small">Gerencie especificações de materiais e regras globais de decisão.</p>
+        <p class="text-muted small">Gerencie especificações, regras e usuários do sistema.</p>
     </div>
     
     <a href="{{ url_for('dashboard') }}" class="btn btn-success shadow-sm">
@@ -17,6 +17,7 @@
 
 <ul class="nav nav-tabs mb-4" id="configTabs" role="tablist">
     
+    <!-- ABAS RESTRITAS AO ADMIN -->
     {% if current_user.is_admin %}
     <li class="nav-item" role="presentation">
         <button class="nav-link fw-bold active" id="materiais-tab" data-bs-toggle="tab" data-bs-target="#materiais" type="button">
@@ -28,8 +29,14 @@
             <i class="fas fa-gavel me-2"></i>Regras de Ação
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="usuarios-tab" data-bs-toggle="tab" data-bs-target="#usuarios" type="button">
+            <i class="fas fa-users me-2"></i>Usuários
+        </button>
+    </li>
     {% endif %}
 
+    <!-- ABA PÚBLICA (ENSINAR) -->
     <li class="nav-item" role="presentation">
         <button class="nav-link fw-bold {% if not current_user.is_admin %}active{% endif %}" id="ensinar-tab" data-bs-toggle="tab" data-bs-target="#ensinar" type="button">
             <i class="fas fa-chalkboard-teacher me-2"></i>Ensinar Sistema
@@ -39,6 +46,7 @@
 
 <div class="tab-content" id="configTabsContent">
     
+    <!-- CONTEÚDO ADMIN -->
     {% if current_user.is_admin %}
     <div class="tab-pane fade show active" id="materiais" role="tabpanel">
         <div class="card p-4 mb-4 shadow-sm border-0">
@@ -264,9 +272,108 @@
             </div>
         </div>
     </div>
+
+    <div class="tab-pane fade" id="usuarios" role="tabpanel">
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-primary bg-opacity-10 text-primary fw-bold">
+                        <i class="fas fa-user-plus me-2"></i>Adicionar Usuário
+                    </div>
+                    <div class="card-body">
+                        <form action="{{ url_for('adicionar_usuario') }}" method="POST">
+                            <div class="mb-3">
+                                <label class="form-label small text-muted fw-bold">Username</label>
+                                <input type="text" name="username" class="form-control" required placeholder="ex: operador">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small text-muted fw-bold">Senha Inicial</label>
+                                <input type="password" name="password" class="form-control" required placeholder="******">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small text-muted fw-bold">Nível de Acesso</label>
+                                <select name="role" class="form-select">
+                                    <option value="operador">Operador (Apenas Ensinar)</option>
+                                    <option value="admin">Administrador (Total)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 fw-bold">
+                                <i class="fas fa-save me-1"></i> Criar Usuário
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white fw-bold text-secondary">
+                        <i class="fas fa-users me-2"></i>Lista de Usuários
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Usuário</th>
+                                    <th>Permissão</th>
+                                    <th class="text-end">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for u in usuarios %}
+                                <tr>
+                                    <td class="text-muted small">{{ u.id }}</td>
+                                    <td class="fw-bold text-dark">{{ u.username }}</td>
+                                    <td>
+                                        {% if u.role == 'admin' %}
+                                            <span class="badge bg-danger">ADMIN</span>
+                                        {% else %}
+                                            <span class="badge bg-info text-dark">OPERADOR</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-primary me-1" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#modalEditUser{{ u.id }}"
+                                                title="Editar Usuário">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        
+                                        {% if u.id == current_user.id %}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Não é possível remover a si mesmo">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        {% else %}
+                                            <a href="{{ url_for('remover_usuario', user_id=u.id) }}" class="btn btn-sm btn-outline-danger" 
+                                               onclick="return confirm('Tem certeza que deseja remover o usuário {{ u.username }}?');"
+                                               title="Remover Usuário">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                
+                                <!-- Modal de Edição de Usuário (CORREÇÃO: Movido para fora da tag TR para evitar problemas de layout, mas mantido no loop) -->
+                                <!-- O modal deve estar fisicamente fora da tabela ou dentro de um TD/TR se bem controlado, mas o mais seguro é no final do loop ou fora da tabela -->
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        
+                        {% if not usuarios %}
+                            <div class="text-center py-3 border-top bg-white text-muted">Nenhum usuário encontrado.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     {% endif %}
-    <div class="tab-pane fade" id="ensinar" role="tabpanel">
-    
+
+    <!-- CONTEÚDO PÚBLICO (ENSINAR) -->
+    <div class="tab-pane fade {% if not current_user.is_admin %}show active{% endif %}" id="ensinar" role="tabpanel">
+        
+        <!-- Filtros Auditoria -->
         <div class="card mb-3 border-0 bg-light shadow-sm">
             <div class="card-body py-3">
                 <form method="GET" action="{{ url_for('pagina_config') }}" class="row g-3 align-items-end">
@@ -295,6 +402,7 @@
             </div>
         </div>
 
+        <!-- Tabela Auditoria -->
         <div class="card shadow-sm border-0 mb-4">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
@@ -303,8 +411,8 @@
                             <th class="ps-3">Data/Hora</th>
                             <th>Lote (Visualizado)</th>
                             <th>Status</th>
-                            <th>Correção: Lote Real</th>
-                            <th>Correção: Massa</th>
+                            <th style="width: 15%;">Nº Lote Real</th>
+                            <th style="width: 30%;">Correção: Massa</th>
                             <th class="text-end pe-3">Ação</th>
                         </tr>
                     </thead>
@@ -334,7 +442,7 @@
                                 <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
                                 <td>
                                     <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
-                                        value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                                           value="{{ ensaio.lote }}" placeholder="Ex: 9563">
                                 </td>
                                 <td>
                                     <select name="massa" class="form-select form-select-sm" required>
@@ -360,6 +468,7 @@
                 </table>
             </div>
 
+            <!-- Paginação Auditoria -->
             {% if total_paginas_audit > 1 %}
             <div class="card-footer bg-white py-2">
                 <nav>
@@ -377,12 +486,122 @@
             {% endif %}
         </div>
     </div>
-
 </div>
 
+<script>
+    function removerLinha(btn) {
+        const row = btn.closest('tr');
+        if(document.querySelectorAll('.regra-row').length > 1) {
+            row.remove();
+            reindexar();
+        } else {
+            alert("É necessário ter pelo menos uma regra padrão.");
+        }
+    }
+
+    function reindexar() {
+        const rows = document.querySelectorAll('.regra-row');
+        rows.forEach((row, index) => {
+            row.querySelector('.index-cell').textContent = index + 1;
+            // Importante: atualiza o value do checkbox para manter sincronia
+            row.querySelector('input[type="checkbox"]').value = index;
+        });
+    }
+
+    function adicionarRegra() {
+        const tbody = document.getElementById('listaRegras');
+        const index = tbody.querySelectorAll('tr').length;
+        
+        const html = `
+        <tr class="regra-row">
+            <td class="text-center text-muted fw-bold index-cell">${index + 1}</td>
+            <td><input type="text" name="nome[]" class="form-control form-control-sm fw-bold border-0 bg-transparent" placeholder="Nova Regra"></td>
+            <td>
+                <div class="input-group input-group-sm">
+                    <input type="number" step="0.1" name="min_score[]" class="form-control text-center fw-bold text-primary" value="0">
+                    <span class="input-group-text border-start-0 bg-white text-muted">%</span>
+                </div>
+            </td>
+            <td class="text-center">
+                <div class="form-check d-flex justify-content-center">
+                    <input class="form-check-input" type="checkbox" name="exige_visc_real" value="${index}">
+                </div>
+            </td>
+            <td><input type="text" name="acao[]" class="form-control form-control-sm" value="NOVA AÇÃO"></td>
+            <td>
+                <select name="cor[]" class="form-select form-select-sm border-0 bg-light">
+                    <option value="success" class="text-success fw-bold">Verde</option>
+                    <option value="warning" class="text-warning fw-bold">Amarelo</option>
+                    <option value="dark" class="text-dark fw-bold">Preto</option>
+                    <option value="danger" class="text-danger fw-bold" selected>Vermelho</option>
+                </select>
+            </td>
+            <td>
+                <button type="button" class="btn btn-outline-danger btn-sm border-0 opacity-50 hover-opacity-100" onclick="removerLinha(this)"><i class="fas fa-trash"></i></button>
+            </td>
+        </tr>`;
+        
+        tbody.insertAdjacentHTML('beforeend', html);
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // Se a URL tiver #ensinar ou #usuarios, ativa a aba correspondente
+        const hash = window.location.hash;
+        if (hash) {
+            const triggerEl = document.querySelector(`button[data-bs-target="${hash}"]`);
+            if (triggerEl) {
+                const tab = new bootstrap.Tab(triggerEl);
+                tab.show();
+            }
+        }
+    });
+</script>
 {% endblock %}
 
 {% block modais %}
+    {% if current_user.is_admin %}
+        {% for u in usuarios %}
+            <div class="modal fade" id="modalEditUser{{ u.id }}" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog">
+                    <form action="{{ url_for('editar_usuario') }}" method="POST">
+                        <div class="modal-content">
+                            <div class="modal-header bg-light">
+                                <h5 class="modal-title fw-bold"><i class="fas fa-user-edit me-2"></i>Editar Usuário</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted fw-bold">Username</label>
+                                    <input type="text" name="username" class="form-control" value="{{ u.username }}" required>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted fw-bold">Nova Senha</label>
+                                    <input type="password" name="password" class="form-control" placeholder="Deixe em branco para manter a atual">
+                                    <div class="form-text x-small">Preencha apenas se quiser alterar a senha.</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted fw-bold">Nível de Acesso</label>
+                                    <select name="role" class="form-select">
+                                        <option value="operador" {% if u.role == 'operador' %}selected{% endif %}>Operador (Apenas Ensinar)</option>
+                                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Administrador (Total)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="modal-footer bg-light">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                <button type="submit" class="btn btn-primary fw-bold">Salvar Alterações</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        {% endfor %}
+    {% endif %}
+
     {% for prod in produtos %}
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
             <div class="modal-dialog modal-xl">
@@ -518,72 +737,4 @@
             </div>
         </div>
     {% endfor %}
-
-    <script>
-        // Funções para a aba de Regras
-        function removerLinha(btn) {
-            const row = btn.closest('tr');
-            if(document.querySelectorAll('.regra-row').length > 1) {
-                row.remove();
-                reindexar();
-            } else {
-                alert("É necessário ter pelo menos uma regra padrão.");
-            }
-        }
-
-        function reindexar() {
-            const rows = document.querySelectorAll('.regra-row');
-            rows.forEach((row, index) => {
-                row.querySelector('.index-cell').textContent = index + 1;
-                // Importante: atualiza o value do checkbox para manter sincronia
-                row.querySelector('input[type="checkbox"]').value = index;
-            });
-        }
-
-        function adicionarRegra() {
-            const tbody = document.getElementById('listaRegras');
-            const index = tbody.querySelectorAll('tr').length;
-            
-            const html = `
-            <tr class="regra-row">
-                <td class="text-center text-muted fw-bold index-cell">${index + 1}</td>
-                <td><input type="text" name="nome[]" class="form-control form-control-sm fw-bold border-0 bg-transparent" placeholder="Nova Regra"></td>
-                <td>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="0.1" name="min_score[]" class="form-control text-center fw-bold text-primary" value="0">
-                        <span class="input-group-text border-start-0 bg-white text-muted">%</span>
-                    </div>
-                </td>
-                <td class="text-center">
-                    <div class="form-check d-flex justify-content-center">
-                        <input class="form-check-input" type="checkbox" name="exige_visc_real" value="${index}">
-                    </div>
-                </td>
-                <td><input type="text" name="acao[]" class="form-control form-control-sm" value="NOVA AÇÃO"></td>
-                <td>
-                    <select name="cor[]" class="form-select form-select-sm border-0 bg-light">
-                        <option value="success" class="text-success fw-bold">Verde</option>
-                        <option value="warning" class="text-warning fw-bold">Amarelo</option>
-                        <option value="dark" class="text-dark fw-bold">Preto</option>
-                        <option value="danger" class="text-danger fw-bold" selected>Vermelho</option>
-                    </select>
-                </td>
-                <td>
-                    <button type="button" class="btn btn-outline-danger btn-sm border-0 opacity-50 hover-opacity-100" onclick="removerLinha(this)"><i class="fas fa-trash"></i></button>
-                </td>
-            </tr>`;
-            
-            tbody.insertAdjacentHTML('beforeend', html);
-        }
-    </script>
-    <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            // Se a URL tiver #ensinar, ativa a aba correspondente
-            if (window.location.hash === '#ensinar') {
-                const triggerEl = document.querySelector('#ensinar-tab');
-                const tab = new bootstrap.Tab(triggerEl);
-                tab.show();
-            }
-        });
-    </script>
 {% endblock %}

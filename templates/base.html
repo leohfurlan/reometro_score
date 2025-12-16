@@ -36,10 +36,14 @@
                     <i class="fas fa-boxes me-2"></i> Estoque de MP
                 </a>
                 
-                {% if current_user.is_authenticated and current_user.is_admin %}
+                <!-- CORREÇÃO: Link visível para TODOS os usuários logados -->
+                {% if current_user.is_authenticated %}
                     <a href="{{ url_for('pagina_config') }}" 
                     class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_config' else '' }}">
                         <i class="fas fa-cogs me-2"></i> Configurações
+                        {% if not current_user.is_admin %}
+                            <span class="badge bg-light text-dark ms-2" style="font-size: 0.6em;">Ensinar</span>
+                        {% endif %}
                     </a>
                 {% endif %}
             </div>
@@ -56,17 +60,10 @@
                         <ul class="navbar-nav ms-auto mt-2 mt-lg-0">
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                    <i class="fas fa-user-circle fa-lg me-1"></i> Eng. Responsável
+                                    <i class="fas fa-user-circle fa-lg me-1"></i> {{ current_user.username }}
                                 </a>
                                 <div class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                                    <a class="dropdown-item" href="#">Perfil: {{ current_user.username }}</a>
-                                    
-                                    {% if current_user.is_admin %}
-                                        <div class="dropdown-divider"></div>
-                                        <a class="dropdown-item text-primary" href="{{ url_for('pagina_config') }}">
-                                            <i class="fas fa-shield-alt me-2"></i> Painel Admin
-                                        </a>
-                                    {% endif %}
+                                    <span class="dropdown-header">Perfil: {{ current_user.role|upper }}</span>
                                     
                                     <div class="dropdown-divider"></div>
                                     <a class="dropdown-item text-danger" href="{{ url_for('logout') }}">Sair</a>
