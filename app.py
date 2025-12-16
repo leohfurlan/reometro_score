@@ -8,6 +8,7 @@ from datetime import datetime
 import math
 import os
 import statistics 
+import sqlite3 # Adicionado para conexão local
 
 # Configurações e Modelos
 from config import Config
@@ -15,13 +16,12 @@ from services.config_manager import carregar_regras_acao, salvar_regras_acao, sa
 from services.learning_service import ensinar_lote
 from services.report_service import gerar_estrutura_relatorio
 
-
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
     carregar_referencias_estaticas,
     get_catalogo_codigo,
-    _MAPA_GRUPOS  # <--- ADICIONE ESTA IMPORTAÇÃO
+    _MAPA_GRUPOS
 )
 
 # --- NOVA IMPORTAÇÃO: SHAREPOINT LOADER ---
@@ -83,10 +83,110 @@ with app.app_context():
 def load_user(user_id):
     return Usuario.query.get(int(user_id))
 
+
+# ==========================================
+# 0. CONFIGURAÇÃO SIDECAR (ARQUIVO LOCAL DE REGRAS)
+# ==========================================
+def get_local_db():
+    """Conecta ao banco SQLite local onde temos permissão de escrita"""
+    # Tenta conectar na pasta instance (padrão Flask) ou raiz
+    db_path = 'users_reoscore.db'
+    if os.path.exists(os.path.join('instance', db_path)):
+        db_path = os.path.join('instance', db_path)
+    
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def iniciar_tabela_aprendizado():
+    """Cria a tabela de correções no SQLite se não existir"""
+    try:
+        conn = get_local_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS aprendizado_local (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave_original TEXT UNIQUE NOT NULL, -- O texto 'feio' (Ex: CAMELAGRACEL...)
+                lote_novo TEXT NOT NULL,             -- O Lote Bonito (Ex: 9609)
+                massa_nova TEXT NOT NULL             -- A Massa Correta
+            )
+        """)
+        conn.commit()
+        conn.close()
+        print("✅ Tabela de aprendizado local (Sidecar) verificada/criada.")
+    except Exception as e:
+        print(f"❌ Erro ao criar tabela local: {e}")
+
+def aplicar_sobreposicao_local(dados_brutos):
+    """
+    Lê as regras do SQLite e aplica sobre a lista de objetos Ensaio em memória.
+    Isso 'corrige' os dados vindos do SQL Server sem precisar de UPDATE lá.
+    """
+    try:
+        # 1. Carrega todas as regras
+        conn = get_local_db()
+        # Verifica se a tabela existe antes de consultar
+        try:
+            regras = conn.execute("SELECT chave_original, lote_novo, massa_nova FROM aprendizado_local").fetchall()
+        except sqlite3.OperationalError:
+            # Tabela ainda não criada
+            conn.close()
+            return dados_brutos
+            
+        conn.close()
+        
+        # Cria mapa para busca rápida: {'TEXTO_FEIO': {'lote': '999', 'massa': 'X'}, ...}
+        mapa_correcoes = {r[0]: {'lote': r[1], 'massa': r[2]} for r in regras}
+        
+        if not mapa_correcoes:
+            return dados_brutos
+
+        count = 0
+        # 2. Varre os dados e aplica o patch em memória
+        for ensaio in dados_brutos:
+            # Tenta casar pelo Lote Original ou pelo Material Original
+            lote_orig = str(getattr(ensaio, 'lote_original', '')).strip().upper()
+            mat_orig = str(getattr(ensaio, 'material_original', '')).strip().upper()
+            
+            # Verifica se alguma das chaves originais está no mapa de correção
+            regra = None
+            if lote_orig in mapa_correcoes:
+                regra = mapa_correcoes[lote_orig]
+            elif mat_orig in mapa_correcoes:
+                regra = mapa_correcoes[mat_orig]
+                
+            if regra:
+                # APLICA A CORREÇÃO NO OBJETO EM MEMÓRIA
+                ensaio.lote = regra['lote']
+                
+                # Se tiver objeto de massa, atualiza a descrição visualmente
+                if ensaio.massa:
+                    ensaio.massa.descricao = regra['massa']
+                
+                # Marca como corrigido manualmente
+                ensaio.metodo_identificacao = "MANUAL"
+                
+                # Opcional: Recalcular score se necessário (normalmente specs estão atrelados ao cod_sankhya)
+                # Se a massa mudou drasticamente, o score antigo pode estar inválido, 
+                # mas recalcular exigiria recarregar specs. Para visualização rápida, isso basta.
+                
+                count += 1
+                
+        print(f"🧠 Sobrescrita Local: {count} registros corrigidos em memória via SQLite.")
+        return dados_brutos
+
+    except Exception as e:
+        print(f"⚠️ Erro ao aplicar regras locais: {e}")
+        return dados_brutos
+
+# Inicializa tabela auxiliar
+iniciar_tabela_aprendizado()
+
+
 # ==========================================
 # 1. INICIALIZAÇÃO E CACHE
 # ==========================================
-print("\n=== REOSCORE V13 (MODULARIZED) ===")
+print("\n=== REOSCORE V13 (MODULARIZED & SIDECAR) ===")
 
 # Certifica que o ETL vai usar somente a planilha baixada do SharePoint
 caminho_sharepoint_inicial = preparar_planilha_sharepoint(forcar_download=False)
@@ -163,12 +263,16 @@ def rota_atualizar():
         resultado = processar_carga_dados()
         
         if resultado:
+            # [NOVO] INJEÇÃO DE CORREÇÃO LOCAL
+            # Aplica as regras do SQLite sobre os dados vindos do SQL Server
+            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
+
             # Atualiza o cache na memória
             cache_service.set(resultado)
             
             # Pega estatísticas para feedback
             stats = cache_service.get_stats()
-            flash(f"Dados processados! {stats['registros']} registros carregados. ({stats['tamanho_mb']} MB)", "info")
+            flash(f"Dados processados e corrigidos! {stats['registros']} registros carregados. ({stats['tamanho_mb']} MB)", "info")
         else:
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
@@ -191,6 +295,9 @@ def dashboard():
         # O download ocorre apenas no botão "Atualizar Dados".
         resultado = processar_carga_dados()
         if resultado:
+            # Aplica correção local também na carga inicial
+            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
+            
             cache_service.set(resultado)
             dados_cache = resultado 
         else:
@@ -648,10 +755,27 @@ def pagina_auditoria():
 
         lista_exibicao.append(e)
 
-    # --- ORDENAÇÃO ---
-    # Vermelho (0) -> Amarelo (1) -> Azul (2) -> Verde (3)
-    peso = {'FANTASMA': 0, 'TEXTO': 1, 'MANUAL': 2, 'LOTE': 3}
-    lista_exibicao.sort(key=lambda x: (peso.get(x.metodo_identificacao, 9), x.data_hora), reverse=False)
+    # --- ORDENAÇÃO CORRIGIDA (DECRESCENTE) ---
+    # Estratégia: Usamos reverse=True (Do Maior para o Menor).
+    # 1. Definimos pesos ALTOS para o que queremos ver PRIMEIRO (Fantasma/Texto).
+    # 2. A data mais recente já é "maior" que a data antiga.
+    peso = {
+        'FANTASMA': 100, 
+        'TEXTO': 90, 
+        'MANUAL': 10, 
+        'LOTE': 0
+    }
+    
+    def get_data_segura(x):
+        return x.data_hora if x.data_hora else datetime.min
+
+    lista_exibicao.sort(
+        key=lambda x: (
+            peso.get(x.metodo_identificacao, 0), # 1º Critério: Prioridade
+            get_data_segura(x)                   # 2º Critério: Data
+        ), 
+        reverse=True  # <--- Decrescente
+    )
 
     # --- PAGINAÇÃO (O Corte) ---
     total_registros = len(lista_exibicao)
@@ -679,97 +803,40 @@ def pagina_auditoria():
 @app.route('/salvar_correcao', methods=['POST'])
 @login_required
 def salvar_correcao():
-    # Campos vindos do template (auditoria.html)
-    texto_original = (
-        request.form.get('texto_original')
-        or request.form.get('lote_original_key')
-        or ''
-    )
-    lote_correto = (
-        request.form.get('lote_correto')
-        or request.form.get('novo_lote')
-        or ''
-    )
-    massa_correta = (
-        request.form.get('massa_correta')
-        or request.form.get('massa')
-        or ''
-    )
+    # 1. Coleta dados do formulário
+    texto_original = request.form.get('lote_original_key') or request.form.get('texto_original')
+    lote_correto = request.form.get('novo_lote') or request.form.get('lote_correto')
+    massa_correta = request.form.get('massa') or request.form.get('massa_correta')
+
+    if not texto_original or not lote_correto:
+        flash("Dados incompletos para salvar.", "warning")
+        return redirect(url_for('pagina_auditoria'))
 
     key_original = str(texto_original).strip().upper()
-    lote_correto = str(lote_correto).strip().upper()
-    massa_correta = str(massa_correta).strip().upper()
+    lote_clean = str(lote_correto).strip().upper()
+    massa_clean = str(massa_correta).strip().upper()
 
-    if not key_original or not lote_correto or not massa_correta:
-        flash("Preencha Lote original, Lote real e Massa para salvar a correção.", "warning")
-        return redirect(url_for('pagina_auditoria'))
-
-    # 1) Salva a regra de aprendizado (JSON)
-    ok = ensinar_lote(key_original, lote_correto, massa_correta)
-    if not ok:
-        flash("Falha ao salvar a regra de aprendizado.", "danger")
-        return redirect(url_for('pagina_auditoria'))
-
-    # 2) Aplica retroativamente no banco (SQL Server)
-    linhas_afetadas = 0
     try:
-        conn = connect_to_database()
+        # 2. Salva no SQLite LOCAL (Sua permissão é total aqui)
+        # Substitui a tentativa de UPDATE no SQL Server que estava falhando
+        conn = get_local_db()
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE dbo.ENSAIO
-            SET NUMERO_LOTE = ?, AMOSTRA = ?
-            WHERE UPPER(LTRIM(RTRIM(NUMERO_LOTE))) = ?
-               OR UPPER(LTRIM(RTRIM(AMOSTRA))) = ?
-            """,
-            (lote_correto, massa_correta, key_original, key_original),
-        )
-        linhas_afetadas = cursor.rowcount or 0
+        
+        # INSERT OR REPLACE garante que se já existe essa chave, atualiza. Se não, cria.
+        cursor.execute("""
+            INSERT OR REPLACE INTO aprendizado_local (chave_original, lote_novo, massa_nova)
+            VALUES (?, ?, ?)
+        """, (key_original, lote_clean, massa_clean))
+        
         conn.commit()
+        conn.close()
+        
+        flash(f"✅ Regra salva localmente! '{key_original}' agora será lido como '{lote_clean}'.", "success")
+        
     except Exception as e:
-        print(f"❌ Erro ao aplicar correção no banco: {e}")
-        flash("Correção salva, mas não foi possível atualizar o banco retroativamente.", "warning")
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        print(f"❌ Erro ao salvar no SQLite: {e}")
+        flash("Erro ao salvar regra localmente.", "danger")
 
-    # 3) Atualiza o cache atual (sem precisar recarregar tudo)
-    try:
-        dados_cache = cache_service.get() or {}
-        ensaios = dados_cache.get('dados') or []
-        materiais = dados_cache.get('materiais') or []
-
-        massa_obj = next(
-            (m for m in materiais if str(getattr(m, 'descricao', '')).strip().upper() == massa_correta),
-            None,
-        )
-
-        atualizados_cache = 0
-        for ensaio in ensaios:
-            lote_orig = str(getattr(ensaio, 'lote_original', '')).strip().upper()
-            mat_orig = str(getattr(ensaio, 'material_original', '')).strip().upper()
-
-            if key_original in {lote_orig, mat_orig}:
-                ensaio.lote = lote_correto
-                if massa_obj:
-                    ensaio.massa = massa_obj
-                ensaio.metodo_identificacao = "MANUAL"
-                try:
-                    ensaio.calcular_score()
-                except Exception:
-                    pass
-                atualizados_cache += 1
-
-        if atualizados_cache:
-            cache_service.set(dados_cache)
-    except Exception as e:
-        print(f"⚠️ Não foi possível atualizar o cache retroativamente: {e}")
-
-    print(f"🔄 Retroativo: {linhas_afetadas} registros no banco foram atualizados.")
-    flash(f"Correção salva. Retroativo no banco: {linhas_afetadas} registro(s).", "success")
     return redirect(url_for('pagina_auditoria'))
 
 

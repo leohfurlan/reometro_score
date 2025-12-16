@@ -11,6 +11,7 @@ testes/
 planilhas/
 criar_admin.py
 obsoletos/
+instance/
 config_massas.json
 de_para_massas.json
 *.json
@@ -18,3 +19,7 @@ de_para_massas.json
 *.pdf
 *.xlsx
 *.xls
+*.db
+users_reoscore.db
+instance/users_reoscore.db
+*.sqlite3
