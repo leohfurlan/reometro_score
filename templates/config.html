@@ -16,20 +16,30 @@
 </div>
 
 <ul class="nav nav-tabs mb-4" id="configTabs" role="tablist">
+    
+    {% if current_user.is_admin %}
     <li class="nav-item" role="presentation">
-        <button class="nav-link active fw-bold" id="materiais-tab" data-bs-toggle="tab" data-bs-target="#materiais" type="button" role="tab">
-            <i class="fas fa-flask me-2"></i>Materiais (Specs)
+        <button class="nav-link fw-bold active" id="materiais-tab" data-bs-toggle="tab" data-bs-target="#materiais" type="button">
+            <i class="fas fa-flask me-2"></i>Materiais
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link fw-bold" id="regras-tab" data-bs-toggle="tab" data-bs-target="#regras" type="button" role="tab">
-            <i class="fas fa-gavel me-2"></i>Regras de Ação (Globais)
+        <button class="nav-link fw-bold" id="regras-tab" data-bs-toggle="tab" data-bs-target="#regras" type="button">
+            <i class="fas fa-gavel me-2"></i>Regras de Ação
+        </button>
+    </li>
+    {% endif %}
+
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold {% if not current_user.is_admin %}active{% endif %}" id="ensinar-tab" data-bs-toggle="tab" data-bs-target="#ensinar" type="button">
+            <i class="fas fa-chalkboard-teacher me-2"></i>Ensinar Sistema
         </button>
     </li>
 </ul>
 
 <div class="tab-content" id="configTabsContent">
     
+    {% if current_user.is_admin %}
     <div class="tab-pane fade show active" id="materiais" role="tabpanel">
         <div class="card p-4 mb-4 shadow-sm border-0">
             <form method="GET" action="/config">
@@ -145,27 +155,30 @@
         </div>
 
         <div class="pagination-container d-flex justify-content-between align-items-center bg-white border border-top-0 rounded-bottom p-2 mb-5">
-            <div class="small text-muted ms-2">Total: <strong>{{ total_itens }}</strong> registros</div>
-            {% if total_paginas > 1 %}
+            <div class="small text-muted ms-2">Total: <strong>{{ total_itens_mat }}</strong> registros</div>
+            {% if total_paginas_mat > 1 %}
             <nav>
                 <ul class="pagination pagination-sm mb-0 align-items-center">
                     {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status, 'sort': sort_by, 'order': order} %}
-                    <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual-1, **args) }}"><i class="fas fa-angle-left"></i></a>
+                    
+                    <li class="page-item {% if pagina_atual_mat == 1 %}disabled{% endif %}">
+                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat-1, **args) }}"><i class="fas fa-angle-left"></i></a>
                     </li>
+                    
                     <li class="page-item d-flex align-items-center mx-2">
                         <span class="small text-muted me-2">Pág.</span>
                         <form action="/config" method="GET" style="display:inline;">
-                            {% for k, v in args.items() if k != 'page' %}
+                            {% for k, v in args.items() %}
                                 <input type="hidden" name="{{ k }}" value="{{ v }}">
                             {% endfor %}
-                            <input type="number" name="page" class="form-control form-control-sm page-input text-center" 
-                                value="{{ pagina_atual }}" min="1" max="{{ total_paginas }}" style="width: 50px;" onchange="this.form.submit()">
+                            <input type="number" name="page_mat" class="form-control form-control-sm page-input text-center" 
+                                value="{{ pagina_atual_mat }}" min="1" max="{{ total_paginas_mat }}" style="width: 50px;" onchange="this.form.submit()">
                         </form>
-                        <span class="small text-muted ms-2">de {{ total_paginas }}</span>
+                        <span class="small text-muted ms-2">de {{ total_paginas_mat }}</span>
                     </li>
-                    <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page=pagina_atual+1, **args) }}"><i class="fas fa-angle-right"></i></a>
+                    
+                    <li class="page-item {% if pagina_atual_mat == total_paginas_mat %}disabled{% endif %}">
+                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat+1, **args) }}"><i class="fas fa-angle-right"></i></a>
                     </li>
                 </ul>
             </nav>
@@ -249,6 +262,119 @@
                     </div>
                 </form>
             </div>
+        </div>
+    </div>
+    {% endif %}
+    <div class="tab-pane fade" id="ensinar" role="tabpanel">
+    
+        <div class="card mb-3 border-0 bg-light shadow-sm">
+            <div class="card-body py-3">
+                <form method="GET" action="{{ url_for('pagina_config') }}" class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Buscar Lote</label>
+                        <input type="text" name="audit_busca" class="form-control form-control-sm" placeholder="Ex: ANTIQ..." value="{{ audit_busca }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Status</label>
+                        <select name="audit_status" class="form-select form-select-sm">
+                            <option value="">Problemas (Padrão)</option>
+                            <option value="ALL" {% if audit_status == 'ALL' %}selected{% endif %}>-- Todos --</option>
+                            <option value="MANUAL" {% if audit_status == 'MANUAL' %}selected{% endif %}>Ensinados</option>
+                            <option value="FANTASMA" {% if audit_status == 'FANTASMA' %}selected{% endif %}>Fantasmas</option>
+                            <option value="TEXTO" {% if audit_status == 'TEXTO' %}selected{% endif %}>Texto/Incertos</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Data</label>
+                        <input type="date" name="audit_data" class="form-control form-control-sm" value="{{ audit_data }}">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-dark btn-sm w-100"><i class="fas fa-filter me-1"></i> Filtrar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-white border-bottom">
+                        <tr>
+                            <th class="ps-3">Data/Hora</th>
+                            <th>Lote (Visualizado)</th>
+                            <th>Status</th>
+                            <th>Correção: Lote Real</th>
+                            <th>Correção: Massa</th>
+                            <th class="text-end pe-3">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ensaio in ensaios_audit %}
+                        <tr class="{% if ensaio.metodo_identificacao == 'MANUAL' %}table-primary bg-opacity-10{% endif %}">
+                            <td class="ps-3 small text-muted font-monospace">
+                                {{ ensaio.data_hora.strftime('%d/%m %H:%M') }}
+                            </td>
+                            <td>
+                                <div class="fw-bold text-dark user-select-all">{{ ensaio.lote }}</div>
+                                <div class="x-small text-muted">Batch: {{ ensaio.batch }}</div>
+                            </td>
+                            <td>
+                                {% if ensaio.metodo_identificacao == 'FANTASMA' %}
+                                    <span class="badge bg-danger">Fantasma</span>
+                                {% elif ensaio.metodo_identificacao == 'TEXTO' %}
+                                    <span class="badge bg-warning text-dark">Texto</span>
+                                {% elif ensaio.metodo_identificacao == 'MANUAL' %}
+                                    <span class="badge bg-primary">Ensinado</span>
+                                {% else %}
+                                    <span class="badge bg-success">Lote OK</span>
+                                {% endif %}
+                            </td>
+                            
+                            <form action="{{ url_for('salvar_correcao') }}" method="POST">
+                                <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
+                                <td>
+                                    <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
+                                        value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                                </td>
+                                <td>
+                                    <select name="massa" class="form-select form-select-sm" required>
+                                        <option value="" disabled {% if not ensaio.massa %}selected{% endif %}>Selecione...</option>
+                                        {% for mat in materiais_audit %}
+                                            <option value="{{ mat.descricao }}" {% if ensaio.massa and ensaio.massa.descricao == mat.descricao %}selected{% endif %}>
+                                                {{ mat.descricao }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td class="text-end pe-3">
+                                    <button type="submit" class="btn btn-success btn-sm shadow-sm" title="Salvar">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                </td>
+                            </form>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro para auditar.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if total_paginas_audit > 1 %}
+            <div class="card-footer bg-white py-2">
+                <nav>
+                    <ul class="pagination pagination-sm justify-content-center mb-0">
+                        <li class="page-item {% if pagina_atual_audit == 1 %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit-1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Anterior</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">{{ pagina_atual_audit }} / {{ total_paginas_audit }}</span></li>
+                        <li class="page-item {% if pagina_atual_audit == total_paginas_audit %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit+1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Próximo</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -449,5 +575,15 @@
             
             tbody.insertAdjacentHTML('beforeend', html);
         }
+    </script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Se a URL tiver #ensinar, ativa a aba correspondente
+            if (window.location.hash === '#ensinar') {
+                const triggerEl = document.querySelector('#ensinar-tab');
+                const tab = new bootstrap.Tab(triggerEl);
+                tab.show();
+            }
+        });
     </script>
 {% endblock %}

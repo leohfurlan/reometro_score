@@ -99,23 +99,44 @@ def get_local_db():
     return conn
 
 def iniciar_tabela_aprendizado():
-    """Cria a tabela de correções no SQLite se não existir"""
+    """Cria tabela e aplica migrações de colunas novas se necessário"""
     try:
         conn = get_local_db()
         cursor = conn.cursor()
+        
+        # 1. Cria a tabela básica se não existir (Schema antigo + novos campos)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS aprendizado_local (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chave_original TEXT UNIQUE NOT NULL, -- O texto 'feio' (Ex: CAMELAGRACEL...)
-                lote_novo TEXT NOT NULL,             -- O Lote Bonito (Ex: 9609)
-                massa_nova TEXT NOT NULL             -- A Massa Correta
+                chave_original TEXT UNIQUE NOT NULL,
+                lote_novo TEXT NOT NULL,
+                massa_nova TEXT NOT NULL,
+                usuario_log TEXT,
+                data_log TEXT
             )
         """)
+        
+        # 2. Migração: Tenta adicionar as colunas caso o banco já exista (versão antiga)
+        # O SQLite não suporta ADD COLUMN IF NOT EXISTS nativo em versões antigas,
+        # então usamos try/except para ignorar erro se a coluna já existir.
+        try:
+            cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN usuario_log TEXT")
+        except sqlite3.OperationalError:
+            pass # Coluna já existe
+            
+        try:
+            cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN data_log TEXT")
+        except sqlite3.OperationalError:
+            pass # Coluna já existe
+
         conn.commit()
         conn.close()
-        print("✅ Tabela de aprendizado local (Sidecar) verificada/criada.")
+        print("✅ Tabela de aprendizado local verificada e atualizada (Schema Logs).")
     except Exception as e:
-        print(f"❌ Erro ao criar tabela local: {e}")
+        print(f"❌ Erro ao inicializar tabela local: {e}")
+
+# Mantenha a chamada da função logo abaixo:
+iniciar_tabela_aprendizado()
 
 def aplicar_sobreposicao_local(dados_brutos):
     """
@@ -178,9 +199,6 @@ def aplicar_sobreposicao_local(dados_brutos):
     except Exception as e:
         print(f"⚠️ Erro ao aplicar regras locais: {e}")
         return dados_brutos
-
-# Inicializa tabela auxiliar
-iniciar_tabela_aprendizado()
 
 
 # ==========================================
@@ -388,18 +406,20 @@ def dashboard():
 @app.route('/config')
 @login_required
 def pagina_config():
-    if current_user.role != 'admin':
-        flash("Acesso negado.", "warning")
-        return redirect(url_for('dashboard'))
+    #if current_user.role != 'admin':
+    #    flash("Acesso negado.", "warning")
+    #    return redirect(url_for('dashboard'))
     
-    # 1. Carrega Regras para a segunda aba
+    # === PARTE 1: CONFIGURAÇÃO DE MATERIAIS (Lógica Original) ===
     regras_acao = carregar_regras_acao()
 
-    # 2. Lógica existente de filtros e paginação de Materiais
     query = request.args.get('q', '').strip().upper()
     filtro_tipo = request.args.get('tipo', '')
     filtro_status = request.args.get('status', '')
-    page = request.args.get('page', 1, type=int)
+    
+    # Renomeamos 'page' para 'page_mat' para não conflitar com a paginação da auditoria
+    page_mat = request.args.get('page_mat', 1, type=int) 
+    
     sort_by = request.args.get('sort', 'descricao') 
     order = request.args.get('order', 'asc')
     LIMIT = 20
@@ -428,20 +448,85 @@ def pagina_config():
     else: produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
 
     total_itens = len(produtos_filtrados)
-    total_paginas = math.ceil(total_itens / LIMIT)
-    page = max(1, min(page, total_paginas)) if total_paginas > 0 else 1
+    total_paginas_mat = math.ceil(total_itens / LIMIT)
+    page_mat = max(1, min(page_mat, total_paginas_mat)) if total_paginas_mat > 0 else 1
     
-    start = (page - 1) * LIMIT
+    start = (page_mat - 1) * LIMIT
     end = start + LIMIT
     produtos_paginados = produtos_filtrados[start:end]
 
+    # === PARTE 2: DADOS DE AUDITORIA (Nova Lógica Fundida) ===
+    # Recupera cache
+    dados_cache = cache_service.get()
+    ensaios_audit = []
+    materiais_audit = []
+    
+    if dados_cache:
+        ensaios_raw = dados_cache['dados']
+        materiais_audit = dados_cache['materiais']
+        
+        # Filtros de Auditoria
+        f_data = request.args.get('audit_data', '')
+        f_status = request.args.get('audit_status', '')
+        f_busca = request.args.get('audit_busca', '').upper().strip()
+        
+        # Paginação Auditoria
+        page_audit = request.args.get('page_audit', 1, type=int)
+        per_page_audit = 50
+
+        # Filtragem em memória
+        for e in ensaios_raw:
+            if f_data and e.data_hora.strftime('%Y-%m-%d') != f_data: continue
+            if f_status and e.metodo_identificacao != f_status: continue
+            if f_busca and f_busca not in str(e.lote).upper(): continue
+
+            # Lógica Padrão: Esconde 'LOTE' se sem filtros
+            if not f_status and not f_busca and not f_data:
+                if e.metodo_identificacao == 'LOTE': continue
+
+            ensaios_audit.append(e)
+
+        # Ordenação Auditoria
+        peso = {'FANTASMA': 100, 'TEXTO': 90, 'MANUAL': 10, 'LOTE': 0}
+        def get_data_segura(x): return x.data_hora if x.data_hora else datetime.min
+        
+        ensaios_audit.sort(
+            key=lambda x: (peso.get(x.metodo_identificacao, 0), get_data_segura(x)), 
+            reverse=True
+        )
+
+        # Paginação Auditoria
+        total_registros_audit = len(ensaios_audit)
+        total_paginas_audit = math.ceil(total_registros_audit / per_page_audit)
+        page_audit = max(1, min(page_audit, total_paginas_audit)) if total_paginas_audit > 0 else 1
+        
+        start_a = (page_audit - 1) * per_page_audit
+        end_a = start_a + per_page_audit
+        ensaios_audit_paginados = ensaios_audit[start_a:end_a]
+    else:
+        ensaios_audit_paginados = []
+        total_paginas_audit = 1
+        total_registros_audit = 0
+        page_audit = 1
+
     return render_template(
         'config.html', 
+        # Dados Materiais
         produtos=produtos_paginados,
-        regras_acao=regras_acao, # <--- Enviando regras para o template
+        regras_acao=regras_acao,
         query=query, filtro_tipo=filtro_tipo, filtro_status=filtro_status,
-        pagina_atual=page, total_paginas=total_paginas, total_itens=total_itens,
-        sort_by=sort_by, order=order
+        pagina_atual_mat=page_mat, total_paginas_mat=total_paginas_mat, total_itens_mat=total_itens,
+        sort_by=sort_by, order=order,
+        
+        # Dados Auditoria (Novos)
+        ensaios_audit=ensaios_audit_paginados,
+        materiais_audit=materiais_audit,
+        pagina_atual_audit=page_audit,
+        total_paginas_audit=total_paginas_audit,
+        total_registros_audit=total_registros_audit,
+        audit_busca=request.args.get('audit_busca', ''),
+        audit_status=request.args.get('audit_status', ''),
+        audit_data=request.args.get('audit_data', '')
     )
 
 @app.route('/salvar_regras', methods=['POST'])
@@ -788,6 +873,14 @@ def pagina_auditoria():
     end = start + per_page
     ensaios_paginados = lista_exibicao[start:end]
 
+
+    # Cria um dicionário mutável a partir dos argumentos da URL
+    filtros_para_template = dict(request.args)
+    # Remove 'page' para evitar conflito no url_for do template
+    if 'page' in filtros_para_template:
+        del filtros_para_template['page']
+
+        
     return render_template(
         'auditoria.html', 
         ensaios=ensaios_paginados, 
@@ -797,47 +890,50 @@ def pagina_auditoria():
         total_paginas=total_paginas,
         total_registros=total_registros,
         # Filtros (para manter na navegação)
-        request_args=request.args
+        request_args=filtros_para_template
     )
 
 @app.route('/salvar_correcao', methods=['POST'])
 @login_required
 def salvar_correcao():
-    # 1. Coleta dados do formulário
+    # 1. Coleta dados (IGUAL AO ANTERIOR)
     texto_original = request.form.get('lote_original_key') or request.form.get('texto_original')
     lote_correto = request.form.get('novo_lote') or request.form.get('lote_correto')
     massa_correta = request.form.get('massa') or request.form.get('massa_correta')
 
     if not texto_original or not lote_correto:
         flash("Dados incompletos para salvar.", "warning")
-        return redirect(url_for('pagina_auditoria'))
+        return redirect(url_for('pagina_config', _anchor='ensinar')) # Redireciona para a aba certa
 
     key_original = str(texto_original).strip().upper()
     lote_clean = str(lote_correto).strip().upper()
     massa_clean = str(massa_correta).strip().upper()
 
+    # --- NOVOS DADOS DE LOG ---
+    user_log = current_user.username
+    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
     try:
-        # 2. Salva no SQLite LOCAL (Sua permissão é total aqui)
-        # Substitui a tentativa de UPDATE no SQL Server que estava falhando
         conn = get_local_db()
         cursor = conn.cursor()
         
-        # INSERT OR REPLACE garante que se já existe essa chave, atualiza. Se não, cria.
+        # INSERT OR REPLACE atualizado com as novas colunas
         cursor.execute("""
-            INSERT OR REPLACE INTO aprendizado_local (chave_original, lote_novo, massa_nova)
-            VALUES (?, ?, ?)
-        """, (key_original, lote_clean, massa_clean))
+            INSERT OR REPLACE INTO aprendizado_local 
+            (chave_original, lote_novo, massa_nova, usuario_log, data_log)
+            VALUES (?, ?, ?, ?, ?)
+        """, (key_original, lote_clean, massa_clean, user_log, time_log))
         
         conn.commit()
         conn.close()
         
-        flash(f"✅ Regra salva localmente! '{key_original}' agora será lido como '{lote_clean}'.", "success")
+        flash(f"✅ Regra salva! (Log: {user_log} às {time_log})", "success")
         
     except Exception as e:
         print(f"❌ Erro ao salvar no SQLite: {e}")
         flash("Erro ao salvar regra localmente.", "danger")
 
-    return redirect(url_for('pagina_auditoria'))
+    return redirect(url_for('pagina_config', _anchor='ensinar'))
 
 
 # ==========================================
