@@ -194,9 +194,10 @@ def processar_carga_dados(data_corte='2025-07-01'):
         lote_orig = row['NUMERO_LOTE']
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
-        
+
         # Chaves para busca
         key_lote_orig = str(lote_orig).strip().upper()
+        key_amostra_orig = str(amostra).strip().upper()
         
         produto = None
         equip_planilha = None
@@ -281,8 +282,10 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
-                'ids_ensaio': [], 'massa': produto, 
-                'lote_visivel': chave_lote, 'batch': chave_batch, 
+                'ids_ensaio': [], 'massa': produto,
+                'lote_visivel': chave_lote, 'batch': chave_batch,
+                'lote_original': key_lote_orig,
+                'material_original': key_amostra_orig,
                 'data': row['DATA'],
                 'ts2': None, 't90': None, 'visc': None,
                 'temps': [], 'tempos_max': [], 'tempo_max': None,
@@ -393,6 +396,8 @@ def processar_carga_dados(data_corte='2025-07-01'):
         
         # --- ATRIBUIÇÃO DE NOVOS DADOS ---
         novo_ensaio.metodo_identificacao = dados.get('metodo_id', 'FANTASMA')
+        novo_ensaio.lote_original = dados.get('lote_original')
+        novo_ensaio.material_original = dados.get('material_original')
         
         # Injeção das médias para relatórios (mesmo se o ensaio tiver valor real)
         novo_ensaio.medias_lote = {

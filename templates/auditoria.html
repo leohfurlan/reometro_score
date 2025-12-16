@@ -80,7 +80,7 @@
                         </td>
                         
                         <form action="{{ url_for('salvar_correcao') }}" method="POST" id="form-{{ ensaio.id_ensaio }}">
-                            <input type="hidden" name="lote_original_key" value="{{ ensaio.lote }}">
+                            <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
                             <td>
                                 <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
                                        value="{{ ensaio.lote }}" placeholder="Ex: 9563">
