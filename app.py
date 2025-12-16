@@ -679,29 +679,97 @@ def pagina_auditoria():
 @app.route('/salvar_correcao', methods=['POST'])
 @login_required
 def salvar_correcao():
-    # 1. Captura dados
-    lote_original_key = request.form.get('lote_original_key', '').strip() # Strip aqui é vital!
-    novo_lote_real = request.form.get('novo_lote', '').strip()            # Strip aqui também!
-    nova_massa = request.form.get('massa')
-    
-    if not lote_original_key or not nova_massa:
-        flash("Dados inválidos.", "danger")
-        return redirect(url_for('pagina_auditoria'))
-    
-    # 2. Definição do Lote Final
-    # Se o usuário deixou em branco, usamos a chave original (mas limpa)
-    lote_para_salvar = novo_lote_real if novo_lote_real else lote_original_key
+    # Campos vindos do template (auditoria.html)
+    texto_original = (
+        request.form.get('texto_original')
+        or request.form.get('lote_original_key')
+        or ''
+    )
+    lote_correto = (
+        request.form.get('lote_correto')
+        or request.form.get('novo_lote')
+        or ''
+    )
+    massa_correta = (
+        request.form.get('massa_correta')
+        or request.form.get('massa')
+        or ''
+    )
 
-    # 3. Salva
-    if ensinar_lote(lote_original_key, lote_para_salvar, nova_massa):
-        flash(f"Correção salva! '{lote_original_key}' -> Lote '{lote_para_salvar}'.", "success")
-        
-        # IMPORTANTE: Invalidar cache para forçar recarga visual imediata
-        # Se você tiver um método cache_service.invalidate(), chame-o aqui.
-        # Caso contrário, o usuário precisa clicar em "Recarregar Dados" manualmente.
-    else:
-        flash("Erro ao salvar.", "danger")
-        
+    key_original = str(texto_original).strip().upper()
+    lote_correto = str(lote_correto).strip().upper()
+    massa_correta = str(massa_correta).strip().upper()
+
+    if not key_original or not lote_correto or not massa_correta:
+        flash("Preencha Lote original, Lote real e Massa para salvar a correção.", "warning")
+        return redirect(url_for('pagina_auditoria'))
+
+    # 1) Salva a regra de aprendizado (JSON)
+    ok = ensinar_lote(key_original, lote_correto, massa_correta)
+    if not ok:
+        flash("Falha ao salvar a regra de aprendizado.", "danger")
+        return redirect(url_for('pagina_auditoria'))
+
+    # 2) Aplica retroativamente no banco (SQL Server)
+    linhas_afetadas = 0
+    try:
+        conn = connect_to_database()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE dbo.ENSAIO
+            SET NUMERO_LOTE = ?, AMOSTRA = ?
+            WHERE UPPER(LTRIM(RTRIM(NUMERO_LOTE))) = ?
+               OR UPPER(LTRIM(RTRIM(AMOSTRA))) = ?
+            """,
+            (lote_correto, massa_correta, key_original, key_original),
+        )
+        linhas_afetadas = cursor.rowcount or 0
+        conn.commit()
+    except Exception as e:
+        print(f"❌ Erro ao aplicar correção no banco: {e}")
+        flash("Correção salva, mas não foi possível atualizar o banco retroativamente.", "warning")
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    # 3) Atualiza o cache atual (sem precisar recarregar tudo)
+    try:
+        dados_cache = cache_service.get() or {}
+        ensaios = dados_cache.get('dados') or []
+        materiais = dados_cache.get('materiais') or []
+
+        massa_obj = next(
+            (m for m in materiais if str(getattr(m, 'descricao', '')).strip().upper() == massa_correta),
+            None,
+        )
+
+        atualizados_cache = 0
+        for ensaio in ensaios:
+            lote_orig = str(getattr(ensaio, 'lote_original', '')).strip().upper()
+            mat_orig = str(getattr(ensaio, 'material_original', '')).strip().upper()
+
+            if key_original in {lote_orig, mat_orig}:
+                ensaio.lote = lote_correto
+                if massa_obj:
+                    ensaio.massa = massa_obj
+                ensaio.metodo_identificacao = "MANUAL"
+                try:
+                    ensaio.calcular_score()
+                except Exception:
+                    pass
+                atualizados_cache += 1
+
+        if atualizados_cache:
+            cache_service.set(dados_cache)
+    except Exception as e:
+        print(f"⚠️ Não foi possível atualizar o cache retroativamente: {e}")
+
+    print(f"🔄 Retroativo: {linhas_afetadas} registros no banco foram atualizados.")
+    flash(f"Correção salva. Retroativo no banco: {linhas_afetadas} registro(s).", "success")
     return redirect(url_for('pagina_auditoria'))
 
 
@@ -766,7 +834,7 @@ def detalhes_lotes_massa(cod_sankhya):
     # Ordenação
     reverse = (order == 'desc')
     if sort_by == 'data':
-        lotes_lista.sort(key=lambda x: x['data_recente'], reverse=reverse)
+        lotes_lista.sort(key=lambda x: x.get('data_recente') or datetime.min, reverse=reverse)
     elif sort_by == 'lote':
         lotes_lista.sort(key=lambda x: x['numero'], reverse=reverse)
     elif sort_by == 'score':

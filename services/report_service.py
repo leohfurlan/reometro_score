@@ -1,5 +1,6 @@
 from collections import defaultdict
 import statistics
+from datetime import datetime
 
 def gerar_estrutura_relatorio(lista_ensaios, busca='', ordenar_por='nome', ordem='asc'):
     arvore = {}
@@ -88,6 +89,15 @@ def gerar_estrutura_relatorio(lista_ensaios, busca='', ordenar_por='nome', ordem
             else:
                 lote['kpi_lote']['score_medio'] = 0
                 lote['kpi_lote']['taxa_aprovacao'] = 0
+
+        # Ordenação padrão dos lotes: mais recente primeiro (data_recente DESC)
+        massa_node['lotes'] = dict(
+            sorted(
+                massa_node['lotes'].items(),
+                key=lambda kv: kv[1].get('data_recente') or datetime.min,
+                reverse=True,
+            )
+        )
 
         # Médias Gerais Massa (igual anterior)
         def safe_mean(lista): return statistics.mean(lista) if lista else None
