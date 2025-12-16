@@ -8,7 +8,7 @@ class CacheManager:
     Previne crescimento descontrolado e dados obsoletos.
     """
     
-    def __init__(self, ttl_minutes=30, max_size_mb=500):
+    def __init__(self, ttl_minutes=120, max_size_mb=500):
         self.cache = {
             'dados': [],
             'materiais': [],

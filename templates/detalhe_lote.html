@@ -2,279 +2,405 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Lote {{ lote.numero }} - Relatório</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lote {{ lote.numero }} - Detalhes</title>
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
-        /* --- ESTILOS DE TELA (PADRÃO) --- */
-        body { background-color: #f8f9fa; } 
-        .card-kpi { border-left: 4px solid; }
-        
-        /* Altura padrão do gráfico na tela */
-        .chart-container {
-            position: relative;
-            height: 300px; 
-            width: 100%;
+        /* --- ESTILOS GERAIS (Modo Janela Limpa) --- */
+        body {
+            background-color: #f4f7f6;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            padding-bottom: 1.5rem;
         }
 
-        /* --- ESTILOS DE IMPRESSÃO (PAISAGEM COMPACTA) --- */
+        /* --- CARDS MODERNOS --- */
+        .modern-card {
+            background: #fff;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            overflow: hidden;
+        }
+        
+        .card-header-modern {
+            background: #fff;
+            border-bottom: 1px solid #f0f0f0;
+            padding: 12px 16px;
+            font-weight: 700;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* --- KPIS (Topo) --- */
+        .stat-card {
+            padding: 15px 20px;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-left: 5px solid transparent;
+            height: 100%;
+        }
+        .stat-card.primary { border-left-color: #0d6efd; }
+        .stat-card.success { border-left-color: #198754; }
+        .stat-card.warning { border-left-color: #ffc107; }
+        .stat-card.danger { border-left-color: #dc3545; }
+
+        .stat-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        /* --- TABELA DE MÉDIAS (Specs + Real) --- */
+        .specs-table {
+            width: 100%;
+            font-size: 0.85rem;
+            margin-bottom: 0;
+        }
+        .specs-table th {
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            color: inherit;
+            opacity: 0.7;
+            font-weight: 600;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+        }
+        .specs-table td {
+            padding: 6px 4px;
+            vertical-align: middle;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        .specs-table tr:last-child td { border-bottom: none; }
+        
+        .col-real-highlight {
+            background-color: rgba(255,255,255,0.4);
+            font-weight: bold;
+            font-size: 1rem;
+            text-align: center;
+            border-radius: 6px;
+        }
+
+        /* --- TABELA DE BATCHES --- */
+        .table-modern thead th {
+            border-top: none;
+            border-bottom: 2px solid #eef2f7;
+            color: #6c757d;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .table-modern thead th:hover { background-color: #f8f9fa; color: #0d6efd; }
+        .table-modern tbody td { vertical-align: middle; padding: 10px 12px; border-bottom: 1px solid #f8f9fa; font-size: 0.9rem; }
+        .sort-indicator { font-size: 0.7em; margin-left: 5px; color: #ccc; }
+        .active-sort .sort-indicator { color: #0d6efd; }
+
+        .card-body-compact { padding: 12px 12px; }
+        .stack-gap-12 > * + * { margin-top: 10px; }
+        .charts-container { padding: 12px 12px; }
+        .chart-box { height: clamp(190px, 22vh, 240px); padding: 8px; }
+        .chart-box.chart-reo { height: clamp(205px, 24vh, 260px); }
+        .chart-box.chart-visc { height: clamp(170px, 18vh, 215px); }
+        .chart-title { margin-bottom: 6px; }
+        .value-alert { color: #dc3545 !important; }
+        .value-alert .fa-exclamation-triangle { font-size: 0.85rem; }
+
+        /* --- IMPRESSÃO --- */
         @media print {
-            /* 1. Configuração da Página */
-            @page { 
-                size: A4 landscape; 
-                margin: 5mm; /* Margens mínimas */
-            }
-            
-            body { 
-                background-color: white !important; 
-                -webkit-print-color-adjust: exact;
-                zoom: 70%; /* <--- O SEGREDO: Reduz escala para caber tudo */
-                font-size: 11px;
-            }
-
-            /* 2. Ocultar elementos desnecessários */
-            .btn, .no-print, .sticky-top, input[type="checkbox"], ::-webkit-scrollbar { 
-                display: none !important; 
-            }
-            
-            /* 3. Ajuste dos Cards (KPIs e Gráficos) */
-            .card { 
-                box-shadow: none !important; 
-                border: 1px solid #ccc !important; 
-                break-inside: avoid;
-            }
-            .card-header { 
-                background-color: #f0f0f0 !important; 
-                color: black !important; 
-                padding: 4px 8px !important;
-                font-size: 12px;
-            }
-            .card-body { padding: 8px !important; }
-
-            /* 4. FORÇAR O GRID DOS KPIS (Correção do problema relatado) */
-            .row-kpi-print {
-                display: flex !important;
-                flex-wrap: nowrap !important;
-                gap: 10px !important;
-                margin-bottom: 10px !important;
-            }
-            .col-kpi-print {
-                flex: 1 !important; /* Força divisão igual */
-                width: 25% !important;
-            }
-
-            /* 5. FORÇAR LAYOUT PRINCIPAL (2 COLUNAS) */
-            .row-main-print { 
-                display: flex !important; 
-                flex-wrap: nowrap !important; 
-                gap: 15px;
-            }
-            
-            /* Coluna Esquerda (Tabelas) */
-            .col-left-print { 
-                width: 38% !important; 
-                flex: 0 0 38% !important; 
-            }
-            
-            /* Coluna Direita (Gráficos) */
-            .col-right-print { 
-                width: 62% !important; 
-                flex: 0 0 62% !important; 
-            }
-
-            /* 6. Gráficos Compactos na Impressão */
-            .col-right-print .card-body {
-                display: block !important; 
-            }
-            .chart-wrapper-print {
-                width: 100% !important;
-                height: 240px !important; /* Altura reduzida para caber na folha */
-                margin-bottom: 10px;
-                page-break-inside: avoid;
-            }
-            .chart-container { height: 210px !important; }
-
-            /* 7. Tabelas Compactas */
-            .table-responsive { overflow: visible !important; max-height: none !important; }
-            .table th, .table td { padding: 2px 4px !important; font-size: 10px; }
-            .table th a { text-decoration: none !important; color: black !important; pointer-events: none; }
-            
-            /* Força a tabela de batches a não ter scroll na impressão e mostrar tudo (vai quebrar pág se necessário) */
-            #table-batches-container { max-height: none !important; }
+            body { background: white !important; -webkit-print-color-adjust: exact; padding: 0; }
+            .no-print { display: none !important; }
+            .modern-card, .stat-card { box-shadow: none !important; border: 1px solid #ddd !important; }
+            .col-real-highlight { border: 1px solid #000; }
         }
     </style>
 </head>
-<body class="p-4">
+<body>
 
-<div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
-        <div>
-            <h5 class="text-secondary mb-0">{{ massa.nome }}</h5>
-            <h2 class="fw-bold text-dark display-6 mb-0">Lote: {{ lote.numero }}</h2>
-            <p class="text-muted mb-0 small">Cód: {{ massa.cod }} | Atualizado: {{ lote.data_recente.strftime('%d/%m/%Y %H:%M') }}</p>
+    {# Precisamos pegar o objeto de especificações (Specs) para mostrar Min/Max #}
+    {% set ref_ensaio = ensaios[0] %}
+    {# Tenta identificar qual perfil de Alta foi usado (Cinza, Preto ou Genérico) #}
+    {% set p_alta = ref_ensaio.massa.perfis.get('alta_cinza') or ref_ensaio.massa.perfis.get('alta_preto') or ref_ensaio.massa.perfis.get('alta') %}
+    {# Pega o perfil de Baixa #}
+    {% set p_baixa = ref_ensaio.massa.perfis.get('baixa') %}
+    
+    {% if not p_alta and not p_baixa %}
+        {% set p_alta = ref_ensaio.massa.parametros %}
+        {% set p_baixa = ref_ensaio.massa.parametros %}
+    {% endif %}
+
+<div class="container-fluid px-4 py-2">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex align-items-center">
+            <button class="btn btn-white border shadow-sm rounded-circle me-3 no-print" onclick="window.close();" title="Fechar Janela" style="width: 40px; height: 40px;">
+                <i class="fas fa-times text-muted"></i>
+            </button>
+            
+            <div>
+                <h5 class="text-secondary mb-0 fw-bold ls-1" style="font-size: 0.85rem; letter-spacing: 1px; text-transform: uppercase;">{{ massa.nome }}</h5>
+                <div class="d-flex align-items-baseline gap-2">
+                    <h2 class="fw-bold text-dark mb-0">Lote {{ lote.numero }}</h2>
+                    <span class="badge bg-secondary bg-opacity-10 text-dark border">{{ massa.cod }}</span>
+                </div>
+                <div class="text-muted small mt-1"><i class="far fa-clock me-1"></i> Atualizado: {{ lote.data_recente.strftime('%d/%m/%Y %H:%M') }}</div>
+            </div>
         </div>
-        <div class="text-end">
-            <button class="btn btn-outline-secondary btn-sm mb-2 no-print" onclick="window.print()">
+
+        <div class="text-end d-flex align-items-center gap-3">
+            <button class="btn btn-outline-secondary btn-sm no-print shadow-sm" onclick="window.print()">
                 <i class="fas fa-print me-2"></i> Imprimir
             </button>
             
-            <div class="display-4 fw-bold lh-1 {% if lote.kpi_lote.score_medio >= 85 %}text-success{% else %}text-warning{% endif %}">
-                {{ "%.0f"|format(lote.kpi_lote.score_medio) }}
-            </div>
-            <div class="text-muted small text-uppercase fw-bold">Score Geral</div>
-        </div>
-    </div>
-
-    <div class="row g-3 mb-3 row-kpi-print">
-        <div class="col-md-3 col-kpi-print"> 
-            <div class="card p-2 shadow-sm card-kpi border-primary h-100">
-                <div class="text-muted small fw-bold text-uppercase" style="font-size: 0.75rem;">Total Ensaios</div>
-                <div class="fs-2 fw-bold text-dark lh-1">{{ lote.kpi_lote.total }}</div>
-            </div>
-        </div>
-        <div class="col-md-3 col-kpi-print">
-            <div class="card p-2 shadow-sm card-kpi border-success h-100">
-                <div class="text-muted small fw-bold text-uppercase" style="font-size: 0.75rem;">Aprovados</div>
-                <div class="fs-2 fw-bold text-success lh-1">{{ lote.kpi_lote.aprovados }}</div>
-            </div>
-        </div>
-        <div class="col-md-3 col-kpi-print">
-            <div class="card p-2 shadow-sm card-kpi border-warning h-100">
-                <div class="text-muted small fw-bold text-uppercase" style="font-size: 0.75rem;">Ressalvas</div>
-                <div class="fs-2 fw-bold text-warning lh-1">{{ lote.kpi_lote.ressalvas }}</div>
-            </div>
-        </div>
-        <div class="col-md-3 col-kpi-print">
-            <div class="card p-2 shadow-sm card-kpi border-danger h-100">
-                <div class="text-muted small fw-bold text-uppercase" style="font-size: 0.75rem;">Reprovados</div>
-                <div class="fs-2 fw-bold text-danger lh-1">{{ lote.kpi_lote.reprovados }}</div>
+            <div class="bg-white px-3 py-2 rounded shadow-sm border text-center">
+                <div class="display-6 fw-bold lh-1 {% if lote.kpi_lote.score_medio >= 85 %}text-success{% else %}text-warning{% endif %}">
+                    {{ "%.0f"|format(lote.kpi_lote.score_medio) }}
+                </div>
+                <div class="text-muted x-small fw-bold text-uppercase mt-1" style="font-size: 0.65rem;">Score Geral</div>
             </div>
         </div>
     </div>
 
-    <div class="row g-4 row-main-print"> 
+    <div class="row g-3 mb-3">
+        <div class="col-md-3 col-sm-6">
+            <div class="stat-card primary">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase small mb-1">Total Ensaios</h6>
+                    <h2 class="mb-0 fw-bold text-dark">{{ lote.kpi_lote.total }}</h2>
+                </div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                    <i class="fas fa-vials"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="stat-card success">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase small mb-1">Aprovados</h6>
+                    <h2 class="mb-0 fw-bold text-success">{{ lote.kpi_lote.aprovados }}</h2>
+                </div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="stat-card warning">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase small mb-1">Ressalvas</h6>
+                    <h2 class="mb-0 fw-bold text-warning">{{ lote.kpi_lote.ressalvas }}</h2>
+                </div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="stat-card danger">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase small mb-1">Reprovados</h6>
+                    <h2 class="mb-0 fw-bold text-danger">{{ lote.kpi_lote.reprovados }}</h2>
+                </div>
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger">
+                    <i class="fas fa-times-circle"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
         
-        <div class="col-md-5 col-left-print">
+        <div class="col-lg-5">
             
-            {% if lote.medias_detalhadas.tem_alta %}
-            <div class="card shadow-sm border-0 mb-3 border-start border-4 border-danger">
-                <div class="card-header bg-white fw-bold text-danger py-1 x-small">
-                    <i class="fas fa-fire me-1"></i>MÉDIA ALTA (CURA)
+            <div class="modern-card mb-2">
+                <div class="card-header-modern">
+                    <span><i class="fas fa-chart-bar me-2 text-primary"></i>Médias Consolidadas</span>
                 </div>
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0 text-center small">
-                        <thead class="bg-light">
-                            <tr><th>Parâm.</th><th>Mín</th><th>Alvo</th><th>Máx</th><th class="table-danger bg-opacity-10 fw-bold border-start">Real</th></tr>
-                        </thead>
-                        <tbody>
-                            {% set ref = ensaios[0] %}
-                            {% set p_alta = ref.massa.perfis.get('alta_cinza') or ref.massa.perfis.get('alta') or ref.massa.parametros %}
-                            {% for param in ['Ts2', 'T90'] %}
-                            {% set p_obj = p_alta.get(param) %}
-                            {% if p_obj %}
-                            <tr>
-                                <td class="text-start ps-2 fw-bold">{{ param }}</td>
-                                <td class="text-muted">{{ p_obj.minimo }}</td>
-                                <td class="text-primary fw-bold">{{ p_obj.alvo }}</td>
-                                <td class="text-muted">{{ p_obj.maximo }}</td>
-                                <td class="fw-bold border-start fs-6 text-danger">
-                                    {{ "%.2f"|format(lote.medias_detalhadas['alta_' + param.lower()]) }}
-                                </td>
-                            </tr>
-                            {% endif %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div class="card-body-compact stack-gap-12">
+                    
+                    {% if lote.medias_detalhadas.tem_alta %}
+                    <div class="p-2 rounded-3 border border-danger border-opacity-10 bg-danger bg-opacity-10">
+                        <div class="d-flex align-items-center mb-2 border-bottom border-danger border-opacity-25 pb-2">
+                            <i class="fas fa-fire text-danger me-2"></i>
+                            <span class="fw-bold text-danger small text-uppercase">Média Alta (Cura)</span>
+                        </div>
+                        
+                        <table class="specs-table text-danger">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%">Parâmetro</th>
+                                    <th class="text-center" style="width: 25%">Mín</th>
+                                    <th class="text-center" style="width: 25%">Máx</th>
+                                    <th class="text-center text-dark" style="width: 25%">REAL</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% set spec_ts2 = p_alta.get('Ts2') %}
+                                {% set alta_ts2_val = lote.medias_detalhadas.alta_ts2 %}
+                                {% set alta_ts2_alert = spec_ts2 and (alta_ts2_val < spec_ts2.minimo or alta_ts2_val > spec_ts2.maximo) %}
+                                <tr>
+                                    <td class="fw-bold">Ts2</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_ts2.minimo) if spec_ts2 else '-' }}</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_ts2.maximo) if spec_ts2 else '-' }}</td>
+                                    <td class="col-real-highlight text-dark {% if alta_ts2_alert %}value-alert fw-bold{% endif %}">
+                                        {% if alta_ts2_alert %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                        {{ "%.2f"|format(alta_ts2_val) }} s
+                                    </td>
+                                </tr>
+                                {% set spec_t90 = p_alta.get('T90') %}
+                                {% set alta_t90_val = lote.medias_detalhadas.alta_t90 %}
+                                {% set alta_t90_alert = spec_t90 and (alta_t90_val < spec_t90.minimo or alta_t90_val > spec_t90.maximo) %}
+                                <tr>
+                                    <td class="fw-bold">T90</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_t90.minimo) if spec_t90 else '-' }}</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_t90.maximo) if spec_t90 else '-' }}</td>
+                                    <td class="col-real-highlight text-dark {% if alta_t90_alert %}value-alert fw-bold{% endif %}">
+                                        {% if alta_t90_alert %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                        {{ "%.2f"|format(alta_t90_val) }} s
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <div class="p-2 rounded-3 border border-primary border-opacity-10 bg-primary bg-opacity-10">
+                        <div class="d-flex align-items-center mb-2 border-bottom border-primary border-opacity-25 pb-2">
+                            <i class="fas fa-snowflake text-primary me-2"></i>
+                            <span class="fw-bold text-primary small text-uppercase">Média Baixa / Visc</span>
+                        </div>
+                        
+                        <table class="specs-table text-primary">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%">Parâmetro</th>
+                                    <th class="text-center" style="width: 25%">Mín</th>
+                                    <th class="text-center" style="width: 25%">Máx</th>
+                                    <th class="text-center text-dark" style="width: 25%">REAL</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% set spec_visc = p_baixa.get('Viscosidade') %}
+                                {% set visc_val = lote.medias_detalhadas.visc %}
+                                {% set visc_alert = spec_visc and visc_val and (visc_val < spec_visc.minimo or visc_val > spec_visc.maximo) %}
+                                {% if lote.medias_detalhadas.visc > 0 or spec_visc %}
+                                <tr>
+                                    <td class="fw-bold">Visc.</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_visc.minimo) if spec_visc else '-' }}</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_visc.maximo) if spec_visc else '-' }}</td>
+                                    <td class="col-real-highlight text-dark {% if visc_alert %}value-alert fw-bold{% endif %}">
+                                        {% if visc_alert %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                        {% if lote.medias_detalhadas.visc > 0 %}
+                                            {{ "%.1f"|format(visc_val) }} MU
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endif %}
+
+                                {% set spec_ts2_bx = p_baixa.get('Ts2') %}
+                                {% set baixa_ts2_val = lote.medias_detalhadas.baixa_ts2 %}
+                                {% set baixa_ts2_alert = spec_ts2_bx and baixa_ts2_val and (baixa_ts2_val < spec_ts2_bx.minimo or baixa_ts2_val > spec_ts2_bx.maximo) %}
+                                {% if lote.medias_detalhadas.baixa_ts2 > 0 or spec_ts2_bx %}
+                                <tr>
+                                    <td class="fw-bold">Ts2 (Bx)</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_ts2_bx.minimo) if spec_ts2_bx else '-' }}</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_ts2_bx.maximo) if spec_ts2_bx else '-' }}</td>
+                                    <td class="col-real-highlight text-dark {% if baixa_ts2_alert %}value-alert fw-bold{% endif %}">
+                                        {% if baixa_ts2_alert %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                        {% if lote.medias_detalhadas.baixa_ts2 > 0 %}
+                                            {{ "%.2f"|format(baixa_ts2_val) }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endif %}
+                                
+                                {% set spec_t90_bx = p_baixa.get('T90') %}
+                                {% set baixa_t90_val = lote.medias_detalhadas.baixa_t90 %}
+                                {% set baixa_t90_alert = spec_t90_bx and baixa_t90_val and (baixa_t90_val < spec_t90_bx.minimo or baixa_t90_val > spec_t90_bx.maximo) %}
+                                {% if lote.medias_detalhadas.baixa_t90 > 0 and spec_t90_bx %}
+                                <tr>
+                                    <td class="fw-bold">T90 (Bx)</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_t90_bx.minimo) }}</td>
+                                    <td class="text-center">{{ "%.1f"|format(spec_t90_bx.maximo) }}</td>
+                                    <td class="col-real-highlight text-dark {% if baixa_t90_alert %}value-alert fw-bold{% endif %}">
+                                        {% if baixa_t90_alert %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                        {{ "%.2f"|format(baixa_t90_val) }}
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            {% endif %}
 
-            <div class="card shadow-sm border-0 mb-3 border-start border-4 border-primary">
-                <div class="card-header bg-white fw-bold text-primary py-1 x-small">
-                    <i class="fas fa-snowflake me-1"></i>MÉDIA BAIXA / VISC
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0 text-center small">
-                        <thead class="bg-light">
-                            <tr><th>Parâm.</th><th>Mín</th><th>Alvo</th><th>Máx</th><th class="table-primary bg-opacity-10 fw-bold border-start">Real</th></tr>
-                        </thead>
-                        <tbody>
-                            {% set ref = ensaios[0] %}
-                            {% set p_baixa = ref.massa.perfis.get('baixa') or ref.massa.parametros %}
-                            {% set p_visc = p_baixa.get('Viscosidade') %}
-                            {% if p_visc %}
-                            <tr>
-                                <td class="text-start ps-2 fw-bold">Visc.</td>
-                                <td class="text-muted">{{ p_visc.minimo }}</td>
-                                <td class="text-primary fw-bold">{{ p_visc.alvo }}</td>
-                                <td class="text-muted">{{ p_visc.maximo }}</td>
-                                <td class="fw-bold border-start fs-6 text-primary">
-                                    {{ "%.1f"|format(lote.medias_detalhadas.visc) }}
-                                </td>
-                            </tr>
-                            {% endif %}
-                            {% for param in ['Ts2', 'T90'] %}
-                            {% set p_obj = p_baixa.get(param) %}
-                            {% if p_obj and lote.medias_detalhadas['baixa_' + param.lower()] > 0 %}
-                            <tr>
-                                <td class="text-start ps-2 fw-bold">{{ param }} (Bx)</td>
-                                <td class="text-muted">{{ p_obj.minimo }}</td>
-                                <td class="text-primary fw-bold">{{ p_obj.alvo }}</td>
-                                <td class="text-muted">{{ p_obj.maximo }}</td>
-                                <td class="fw-bold border-start fs-6 text-dark">
-                                    {{ "%.2f"|format(lote.medias_detalhadas['baixa_' + param.lower()]) }}
-                                </td>
-                            </tr>
-                            {% endif %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="card shadow-sm border-0">
-                <div class="card-header bg-white fw-bold text-secondary d-flex justify-content-between align-items-center py-2">
-                    <span class="x-small"><i class="fas fa-list me-1"></i>BATCHES INDIVIDUAIS</span>
-                    <button class="btn btn-sm btn-primary py-0 no-print" onclick="atualizarGraficos()">
-                        <i class="fas fa-sync-alt"></i>
+            <div class="modern-card">
+                <div class="card-header-modern">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-list-ol me-2 text-primary"></i>
+                        <span>Batches Individuais</span>
+                    </div>
+                    <button class="btn btn-sm btn-light border no-print" onclick="atualizarGraficos()" title="Atualizar Gráficos">
+                        <i class="fas fa-sync-alt text-muted"></i>
                     </button>
                 </div>
-                <div class="table-responsive" id="table-batches-container" style="max-height: 500px; overflow-y: auto;">
-                    <table class="table table-hover mb-0 x-small align-middle">
-                        <thead class="sticky-top bg-light">
+                
+                <div class="table-responsive" style="max-height: 550px; overflow-y: auto;">
+                    <table class="table table-hover table-modern mb-0" id="tabelaBatches">
+                        <thead class="sticky-top bg-white shadow-sm">
                             <tr>
-                                <th class="text-center no-print" style="width: 25px;"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
-                                <th><a href="{{ url_for('detalhe_lote_view', cod_sankhya=massa.cod, numero_lote=lote.numero, sort='id', order='asc' if order=='desc' else 'desc') }}" class="text-secondary text-decoration-none">ID <i class="fas fa-sort"></i></a></th>
-                                <th>Hora</th>
-                                <th>Batch</th>
-                                <th>Temp</th>
-                                <th>Score</th>
-                                <th class="text-center">Sts</th>
+                                <th class="text-center no-print" style="width: 40px;">
+                                    <input type="checkbox" id="checkAll" class="form-check-input" onclick="toggleAll(this)">
+                                </th>
+                                <th onclick="ordenarTabela(1, 'num')">ID <i class="fas fa-sort sort-indicator"></i></th>
+                                <th onclick="ordenarTabela(2, 'str')">Hora <i class="fas fa-sort sort-indicator"></i></th>
+                                <th onclick="ordenarTabela(3, 'num')">Batch <i class="fas fa-sort sort-indicator"></i></th>
+                                <th onclick="ordenarTabela(4, 'num')">Temp <i class="fas fa-sort sort-indicator"></i></th>
+                                <th onclick="ordenarTabela(5, 'num')">Score <i class="fas fa-sort sort-indicator"></i></th>
+                                <th class="text-center" onclick="ordenarTabela(6, 'str')">Sts <i class="fas fa-sort sort-indicator"></i></th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for e in ensaios %}
                             <tr>
                                 <td class="text-center no-print">
-                                    <input type="checkbox" class="batch-check" value="{{ e.id_ensaio }}" {% if loop.index <= 10 %}checked{% endif %}>
+                                    <input type="checkbox" class="form-check-input batch-check" value="{{ e.id_ensaio }}" onclick="atualizarGraficos()" {% if loop.index <= 10 %}checked{% endif %}>
                                 </td>
-                                <td>{{ e.id_ensaio }}</td>
-                                <td>{{ e.data_hora.strftime('%H:%M') }}</td>
-                                <td class="fw-bold">{{ e.batch }}</td>
-                                <td>{{ "%.0f"|format(e.temp_plato) }}°</td>
-                                <td>
-                                    <span class="badge {% if e.score_final >= 85 %}bg-success{% else %}bg-warning text-dark{% endif %} border px-1">
+                                <td class="text-muted small" data-order="{{ e.id_ensaio }}">{{ e.id_ensaio }}</td>
+                                <td data-order="{{ e.data_hora.timestamp() }}">{{ e.data_hora.strftime('%H:%M') }}</td>
+                                <td class="fw-bold" data-order="{{ e.batch }}">{{ e.batch }}</td>
+                                <td data-order="{{ e.temp_plato }}">{{ "%.0f"|format(e.temp_plato) }}°</td>
+                                <td data-order="{{ e.score_final }}">
+                                    <span class="badge {% if e.score_final >= 85 %}bg-success{% else %}bg-warning text-dark{% endif %} border px-2 py-1">
                                         {{ "%.0f"|format(e.score_final) }}
                                     </span>
                                 </td>
-                                <td class="text-center">
+                                <td class="text-center" data-order="{{ e.acao_recomendada }}">
                                     {% if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada %}
-                                        <i class="fas fa-check-circle text-success"></i>
+                                        <i class="fas fa-check-circle text-success" data-bs-toggle="tooltip" title="Aprovado"></i>
                                     {% elif "REPROVAR" in e.acao_recomendada %}
-                                        <i class="fas fa-times-circle text-danger"></i>
+                                        <i class="fas fa-times-circle text-danger" data-bs-toggle="tooltip" title="Reprovado"></i>
                                     {% else %}
-                                        <i class="fas fa-exclamation-circle text-warning"></i>
+                                        <i class="fas fa-exclamation-circle text-warning" data-bs-toggle="tooltip" title="{{ e.acao_recomendada }}"></i>
                                     {% endif %}
                                 </td>
                             </tr>
@@ -282,52 +408,113 @@
                         </tbody>
                     </table>
                 </div>
+                <div class="card-footer bg-white text-center text-muted x-small py-2 border-top-0">
+                    <i class="fas fa-info-circle me-1"></i> Clique nos cabeçalhos para ordenar
+                </div>
             </div>
         </div>
 
-        <div class="col-md-7 col-right-print">
-            <div class="card shadow-sm border-0 h-100">
-                <div class="card-header bg-white fw-bold text-secondary d-flex justify-content-between py-2">
-                    <span class="x-small"><i class="fas fa-chart-line me-1"></i>CURVAS COMPARATIVAS</span>
-                    <span class="badge bg-light text-dark border no-print" id="lblCount">10 sel.</span>
+        <div class="col-lg-7">
+            <div class="modern-card d-flex flex-column">
+                <div class="card-header-modern">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-chart-line me-2 text-secondary"></i>
+                        <span>Curvas Comparativas</span>
+                    </div>
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary border no-print" id="lblCount">0 sel.</span>
                 </div>
-                <div class="card-body p-3 d-flex flex-column">
+                
+                <div class="charts-container d-flex flex-column gap-2">
                     
-                    <div class="chart-wrapper-print mb-3">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <h6 class="x-small text-muted fw-bold mb-0">REOMETRIA (Torque)</h6>
-                            <div class="btn-group btn-group-sm no-print" role="group">
-                                <input type="radio" class="btn-check" name="btnradio" id="btnAll" autocomplete="off" checked onclick="filtrarGrafico('TODOS')">
-                                <label class="btn btn-outline-secondary py-0" style="font-size: 0.75rem;" for="btnAll">Tudo</label>
-                                <input type="radio" class="btn-check" name="btnradio" id="btnAlta" autocomplete="off" onclick="filtrarGrafico('ALTA')">
-                                <label class="btn btn-outline-danger py-0" style="font-size: 0.75rem;" for="btnAlta">Alta</label>
-                                <input type="radio" class="btn-check" name="btnradio" id="btnBaixa" autocomplete="off" onclick="filtrarGrafico('BAIXA')">
-                                <label class="btn btn-outline-primary py-0" style="font-size: 0.75rem;" for="btnBaixa">Baixa</label>
-                            </div>
+                    <div class="chart-wrapper-print">
+                        <div class="d-flex justify-content-between align-items-center chart-title">
+                            <span class="fw-bold text-primary small"><i class="fas fa-snowflake me-1"></i> Reometria - Baixa Temperatura</span>
+                            
                         </div>
-                        <div class="chart-container">
-                            <canvas id="chartReometria"></canvas>
+                        <div class="chart-box chart-reo rounded border border-light bg-white">
+                            <canvas id="chartReometriaBaixa"></canvas>
                         </div>
                     </div>
-                    
-                    <hr class="my-2 no-print">
 
                     <div class="chart-wrapper-print">
-                        <h6 class="x-small text-muted fw-bold mb-1 text-center">VISCOSIDADE (Mooney)</h6>
-                        <div class="chart-container">
+                        <div class="d-flex justify-content-between align-items-center chart-title">
+                            <span class="fw-bold text-danger small"><i class="fas fa-fire me-1"></i> Reometria - Alta Temperatura</span>
+                            <span class="text-muted x-small">Batches selecionados</span>
+                        </div>
+                        <div class="chart-box chart-reo rounded border border-light bg-white">
+                            <canvas id="chartReometriaAlta"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-wrapper-print">
+                        <div class="chart-title">
+                            <span class="fw-bold text-primary small"><i class="fas fa-water me-1"></i> Viscosidade (Mooney)</span>
+                        </div>
+                        <div class="chart-box chart-visc rounded border border-light bg-white">
                             <canvas id="chartViscosidade"></canvas>
                         </div>
                     </div>
-
                 </div>
             </div>
         </div>
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
 <script>
-    let chartReo = null;
-    let chartVisc = null;
+    // --- LÓGICA DE ORDENAÇÃO CLIENT-SIDE (SPA) ---
+    let sortDirections = {};
+
+    function ordenarTabela(colIndex, type) {
+        const table = document.getElementById("tabelaBatches");
+        const tbody = table.querySelector("tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        const th = table.querySelectorAll("th")[colIndex];
+        
+        let direction = sortDirections[colIndex] === 'asc' ? 'desc' : 'asc';
+        sortDirections[colIndex] = direction;
+
+        table.querySelectorAll(".sort-indicator").forEach(icon => {
+            icon.className = "fas fa-sort sort-indicator text-muted opacity-25";
+        });
+        const currentIcon = th.querySelector(".sort-indicator");
+        if(currentIcon) {
+            currentIcon.className = direction === 'asc' 
+                ? "fas fa-sort-up sort-indicator text-primary" 
+                : "fas fa-sort-down sort-indicator text-primary";
+        }
+
+        rows.sort((rowA, rowB) => {
+            const cellA = rowA.children[colIndex];
+            const cellB = rowB.children[colIndex];
+
+            let valA = cellA.getAttribute("data-order") || cellA.innerText.trim();
+            let valB = cellB.getAttribute("data-order") || cellB.innerText.trim();
+
+            if (type === 'num') {
+                valA = parseFloat(valA) || 0;
+                valB = parseFloat(valB) || 0;
+            } else {
+                valA = valA.toString().toLowerCase();
+                valB = valB.toString().toLowerCase();
+            }
+
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        tbody.innerHTML = "";
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    // --- LÓGICA DE GRÁFICOS (Chart.js) ---
+    const chartRefs = {
+        reoBaixa: null,
+        reoAlta: null,
+        visc: null
+    };
 
     function toggleAll(source) {
         document.querySelectorAll('.batch-check').forEach(cb => cb.checked = source.checked);
@@ -342,8 +529,12 @@
         if(lbl) lbl.textContent = `${checkboxes.length} sel.`;
 
         if (!ids) {
-            if(chartReo) chartReo.clear();
-            if(chartVisc) chartVisc.clear();
+            Object.keys(chartRefs).forEach(key => {
+                if (chartRefs[key]) {
+                    chartRefs[key].destroy();
+                    chartRefs[key] = null;
+                }
+            });
             return;
         }
 
@@ -352,19 +543,37 @@
             const data = await response.json();
 
             if (data.error) { console.warn(data.error); return; }
+            const datasetsReo = data.reometria || [];
+            const baixaSets = datasetsReo.filter(ds => ds.tempType === 'BAIXA');
+            const altaSets = datasetsReo.filter(ds => ds.tempType === 'ALTA' || !ds.tempType);
 
-            renderChart('chartReometria', data.reometria, 'Torque (lb.in)', 'reo');
+            const normalize = (arr, isAlta=false) => arr.map(ds => {
+                const clone = {...ds};
+                clone.fullLabel = clone.label;
+                const batchOnly = (clone.label || '').split('Batch').pop()?.trim() || clone.label;
+                if (isAlta) clone.label = batchOnly;
+                clone.borderWidth = 2;
+                clone.pointRadius = 0;
+                clone.pointHoverRadius = 3;
+                clone.tension = 0.35;
+                return clone;
+            });
+
+            renderChart('chartReometriaBaixa', normalize(baixaSets), 'Torque (lb.in)', 'reoBaixa');
+            renderChart('chartReometriaAlta', normalize(altaSets, true), 'Torque (lb.in)', 'reoAlta', { showLegend: true });
             renderChart('chartViscosidade', data.viscosidade, 'Mooney (MU)', 'visc');
 
         } catch (e) { console.error("Erro API:", e); }
     }
 
-    function renderChart(canvasId, datasets, yLabel, type) {
+    function renderChart(canvasId, datasets, yLabel, type, opts = {}) {
         const ctx = document.getElementById(canvasId).getContext('2d');
-        if (type === 'reo' && chartReo) chartReo.destroy();
-        if (type === 'visc' && chartVisc) chartVisc.destroy();
+        if (chartRefs[type]) chartRefs[type].destroy();
 
-        if (!datasets || datasets.length === 0) return;
+        if (!datasets || datasets.length === 0) {
+            chartRefs[type] = null;
+            return;
+        }
 
         const newChart = new Chart(ctx, {
             type: 'line',
@@ -372,28 +581,39 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                elements: { point: { radius: 0 } },
                 interaction: { mode: 'nearest', axis: 'x', intersect: false },
-                plugins: { legend: { display: false }, tooltip: { enabled: true } },
+                plugins: { 
+                    legend: { 
+                        display: opts.showLegend || false, 
+                        position: 'bottom',
+                        labels: { usePointStyle: true, boxWidth: 8, padding: 12 }
+                    }, 
+                    tooltip: { 
+                        enabled: true,
+                        callbacks: {
+                            label: function(context) {
+                                const ds = context.dataset;
+                                const lbl = ds.fullLabel || ds.label || '';
+                                return `${lbl}: ${context.parsed.y.toFixed(2)}`;
+                            }
+                        }
+                    } 
+                },
                 scales: {
-                    x: { type: 'linear', title: {display: true, text: 'Tempo (s)'} },
-                    y: { title: {display: true, text: yLabel} }
+                    x: { type: 'linear', title: {display: true, text: 'Tempo (s)'}, grid: { display: false } },
+                    y: { title: {display: true, text: yLabel}, grid: { color: '#f0f0f0' } }
                 }
             }
         });
 
-        if (type === 'reo') chartReo = newChart;
-        if (type === 'visc') chartVisc = newChart;
+        chartRefs[type] = newChart;
     }
 
-    function filtrarGrafico(tipo) {
-        if (!chartReo) return;
-        chartReo.data.datasets.forEach(ds => {
-            if (tipo === 'TODOS') ds.hidden = false;
-            else ds.hidden = (ds.tempType !== tipo);
-        });
-        chartReo.update();
-    }
+    // Tooltip Bootstrap
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
 
     document.addEventListener('DOMContentLoaded', atualizarGraficos);
 </script>
