@@ -6,10 +6,13 @@ import pandas as pd
 from datetime import datetime
 from difflib import get_close_matches
 
-# Importação dos modelos e serviços existentes
-from models.ensaio import Ensaio
-from models.consolidado import EnsaioConsolidado  # <--- NOVA IMPORTAÇÃO
-from models.usuario import db # <--- Acesso ao SQL Alchemy
+# --- NOVAS IMPORTAÇÕES (ARQUITETURA V13) ---
+from models.usuario import db
+from models.consolidado import EnsaioConsolidado
+from models.score_versioning import ScoreVersao, ScoreResultado
+from services.scoring_engine import ScoringEngine
+# -------------------------------------------
+
 from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
@@ -24,7 +27,7 @@ _MAPA_GRUPOS = {}
 _DE_PARA_CORRECOES = {}
 _MAPA_APRENDIZADO = {}
 
-# --- FUNÇÕES AUXILIARES (HELPERS) ---
+# --- FUNÇÕES AUXILIARES ---
 
 def safe_float(val):
     if val is None: return None
@@ -34,72 +37,59 @@ def safe_float(val):
         return f
     except: return None
 
+def chunk_list(lista, tamanho):
+    """Gera fatias da lista para evitar erro de 'too many SQL variables'"""
+    for i in range(0, len(lista), tamanho):
+        yield lista[i:i + tamanho]
+
 def carregar_referencias_estaticas():
     """
-    Carrega mapas de configuração, incluindo o novo Aprendizado Manual.
+    Carrega mapas de configuração, incluindo o Aprendizado Manual.
     """
     global _CATALOGO_CODIGO, _CATALOGO_NOME, _MAPA_LOTES_PLANILHA, _MAPA_GRUPOS, _DE_PARA_CORRECOES, _MAPA_APRENDIZADO
     
     print("--- 🔄 ETL: Carregando referências estáticas... ---")
     
-    # 1. Carrega Catálogo Sankhya
     try:
         _CATALOGO_CODIGO, _CATALOGO_NOME = importar_catalogo_sankhya()
         aplicar_configuracoes_no_catalogo(_CATALOGO_CODIGO)
     except Exception as e:
         print(f"⚠️ Erro no Sankhya: {e}")
 
-    # 2. Carrega Planilha de Lotes (Local/SharePoint)
     _MAPA_LOTES_PLANILHA = carregar_dicionario_lotes()
     
-    # 3. Mapa de Grupos via SQL Server
     print("   > Carregando Grupos de Máquinas do SQL Server...")
     _MAPA_GRUPOS = {}
     conn = None
     try:
         conn = connect_to_database()
         cursor = conn.cursor()
-        
-        query_grupos = '''
-        SELECT COD_GRUPO, NOME, MAQUINA FROM dbo.GRUPO
-        '''
-        
-        cursor.execute(query_grupos)
+        cursor.execute("SELECT COD_GRUPO, NOME, MAQUINA FROM dbo.GRUPO")
         rows = cursor.fetchall()
-        
         for row in rows:
             c_grupo = row[0]
             c_nome = str(row[1]).strip().upper()
-            c_maquina = row[2] 
-            
+            str_maquina = str(row[2]).strip()
             tipo_normalizado = "INDEFINIDO"
-            str_maquina = str(c_maquina).strip()
-            
             if str_maquina == '1': tipo_normalizado = "REOMETRO"
             elif str_maquina == '3': tipo_normalizado = "VISCOSIMETRO"
             elif "VISC" in c_nome: tipo_normalizado = "VISCOSIMETRO"
             elif "REO" in c_nome or "MDR" in c_nome: tipo_normalizado = "REOMETRO"
-                
             _MAPA_GRUPOS[c_grupo] = {'tipo': tipo_normalizado, 'descricao': c_nome}
-            
-        print(f"   ✅ {len(_MAPA_GRUPOS)} grupos carregados da tabela dbo.GRUPO.")
-        
+        print(f"   ✅ {len(_MAPA_GRUPOS)} grupos carregados.")
     except Exception as e:
         print(f"⚠️ Erro ao carregar Grupos do SQL: {e}")
     finally:
         if conn: conn.close()
 
-    # 4. De-Para JSON
-    _DE_PARA_CORRECOES = {}
     if os.path.exists("de_para_massas.json"):
         try:
             with open("de_para_massas.json", 'r', encoding='utf-8') as f:
                 _DE_PARA_CORRECOES = json.load(f)
         except: pass
 
-    # 5. Aprendizado Manual (Prioridade Máxima)
     _MAPA_APRENDIZADO = carregar_aprendizado()
-    print(f"   🧠 Memória carregada: {len(_MAPA_APRENDIZADO)} lotes ensinados manualmente.")
+    print(f"   🧠 Memória carregada: {len(_MAPA_APRENDIZADO)} correções manuais.")
 
 def extrair_lote_da_string(texto_sujo):
     if not texto_sujo: return None, None
@@ -123,99 +113,30 @@ def match_nome_inteligente(texto_bruto):
     if texto in _DE_PARA_CORRECOES: texto = _DE_PARA_CORRECOES[texto]
     if texto in _CATALOGO_NOME: return _CATALOGO_NOME[texto]
     if ("MASSA " + texto) in _CATALOGO_NOME: return _CATALOGO_NOME["MASSA " + texto]
-    if texto.startswith("MASSA "):
-        sem = texto.replace("MASSA ", "").strip()
-        if sem in _CATALOGO_NOME: return _CATALOGO_NOME[sem]
     opcoes = list(_CATALOGO_NOME.keys())
     matches = get_close_matches(texto, opcoes, n=1, cutoff=0.7)
-    if matches:
-        melhor_match = matches[0]
-        palavras_orig = set(texto.split())
-        palavras_match = set(melhor_match.split())
-        diferenca = palavras_match - palavras_orig
-        palavras_risco = {'ORB', 'AQ', 'PRETO', 'BRANCO', 'STD', 'ESPECIAL'}
-        if not diferenca.intersection(palavras_risco):
-            return _CATALOGO_NOME[melhor_match]
+    if matches: return _CATALOGO_NOME[matches[0]]
     return None
 
-def classificar_tipo_ensaio(ensaio, temp_plato):
-    dados_grupo = _MAPA_GRUPOS.get(ensaio.cod_grupo)
-    if dados_grupo:
-        tipo_oficial = dados_grupo.get('tipo', 'INDEFINIDO')
-        if tipo_oficial == 'VISCOSIMETRO': return 'VISCOSIDADE'
-        if tipo_oficial == 'REOMETRO': pass 
-    
-    nome_perfil = getattr(ensaio, 'nome_perfil_usado', '') or ''
-    nome_up = nome_perfil.upper()
-    if "VISC" in nome_up or "MOONEY" in nome_up: return "VISCOSIDADE"
-    if "ALTA" in nome_up: return "ALTA"
-    if "BAIXA" in nome_up: return "BAIXA"
-
-    temp = temp_plato or 0
-    if temp >= 175: return "ALTA"
-    if 120 <= temp < 175: return "BAIXA"
-    if 90 <= temp < 120: return "VISCOSIDADE"
-    return "ALTA"
-
-
-def persistir_dados(lista_ensaios_memoria):
-    """
-    Transforma objetos Ensaio (Lógica de Negócio) em EnsaioConsolidado (Persistência)
-    e salva no SQLite usando Upsert.
-    """
-    print(f"💾 ETL: Persistindo {len(lista_ensaios_memoria)} registros no Golden Dataset...")
-    
-    count_novos = 0
-    count_update = 0
-    
-    try:
-        # Inicia transação
-        for ensaio_obj in lista_ensaios_memoria:
-            
-            # Cria dicionário de dados flat
-            dados = {
-                'id_ensaio': ensaio_obj.id_ensaio,
-                'data_hora': ensaio_obj.data_hora,
-                'lote': str(ensaio_obj.lote)[:50],
-                'batch': str(ensaio_obj.batch)[:10],
-                'cod_sankhya': ensaio_obj.massa.cod_sankhya if ensaio_obj.massa else 0,
-                'massa_descricao': ensaio_obj.massa.descricao if ensaio_obj.massa else 'INDEFINIDO',
-                'temp_plato': ensaio_obj.temp_plato,
-                'ts2': ensaio_obj.valores_medidos.get('Ts2'),
-                't90': ensaio_obj.valores_medidos.get('T90'),
-                'viscosidade': ensaio_obj.valores_medidos.get('Viscosidade'),
-                'origem_viscosidade': ensaio_obj.origem_viscosidade,
-                'score_final': ensaio_obj.score_final,
-                'acao_recomendada': ensaio_obj.acao_recomendada,
-                'metodo_identificacao': getattr(ensaio_obj, 'metodo_identificacao', 'N/A'),
-                'lote_original': str(getattr(ensaio_obj, 'lote_original', ''))[:100],
-                'material_original': str(getattr(ensaio_obj, 'material_original', ''))[:200],
-                'updated_at': datetime.now()
-            }
-
-            # Upsert via SQLAlchemy Merge
-            # Merge busca pela Primary Key (id_ensaio). Se existir, atualiza. Se não, cria.
-            db.session.merge(EnsaioConsolidado(**dados))
-            count_update += 1
-
-        db.session.commit()
-        print(f"✅ Persistência concluída com sucesso.")
-        
-    except Exception as e:
-        db.session.rollback()
-        print(f"❌ Erro ao persistir dados: {e}")
-        raise e
-
-# --- LÓGICA PRINCIPAL ---
+# --- LÓGICA PRINCIPAL (ETL V2) ---
 
 def processar_carga_dados(data_corte='2025-07-01'):
     if not _CATALOGO_CODIGO:
         carregar_referencias_estaticas()
 
-    print(f"--- 🚀 ETL PROCESSOR: Iniciando carga SQL... ---")
+    print(f"--- 🚀 ETL V2: Iniciando carga e cálculo de score... ---")
     start_time = datetime.now()
     
+    versao_ativa = ScoreVersao.query.filter_by(status='ACTIVE').first()
+    engine = None
+    if versao_ativa:
+        print(f"   ⚙️ Engine ativada: {versao_ativa.nome}")
+        engine = ScoringEngine(versao_ativa)
+    else:
+        print("   ⚠️ Nenhuma versão de score ATIVA encontrada. Scores serão 0.")
+
     conn = None
+    resultados_brutos = []
     try:
         conn = connect_to_database()
         cursor = conn.cursor()
@@ -244,241 +165,168 @@ def processar_carga_dados(data_corte='2025-07-01'):
         lote_orig = row['NUMERO_LOTE']
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
-
-        # Chaves para busca
         key_lote_orig = str(lote_orig).strip().upper()
-        key_amostra_orig = str(amostra).strip().upper()
         
+        lote_final = key_lote_orig
         produto = None
-        equip_planilha = None
         metodo_id = "FANTASMA"
+        equip_planilha = None
         
-        # Variáveis finais (padrão)
-        lote_final = None
-        chave_lote = key_lote_orig # Se não achar nada, usa o original (sujo)
-
-        dados_grupo = _MAPA_GRUPOS.get(grupo, {})
-        tipo_equip = dados_grupo.get('tipo', 'INDEFINIDO')
-        usar_cod = (tipo_equip != "VISCOSIMETRO") 
-
-        # --- [PRIORIDADE 0] MEMÓRIA DE APRENDIZADO (CORREÇÃO TOTAL) ---
         match_aprendido = _MAPA_APRENDIZADO.get(key_lote_orig)
-        
         if match_aprendido:
-            # Sobrescreve com o que o usuário ensinou
             lote_final = match_aprendido.get('lote_real')
-            nome_massa_aprendida = match_aprendido.get('massa')
-            
-            # Atualiza a chave de agrupamento para o lote limpo/correto
-            chave_lote = lote_final
-            
-            produto = match_nome_inteligente(nome_massa_aprendida)
-            if produto:
-                metodo_id = "MANUAL" # 🔵 Ensinado pelo usuário
+            produto = match_nome_inteligente(match_aprendido.get('massa'))
+            if produto: metodo_id = "MANUAL"
         
-        else:
-            # --- [PRIORIDADE 1] BUSCA AUTOMÁTICA (Planilha / Regex) ---
-            lote_final, _ = extrair_lote_da_string(lote_orig)
-            if not lote_final: lote_final, _ = extrair_lote_da_string(amostra)
-            
-            if lote_final:
-                chave_lote = lote_final # Usa o lote limpo
-                
+        if metodo_id == "FANTASMA":
+            lote_clean, _ = extrair_lote_da_string(lote_orig)
+            if not lote_clean: lote_clean, _ = extrair_lote_da_string(amostra)
+            if lote_clean:
+                lote_final = lote_clean
                 dados_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
-                
-                if dados_planilha:
-                    # Lógica de Ano (Correção de Colisão)
-                    if isinstance(dados_planilha, dict) and 'massa' not in dados_planilha:
-                        try:
-                            data_ensaio = row['DATA']
-                            ano_ensaio = str(data_ensaio.year) if hasattr(data_ensaio, 'year') else str(pd.to_datetime(data_ensaio).year)
-                        except:
-                            ano_ensaio = str(datetime.now().year)
-                        
-                        item_ano = dados_planilha.get(ano_ensaio)
-                        if not item_ano:
-                            try:
-                                anos_ordenados = sorted(dados_planilha.keys())
-                                if anos_ordenados: item_ano = dados_planilha[anos_ordenados[-1]]
-                            except: pass
-                        
-                        if item_ano: dados_planilha = item_ano
+                if isinstance(dados_planilha, dict) and 'massa' not in dados_planilha:
+                    ano = str(row['DATA'].year)
+                    dados_planilha = dados_planilha.get(ano) or list(dados_planilha.values())[-1]
+                if isinstance(dados_planilha, dict):
+                    produto = match_nome_inteligente(dados_planilha.get('massa'))
+                    equip_planilha = dados_planilha.get('equipamento')
+                    if produto: metodo_id = "LOTE"
 
-                    # Extração dos dados
-                    if isinstance(dados_planilha, dict):
-                        nome_massa = dados_planilha.get('massa')
-                        equip_planilha = dados_planilha.get('equipamento')
-                    else:
-                        nome_massa = dados_planilha
-                    
-                    if nome_massa: 
-                        produto = match_nome_inteligente(nome_massa)
-                        if produto:
-                            metodo_id = "LOTE" # ✅ Identificado via Planilha
-            
-            # --- [PRIORIDADE 2] BUSCA POR TEXTO (FALLBACK) ---
-            if not produto:
-                produto = match_nome_inteligente(amostra)
-                if not produto and usar_cod: 
-                    produto = match_nome_inteligente(row['CODIGO_REO'])
-                
-                if produto:
-                    metodo_id = "TEXTO" # ⚠️ Identificado via Fuzzy/Texto
+        if metodo_id == "FANTASMA":
+            produto = match_nome_inteligente(amostra) or match_nome_inteligente(row['CODIGO_REO'])
+            if produto: metodo_id = "TEXTO"
 
-        # --- AGRUPAMENTO ---
-        try: chave_batch = int(row['BATCH'])
-        except: chave_batch = 0
-        chave_unica = (chave_lote, chave_batch)
-
+        try: chave_batch = str(int(row['BATCH']))
+        except: chave_batch = "0"
+        
+        chave_unica = (lote_final, chave_batch)
+        
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
                 'ids_ensaio': [], 'massa': produto,
-                'lote_visivel': chave_lote, 'batch': chave_batch,
+                'lote_visivel': lote_final, 'batch': chave_batch,
                 'lote_original': key_lote_orig,
-                'material_original': key_amostra_orig,
+                'material_original': str(amostra).strip(),
                 'data': row['DATA'],
-                'ts2': None, 't90': None, 'visc': None,
-                'temps': [], 'tempos_max': [], 'tempo_max': None,
-                'grupos': set(),
-                'equip_planilha': equip_planilha,
-                'metodo_id': metodo_id
+                'ts2': None, 't90': None, 'visc': None, 'temps': [],
+                'metodo_id': metodo_id,
+                'equip_planilha': equip_planilha
             }
         
-        # Atualiza se encontrou melhor info (ex: equipamento)
         reg = dados_agrupados[chave_unica]
         if equip_planilha and not reg['equip_planilha']: reg['equip_planilha'] = equip_planilha
-        
-        # Atualiza método se melhorou (FANTASMA -> MANUAL/LOTE)
-        if reg['metodo_id'] == "FANTASMA" and metodo_id != "FANTASMA":
-            reg['metodo_id'] = metodo_id
-            
-        reg['ids_ensaio'].append(row['COD_ENSAIO'])
-        reg['grupos'].add(grupo)
+        if reg['metodo_id'] == "FANTASMA" and metodo_id != "FANTASMA": reg['metodo_id'] = metodo_id
         if not reg['massa'] and produto: reg['massa'] = produto
-            
+        
+        reg['ids_ensaio'].append(row['COD_ENSAIO'])
+        
         v_ts2 = safe_float(row['Ts2'])
         v_t90 = safe_float(row['T90'])
         v_visc = safe_float(row['Viscosidade'])
         v_temp = safe_float(row['TEMP_PLATO_INF'])
-        v_max = safe_float(row['MAXIMO_TEMPO'])
         
         if v_ts2: reg['ts2'] = v_ts2
         if v_t90: reg['t90'] = v_t90
         if v_visc: reg['visc'] = v_visc
-        if v_temp and v_temp not in reg['temps']: reg['temps'].append(v_temp)
-        if v_max:
-            if not reg['tempo_max']: reg['tempo_max'] = v_max
-            if v_max not in reg['tempos_max']: reg['tempos_max'].append(v_max)
+        if v_temp: reg['temps'].append(v_temp)
 
-    # --- 📊 NOVO BLOCO: CÁLCULO DE MÉDIAS ESTATÍSTICAS POR LOTE ---
-    acumuladores = {
-        'visc': {},
-        'ts2': {},
-        't90': {}
-    }
-
-    # 1. Coleta os valores de todos os ensaios do mesmo lote (independente do batch)
+    acumuladores_visc = {}
     for dados in dados_agrupados.values():
-        l = dados['lote_visivel']
-        
         if dados['visc']:
-            if l not in acumuladores['visc']: acumuladores['visc'][l] = []
-            acumuladores['visc'][l].append(dados['visc'])
-            
-        if dados['ts2']:
-            if l not in acumuladores['ts2']: acumuladores['ts2'][l] = []
-            acumuladores['ts2'][l].append(dados['ts2'])
-
-        if dados['t90']:
-            if l not in acumuladores['t90']: acumuladores['t90'][l] = []
-            acumuladores['t90'][l].append(dados['t90'])
-
-    # 2. Calcula as médias
-    medias_por_lote = {'visc': {}, 'ts2': {}, 't90': {}}
-    for tipo in ['visc', 'ts2', 't90']:
-        for lote, valores in acumuladores[tipo].items():
-            if valores:
-                medias_por_lote[tipo][lote] = sum(valores) / len(valores)
-
-    # -------------------------------------------------------------
-
-    lista_final = []
-    materiais_set = set()
+            l = dados['lote_visivel']
+            if l not in acumuladores_visc: acumuladores_visc[l] = []
+            acumuladores_visc[l].append(dados['visc'])
     
+    medias_visc = {k: sum(v)/len(v) for k, v in acumuladores_visc.items()}
+
+    lista_consolidada = []
+    lista_historico = []
+    ids_ensaios_processados = []
+
     for _, dados in dados_agrupados.items():
         if not dados['massa']: continue
-        materiais_set.add(dados['massa'])
         
-        lote_atual = dados['lote_visivel']
-        
-        # Lógica da Viscosidade (Preenchimento de Falta)
         valor_visc = dados['visc']
         origem_visc = "Real" if valor_visc else "N/A"
-        
-        if not valor_visc and lote_atual in medias_por_lote['visc']:
-            valor_visc = medias_por_lote['visc'][lote_atual]
-            origem_visc = "Média (Lote)"
-        
-        medidas = {}
-        if dados['ts2']: medidas['Ts2'] = dados['ts2']
-        if dados['t90']: medidas['T90'] = dados['t90']
-        if valor_visc: medidas['Viscosidade'] = valor_visc
+        if not valor_visc and dados['lote_visivel'] in medias_visc:
+            valor_visc = medias_visc[dados['lote_visivel']]
+            origem_visc = "Média"
 
-        temp_princ = dados['temps'][0] if dados['temps'] else 0
-        grupo_id = list(dados['grupos'])[0]
-
-        novo_ensaio = Ensaio(
+        novo_ensaio = EnsaioConsolidado(
             id_ensaio=dados['ids_ensaio'][0],
-            massa_objeto=dados['massa'],
-            valores_medidos=medidas,
-            lote=lote_atual,
-            batch=dados['batch'],
             data_hora=dados['data'],
+            lote=dados['lote_visivel'],
+            batch=dados['batch'],
+            cod_sankhya=dados['massa'].cod_sankhya,
+            massa_descricao=dados['massa'].descricao,
+            temp_plato=dados['temps'][0] if dados['temps'] else 0,
+            ts2=dados['ts2'],
+            t90=dados['t90'],
+            viscosidade=valor_visc,
             origem_viscosidade=origem_visc,
-            temp_plato=temp_princ,
-            temps_plato=list(dados['temps']),
-            cod_grupo=grupo_id,
-            tempo_maximo=dados.get('tempo_max') or 0,
-            tempos_max=list(dados.get('tempos_max') or []),
-            ids_agrupados=list(dados['ids_ensaio']),
-            equipamento_planilha=dados.get('equip_planilha') 
+            metodo_identificacao=dados['metodo_id'],
+            lote_original=dados['lote_original'],
+            material_original=dados['material_original'],
+            updated_at=datetime.now()
         )
         
-        # --- ATRIBUIÇÃO DE NOVOS DADOS ---
-        novo_ensaio.metodo_identificacao = dados.get('metodo_id', 'FANTASMA')
-        novo_ensaio.lote_original = dados.get('lote_original')
-        novo_ensaio.material_original = dados.get('material_original')
-        
-        # Injeção das médias para relatórios (mesmo se o ensaio tiver valor real)
-        novo_ensaio.medias_lote = {
-            'Ts2': medias_por_lote['ts2'].get(lote_atual),
-            'T90': medias_por_lote['t90'].get(lote_atual),
-            'Visc': medias_por_lote['visc'].get(lote_atual)
-        }
-        
-        novo_ensaio.calcular_score()
-        novo_ensaio.tipo_ensaio = classificar_tipo_ensaio(novo_ensaio, temp_princ)
-        
-        lista_final.append(novo_ensaio)
-    
-    lista_final.sort(key=lambda x: x.data_hora, reverse=True)
-    
-    # --- CAMADA DE PERSISTÊNCIA (GOLDEN DATASET) ---
-    try:
-        persistir_dados(lista_final)
-    except Exception as e:
-        print(f"⚠️ Erro crítico ao salvar no banco local: {e}")
-    # -----------------------------------------------
+        if engine:
+            resultado = engine.calcular(novo_ensaio)
+            novo_ensaio.score_final = resultado.score
+            novo_ensaio.acao_recomendada = resultado.acao
+            lista_historico.append(resultado)
+            ids_ensaios_processados.append(novo_ensaio.id_ensaio)
+        else:
+            novo_ensaio.score_final = 0
+            novo_ensaio.acao_recomendada = "SEM ENGINE"
 
-    tempo_total = (datetime.now() - start_time).total_seconds()
-    print(f"✅ ETL FINALIZADO: {len(lista_final)} registros em {tempo_total:.1f}s.")
-    
-    return {
-        'dados': lista_final,
-        'materiais': sorted(list(materiais_set), key=lambda m: m.descricao),
-        'ultimo_update': datetime.now(),
-        'total_registros_brutos': len(resultados_brutos)
-    }
+        lista_consolidada.append(novo_ensaio)
+
+    # 6. Persistência com Chunking (Correção do Erro)
+    try:
+        print(f"   💾 Salvando {len(lista_consolidada)} registros consolidados...")
+        
+        # A. Upsert do Dataset Mestre
+        count = 0
+        for e in lista_consolidada:
+            db.session.merge(e)
+            count += 1
+            # Commit parcial para aliviar memória
+            if count % 1000 == 0:
+                db.session.commit()
+        db.session.commit() # Commit final do merge
+        
+        # B. Histórico de Score (Com Chunking no Delete)
+        if engine and ids_ensaios_processados:
+            print(f"   🧹 Limpando histórico anterior...")
+            
+            # Limite seguro para SQLite (999 é o padrão antigo, 900 é seguro)
+            BATCH_SIZE = 900 
+            
+            # Deleta em lotes
+            for lote_ids in chunk_list(ids_ensaios_processados, BATCH_SIZE):
+                db.session.query(ScoreResultado).filter(
+                    ScoreResultado.id_versao == engine.versao.id,
+                    ScoreResultado.id_ensaio.in_(lote_ids)
+                ).delete(synchronize_session=False)
+            
+            db.session.commit() # Confirma deleções
+            
+            print(f"   📝 Inserindo novos resultados...")
+            # Insere em lotes
+            for lote_res in chunk_list(lista_historico, BATCH_SIZE):
+                db.session.add_all(lote_res)
+                db.session.commit()
+
+        print("✅ Dados persistidos com sucesso!")
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Erro ao salvar no banco: {e}")
+        return None
+
+    total_time = (datetime.now() - start_time).total_seconds()
+    return {'total': len(lista_consolidada), 'tempo': total_time}
 
 def get_catalogo_codigo():
     return _CATALOGO_CODIGO

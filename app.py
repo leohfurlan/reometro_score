@@ -273,33 +273,27 @@ def criar_operador():
 @login_required
 def rota_atualizar():
     try:
-        # --- PASSO 1: TENTATIVA DE DOWNLOAD VIA SHAREPOINT ---
+        # --- PASSO 1: DOWNLOAD SHAREPOINT (Mantido) ---
         if baixar_excel_sharepoint:
-            print("--- ☁️ Iniciando Sync com SharePoint ---")
+            # ... (código de download mantido igual) ...
             caminho_baixado = preparar_planilha_sharepoint(forcar_download=True)
-            
             if caminho_baixado:
                 flash("✅ Planilha baixada do SharePoint com sucesso!", "success")
             else:
-                flash("⚠️ Falha no download do SharePoint (verifique logs). Usando cache anterior.", "warning")
-        else:
-            print("ℹ️ SharePoint Loader não disponível. Pulando download.")
-        # -----------------------------------------------------
+                flash("⚠️ Falha no download do SharePoint. Usando cache.", "warning")
 
-        # --- PASSO 2: EXECUÇÃO DO ETL (BANCO + PLANILHA) ---
-        resultado = processar_carga_dados()
+        # --- PASSO 2: EXECUÇÃO DO ETL (BANCO DE DADOS) ---
+        # O processar_carga_dados agora salva direto no SQLite e retorna stats
+        stats = processar_carga_dados()
         
-        if resultado:
-            # [NOVO] INJEÇÃO DE CORREÇÃO LOCAL
-            # Aplica as regras do SQLite sobre os dados vindos do SQL Server
-            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
-
-            # Atualiza o cache na memória
-            cache_service.set(resultado)
+        if stats:
+            # Lógica simplificada: Não precisamos mais do cache_service nem aplicar_sobreposicao_local
+            # pois o ETL já fez tudo isso direto no banco.
             
-            # Pega estatísticas para feedback
-            stats = cache_service.get_stats()
-            flash(f"Dados processados e corrigidos! {stats['registros']} registros carregados. ({stats['tamanho_mb']} MB)", "info")
+            total = stats.get('total', 0)
+            tempo = stats.get('tempo', 0)
+            
+            flash(f"Base atualizada com sucesso! {total} registros processados em {tempo:.1f}s.", "info")
         else:
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
