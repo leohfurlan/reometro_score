@@ -8,11 +8,13 @@ from difflib import get_close_matches
 
 # Importação dos modelos e serviços existentes
 from models.ensaio import Ensaio
+from models.consolidado import EnsaioConsolidado  # <--- NOVA IMPORTAÇÃO
+from models.usuario import db # <--- Acesso ao SQL Alchemy
 from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import aplicar_configuracoes_no_catalogo
-from services.learning_service import carregar_aprendizado  # <--- NOVA IMPORTAÇÃO
+from services.learning_service import carregar_aprendizado
 
 # --- VARIÁVEIS DE REFERÊNCIA (CACHE DO MÓDULO) ---
 _CATALOGO_CODIGO = {}
@@ -20,7 +22,7 @@ _CATALOGO_NOME = {}
 _MAPA_LOTES_PLANILHA = {}
 _MAPA_GRUPOS = {} 
 _DE_PARA_CORRECOES = {}
-_MAPA_APRENDIZADO = {} # <--- NOVA MEMÓRIA
+_MAPA_APRENDIZADO = {}
 
 # --- FUNÇÕES AUXILIARES (HELPERS) ---
 
@@ -155,6 +157,54 @@ def classificar_tipo_ensaio(ensaio, temp_plato):
     if 90 <= temp < 120: return "VISCOSIDADE"
     return "ALTA"
 
+
+def persistir_dados(lista_ensaios_memoria):
+    """
+    Transforma objetos Ensaio (Lógica de Negócio) em EnsaioConsolidado (Persistência)
+    e salva no SQLite usando Upsert.
+    """
+    print(f"💾 ETL: Persistindo {len(lista_ensaios_memoria)} registros no Golden Dataset...")
+    
+    count_novos = 0
+    count_update = 0
+    
+    try:
+        # Inicia transação
+        for ensaio_obj in lista_ensaios_memoria:
+            
+            # Cria dicionário de dados flat
+            dados = {
+                'id_ensaio': ensaio_obj.id_ensaio,
+                'data_hora': ensaio_obj.data_hora,
+                'lote': str(ensaio_obj.lote)[:50],
+                'batch': str(ensaio_obj.batch)[:10],
+                'cod_sankhya': ensaio_obj.massa.cod_sankhya if ensaio_obj.massa else 0,
+                'massa_descricao': ensaio_obj.massa.descricao if ensaio_obj.massa else 'INDEFINIDO',
+                'temp_plato': ensaio_obj.temp_plato,
+                'ts2': ensaio_obj.valores_medidos.get('Ts2'),
+                't90': ensaio_obj.valores_medidos.get('T90'),
+                'viscosidade': ensaio_obj.valores_medidos.get('Viscosidade'),
+                'origem_viscosidade': ensaio_obj.origem_viscosidade,
+                'score_final': ensaio_obj.score_final,
+                'acao_recomendada': ensaio_obj.acao_recomendada,
+                'metodo_identificacao': getattr(ensaio_obj, 'metodo_identificacao', 'N/A'),
+                'lote_original': str(getattr(ensaio_obj, 'lote_original', ''))[:100],
+                'material_original': str(getattr(ensaio_obj, 'material_original', ''))[:200],
+                'updated_at': datetime.now()
+            }
+
+            # Upsert via SQLAlchemy Merge
+            # Merge busca pela Primary Key (id_ensaio). Se existir, atualiza. Se não, cria.
+            db.session.merge(EnsaioConsolidado(**dados))
+            count_update += 1
+
+        db.session.commit()
+        print(f"✅ Persistência concluída com sucesso.")
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Erro ao persistir dados: {e}")
+        raise e
 
 # --- LÓGICA PRINCIPAL ---
 
@@ -413,6 +463,13 @@ def processar_carga_dados(data_corte='2025-07-01'):
     
     lista_final.sort(key=lambda x: x.data_hora, reverse=True)
     
+    # --- CAMADA DE PERSISTÊNCIA (GOLDEN DATASET) ---
+    try:
+        persistir_dados(lista_final)
+    except Exception as e:
+        print(f"⚠️ Erro crítico ao salvar no banco local: {e}")
+    # -----------------------------------------------
+
     tempo_total = (datetime.now() - start_time).total_seconds()
     print(f"✅ ETL FINALIZADO: {len(lista_final)} registros em {tempo_total:.1f}s.")
     

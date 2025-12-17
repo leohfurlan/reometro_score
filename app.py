@@ -2,13 +2,15 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from models.usuario import db, Usuario
+from models.consolidado import EnsaioConsolidado # Novo Modelo
 from cache_manager import CacheManager
 
 from datetime import datetime
 import math
 import os
 import statistics 
-import sqlite3 # Adicionado para conexão local
+import sqlite3
+from sqlalchemy import or_ # Adicionado para conexão local
 
 # Configurações e Modelos
 from config import Config
@@ -310,34 +312,13 @@ def rota_atualizar():
 @app.route('/')
 @login_required
 def dashboard():
-    # Tenta pegar dados do cache
-    dados_cache = cache_service.get()
-
-    # Se cache vazio ou expirado, força carga
-    if dados_cache is None:
-        print("--- Cache expirado ou vazio. Iniciando carga... ---")
-        # Nota: Na carga automática ao abrir, não forçamos o download do SharePoint para ser mais rápido.
-        # O download ocorre apenas no botão "Atualizar Dados".
-        resultado = processar_carga_dados()
-        if resultado:
-            # Aplica correção local também na carga inicial
-            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
-            
-            cache_service.set(resultado)
-            dados_cache = resultado 
-        else:
-            dados_cache = {'dados': [], 'materiais': [], 'ultimo_update': None} 
-
-    # Trabalha com a lista vinda do cache seguro
-    ensaios_filtrados = list(dados_cache['dados'])
-    total_geral = len(ensaios_filtrados)
+    # --- VERSÃO GOLDEN DATASET (Lê do SQLite Local) ---
     
-    # --- FILTROS DE VIEW ---
+    # 1. Configuração de Parâmetros e Filtros
     search = request.args.get('search', '').strip().upper()
     f_mat = request.args.get('material_filter', '')
     f_cod = request.args.get('codigo_filter', '').strip()
     f_acao = request.args.get('acao_filter', '')
-    f_tipo = request.args.get('tipo_ensaio', '')
     d_start = request.args.get('date_start', '')
     d_end = request.args.get('date_end', '')
     
@@ -346,64 +327,154 @@ def dashboard():
     page = request.args.get('page', 1, type=int)
     LIMIT = 20
 
-    # Aplicação dos Filtros
-    if search:
-        ensaios_filtrados = [e for e in ensaios_filtrados if search in str(e.lote).upper() or search in str(e.batch) or search in str(e.massa.descricao).upper()]
-    if f_mat:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.massa.descricao == f_mat]
-    if f_cod:
-        ensaios_filtrados = [e for e in ensaios_filtrados if str(e.massa.cod_sankhya) == f_cod]
-    if f_acao:
-        if f_acao == "APROVADOS": ensaios_filtrados = [e for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada]
-        elif f_acao == "RESSALVA": ensaios_filtrados = [e for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada]
-        elif f_acao == "REPROVADO": ensaios_filtrados = [e for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada]
-    if f_tipo:
-        alvo = f_tipo.upper()
-        ensaios_filtrados = [e for e in ensaios_filtrados if getattr(e, 'tipo_ensaio', '').upper() == alvo]
-    if d_start:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora >= datetime.strptime(d_start, '%Y-%m-%d')]
-    if d_end:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59, second=59)]
+    # 2. Construção da Query Base
+    query = EnsaioConsolidado.query
 
-    # Cálculo de KPIs
-    total_filtrado = len(ensaios_filtrados)
+    # Filtro: Busca Textual (Lote ou Massa)
+    if search:
+        query = query.filter(
+            or_(
+                EnsaioConsolidado.lote.contains(search),
+                EnsaioConsolidado.massa_descricao.contains(search),
+                EnsaioConsolidado.batch.contains(search)
+            )
+        )
+    
+    # Filtro: Material (Combo)
+    if f_mat:
+        query = query.filter(EnsaioConsolidado.massa_descricao == f_mat)
+        
+    # Filtro: Código Sankhya
+    if f_cod:
+        try:
+            cod_int = int(f_cod)
+            query = query.filter(EnsaioConsolidado.cod_sankhya == cod_int)
+        except ValueError:
+            pass # Ignora se não for número
+
+    # Filtro: Ação / Status
+    if f_acao:
+        if f_acao == "APROVADOS":
+            query = query.filter(
+                or_(
+                    EnsaioConsolidado.acao_recomendada.contains("PRIME"),
+                    EnsaioConsolidado.acao_recomendada == "LIBERAR"
+                )
+            )
+        elif f_acao == "RESSALVA":
+            query = query.filter(
+                or_(
+                    EnsaioConsolidado.acao_recomendada.contains("RESSALVA"),
+                    EnsaioConsolidado.acao_recomendada.contains("CORTAR")
+                )
+            )
+        elif f_acao == "REPROVADO":
+            query = query.filter(EnsaioConsolidado.acao_recomendada.contains("REPROVAR"))
+
+    # Filtro: Datas
+    if d_start:
+        try:
+            dt_s = datetime.strptime(d_start, '%Y-%m-%d')
+            query = query.filter(EnsaioConsolidado.data_hora >= dt_s)
+        except: pass
+        
+    if d_end:
+        try:
+            dt_e = datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            query = query.filter(EnsaioConsolidado.data_hora <= dt_e)
+        except: pass
+
+    # 3. Cálculo de KPI (Sobre a Query Filtrada)
+    # Executamos counts no banco para evitar trazer objetos desnecessários para a memória
+    total_filtrado = query.count()
+    
+    # Obs: Clonamos a query aplicando filtros adicionais apenas para os contadores
+    aprovados = query.filter(
+        or_(
+            EnsaioConsolidado.acao_recomendada.contains("PRIME"),
+            EnsaioConsolidado.acao_recomendada == "LIBERAR"
+        )
+    ).count()
+    
+    ressalvas = query.filter(
+        or_(
+            EnsaioConsolidado.acao_recomendada.contains("RESSALVA"),
+            EnsaioConsolidado.acao_recomendada.contains("CORTAR")
+        )
+    ).count()
+    
+    reprovados = query.filter(EnsaioConsolidado.acao_recomendada.contains("REPROVAR")).count()
+
     kpi = {
         'total': total_filtrado,
-        'aprovados': sum(1 for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada),
-        'ressalvas': sum(1 for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada),
-        'reprovados': sum(1 for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada)
+        'aprovados': aprovados,
+        'ressalvas': ressalvas,
+        'reprovados': reprovados
     }
 
-    # Ordenação
-    reverse = (order == 'desc')
-    def safe_sort(v): return v if v is not None else -1
+    # 4. Ordenação
+    col_map = {
+        'id': EnsaioConsolidado.id_ensaio,
+        'data': EnsaioConsolidado.data_hora,
+        'lote': EnsaioConsolidado.lote,
+        'material': EnsaioConsolidado.massa_descricao,
+        'ts2': EnsaioConsolidado.ts2,
+        't90': EnsaioConsolidado.t90,
+        'visc': EnsaioConsolidado.viscosidade,
+        'score': EnsaioConsolidado.score_final,
+        'acao': EnsaioConsolidado.acao_recomendada,
+        'temp': EnsaioConsolidado.temp_plato
+    }
     
-    key_funcs = {
-        'id': lambda x: x.id_ensaio, 'data': lambda x: x.data_hora if x.data_hora else datetime.min,
-        'lote': lambda x: x.lote, 'score': lambda x: x.score_final, 'material': lambda x: x.massa.descricao,
-        'ts2': lambda x: safe_sort(x.valores_medidos.get('Ts2')),
-        't90': lambda x: safe_sort(x.valores_medidos.get('T90')),
-        'visc': lambda x: safe_sort(x.valores_medidos.get('Viscosidade')),
-        'acao': lambda x: x.acao_recomendada, 'temp': lambda x: safe_sort(x.temp_plato)
-    }
-    if sort_by in key_funcs: ensaios_filtrados.sort(key=key_funcs[sort_by], reverse=reverse)
+    col_sort = col_map.get(sort_by, EnsaioConsolidado.data_hora)
+    
+    if order == 'asc':
+        query = query.order_by(col_sort.asc())
+    else:
+        query = query.order_by(col_sort.desc())
 
-    # Paginação
-    total_paginas = max(1, math.ceil(total_filtrado / LIMIT))
-    page = min(max(1, page), total_paginas)
-    ensaios_paginados = ensaios_filtrados[(page-1)*LIMIT : page*LIMIT]
+    # 5. Paginação
+    paginacao = query.paginate(page=page, per_page=LIMIT, error_out=False)
+    ensaios_paginados = paginacao.items
+    total_paginas = paginacao.pages
+
+    # 6. Dados Auxiliares para o Template
+    
+    # Busca materiais distintos para o filtro dropdown (Query Otimizada)
+    # Retorna lista de dicts: [{'descricao': 'MASSA A'}, {'descricao': 'MASSA B'}]
+    materiais_filtro = db.session.query(EnsaioConsolidado.massa_descricao)\
+        .distinct().order_by(EnsaioConsolidado.massa_descricao).all()
+    materiais_filtro = [{'descricao': m[0]} for m in materiais_filtro if m[0]]
+
+    # Busca data da última atualização (o registro mais recente modificado)
+    last_update_obj = EnsaioConsolidado.query.order_by(EnsaioConsolidado.updated_at.desc()).first()
+    ultimo_update = last_update_obj.updated_at if last_update_obj else None
+
+    # Total geral (sem filtros) para referência
+    total_geral = EnsaioConsolidado.query.count()
 
     context = {
-        'ensaios': ensaios_paginados, 'kpi': kpi,
-        'total_registros_filtrados': total_filtrado, 'total_geral': total_geral,
-        'pagina_atual': page, 'total_paginas': total_paginas,
-        'materiais_filtro': dados_cache['materiais'],
-        'search_term': search, 'material_filter': f_mat, 'codigo_filter': f_cod, 'acao_filter': f_acao, 'tipo_ensaio_filter': f_tipo,
-        'date_start': d_start, 'date_end': d_end, 'sort_by': sort_by, 'order': order,
-        'ultimo_update': dados_cache['ultimo_update']
+        'ensaios': ensaios_paginados,
+        'kpi': kpi,
+        'total_registros_filtrados': total_filtrado,
+        'total_geral': total_geral,
+        'pagina_atual': page,
+        'total_paginas': total_paginas,
+        'materiais_filtro': materiais_filtro,
+        'search_term': search,
+        'material_filter': f_mat,
+        'codigo_filter': f_cod,
+        'acao_filter': f_acao,
+        'date_start': d_start,
+        'date_end': d_end,
+        'sort_by': sort_by,
+        'order': order,
+        'ultimo_update': ultimo_update
     }
     
-    if request.headers.get('HX-Request'): return render_template('tabela_dados.html', **context)
+    if request.headers.get('HX-Request'):
+        return render_template('tabela_dados.html', **context)
+    
     return render_template('index.html', **context)
 
 # ==========================================
