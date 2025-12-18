@@ -264,7 +264,7 @@ def login():
         
         if user and user.check_password(password, bcrypt):
             login_user(user)
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('dashboard_home'))
         else:
             flash('Login ou senha inválidos.', 'danger')
             
@@ -632,7 +632,7 @@ def pagina_config():
 def adicionar_usuario():
     if current_user.role != 'admin':
         flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard_home'))
         
     username = request.form.get('username')
     password = request.form.get('password')
@@ -654,7 +654,7 @@ def adicionar_usuario():
 def editar_usuario():
     if current_user.role != 'admin':
         flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard_home'))
         
     user_id = request.form.get('user_id')
     novo_username = request.form.get('username')
@@ -695,7 +695,7 @@ def editar_usuario():
 def remover_usuario(user_id):
     if current_user.role != 'admin':
         flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard_home'))
         
     user = Usuario.query.get(user_id)
     if user:
@@ -711,7 +711,7 @@ def remover_usuario(user_id):
 @app.route('/salvar_regras', methods=['POST'])
 @login_required
 def salvar_regras():
-    if current_user.role != 'admin': return redirect(url_for('dashboard'))
+    if current_user.role != 'admin': return redirect(url_for('dashboard_home'))
 
     # Coleta dados das listas do formulário
     nomes = request.form.getlist('nome[]')
@@ -742,7 +742,7 @@ def salvar_regras():
 @login_required
 def salvar_config():
     if current_user.role != 'admin':
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard_home'))
 
     cod = request.form.get('cod_sankhya')
     
@@ -1095,7 +1095,8 @@ def salvar_correcao():
 @login_required
 def pagina_relatorios():
     dados_cache = cache_service.get()
-    if not dados_cache: return redirect(url_for('dashboard'))
+    ensaios_cache = dados_cache['dados'] if dados_cache else []
+    ultimo_update = dados_cache.get('ultimo_update') if dados_cache else None
     
     # Captura filtros
     busca = request.args.get('search', '').strip()
@@ -1103,12 +1104,12 @@ def pagina_relatorios():
     order = request.args.get('order', 'asc')
 
     relatorio_estruturado = gerar_estrutura_relatorio(
-        dados_cache['dados'], busca=busca, ordenar_por=sort_by, ordem=order
+        ensaios_cache, busca=busca, ordenar_por=sort_by, ordem=order
     )
     
     context = {
         'relatorio': relatorio_estruturado,
-        'ultimo_update': dados_cache['ultimo_update'],
+        'ultimo_update': ultimo_update,
         'total_massas': len(relatorio_estruturado),
         'search_term': busca, 'sort_by': sort_by, 'order': order
     }
@@ -1123,7 +1124,7 @@ def pagina_relatorios():
 @login_required
 def detalhes_lotes_massa(cod_sankhya):
     dados_cache = cache_service.get()
-    if not dados_cache: return redirect(url_for('dashboard'))
+    if not dados_cache: return redirect(url_for('dashboard_home'))
     
     # Filtra os dados brutos
     lista_filtrada = [e for e in dados_cache['dados'] if e.massa.cod_sankhya == cod_sankhya]
