@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Controle de Qualidade - Lista{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="fw-bold text-secondary mb-0"><i class="fas fa-list-ul me-2"></i>Controle de Lotes</h3>
+            <p class="text-muted small mb-0">Gerencie e analise os ensaios realizados.</p>
+        </div>
+        <a href="{{ url_for('rota_atualizar') }}" class="btn btn-outline-primary btn-sm shadow-sm" onclick="ativarModalCarregamento()">
+            <i class="fas fa-sync me-1"></i> Atualizar Agora
+        </a>
+    </div>
+
+    <div class="card card-body bg-white border-0 shadow-sm mb-4">
+        <form hx-get="{{ url_for('controle_qualidade') }}" hx-target="#tabela-container" hx-push-url="true">
+            <div class="row g-3 align-items-end">
+                
+                <div class="col-md-3">
+                    <label class="small text-muted fw-bold">Busca Rápida</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
+                        <input type="text" name="search" class="form-control border-start-0 ps-0" placeholder="Lote, Batch..." value="{{ search_term }}">
+                    </div>
+                </div>
+
+                <div class="col-md-1">
+                    <label class="small text-muted fw-bold">Cód.</label>
+                    <input type="text" name="codigo_filter" class="form-control" placeholder="1234" value="{{ codigo_filter }}">
+                </div>
+
+                <div class="col-md-2">
+                    <label class="small text-muted fw-bold">Material</label>
+                    <select name="material_filter" class="form-select">
+                        <option value="">Todos</option>
+                        {% for m in materiais_filtro %}
+                            <option value="{{ m.descricao }}" {% if material_filter == m.descricao %}selected{% endif %}>{{ m.descricao }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="small text-muted fw-bold">Status</label>
+                    <select name="acao_filter" class="form-select">
+                        <option value="">Todos</option>
+                        <option value="APROVADOS" {% if acao_filter == 'APROVADOS' %}selected{% endif %}>Aprovados</option>
+                        <option value="RESSALVA" {% if acao_filter == 'RESSALVA' %}selected{% endif %}>Ressalva</option>
+                        <option value="REPROVADO" {% if acao_filter == 'REPROVADO' %}selected{% endif %}>Reprovados</option>
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="small text-muted fw-bold">Período</label>
+                    <div class="input-group">
+                        <input type="date" name="date_start" class="form-control" value="{{ date_start }}">
+                        <span class="input-group-text bg-light border-start-0 border-end-0">até</span>
+                        <input type="date" name="date_end" class="form-control" value="{{ date_end }}">
+                    </div>
+                </div>
+
+                <div class="col-md-1">
+                    <button type="submit" class="btn btn-primary w-100 fw-bold"><i class="fas fa-filter"></i></button>
+                </div>
+            </div>
+            
+            <input type="hidden" name="sort" value="{{ sort_by }}">
+            <input type="hidden" name="order" value="{{ order }}">
+        </form>
+    </div>
+
+    <div id="tabela-container">
+        {% include 'tabela_dados.html' %}
+    </div>
+</div>
+
+<div id="compareBar" class="fixed-bottom bg-white border-top shadow p-3 d-none" style="z-index: 1050;">
+    <div class="container-fluid d-flex justify-content-between align-items-center px-4">
+        <span class="fw-bold text-secondary">
+            <i class="fas fa-check-circle text-success me-2"></i>
+            <span id="countSelected">0</span> curvas selecionadas
+        </span>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-danger" onclick="limparSelecao()">
+                <i class="fas fa-times me-1"></i> Cancelar
+            </button>
+            <button class="btn btn-primary shadow fw-bold" onclick="abrirGraficoComparativo()">
+                <i class="fas fa-chart-line me-2"></i> Comparar Gráficos
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="chartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <div>
+                    <h5 class="modal-title fw-bold"><i class="fas fa-chart-area me-2"></i>Comparativo de Curvas</h5>
+                    <p class="mb-0 small text-muted" id="modalMateriaisTitle">...</p>
+                </div>
+                <div class="ms-auto me-3 d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="toggleGraficoSelection(true)">Marcar Todos</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleGraficoSelection(false)">Limpar</button>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <div class="modal-body">
+                <div id="containerReo" class="mb-4" style="display: none;">
+                    <h6 class="text-primary fw-bold border-bottom pb-2"><i class="fas fa-fire me-2"></i>Reometria</h6>
+                    <div class="card border-0 shadow-sm p-2" style="height: 350px;">
+                        <canvas id="chartReo"></canvas>
+                    </div>
+                </div>
+
+                <div id="containerVisc" style="display: none;">
+                    <h6 class="text-success fw-bold border-bottom pb-2"><i class="fas fa-water me-2"></i>Viscosidade</h6>
+                    <div class="card border-0 shadow-sm p-2" style="height: 350px;">
+                        <canvas id="chartVisc"></canvas>
+                    </div>
+                </div>
+
+                <div id="msgVazio" class="text-center text-muted py-5 d-none">
+                    <i class="fas fa-circle-notch fa-spin fa-2x mb-2"></i><br>Carregando dados...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Função para limpar checkboxes
+    function limparSelecao() {
+        document.querySelectorAll('.curve-selector').forEach(cb => cb.checked = false);
+        document.getElementById('selectAll').checked = false;
+        atualizarBarraComparacao();
+    }
+    
+    // Reinicializa a barra quando o HTMX atualiza a tabela
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target.id === 'tabela-container') {
+            document.getElementById('compareBar').classList.add('d-none');
+        }
+    });
+</script>
+{% endblock %}
