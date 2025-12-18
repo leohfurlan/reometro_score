@@ -2,19 +2,24 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from models.usuario import db, Usuario
+from models.consolidado import EnsaioConsolidado # Novo Modelo
 from cache_manager import CacheManager
 
 from datetime import datetime
 import math
 import os
 import statistics 
-import sqlite3 # Adicionado para conexão local
+import json
+import sqlite3
+from sqlalchemy import or_, func, case, desc, and_ # Adicionado para conexão local
+
 
 # Configurações e Modelos
 from config import Config
 from services.config_manager import carregar_regras_acao, salvar_regras_acao, salvar_configuracao
 from services.learning_service import ensinar_lote
 from services.report_service import gerar_estrutura_relatorio
+from models.score_versioning import ScoreResultado
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
@@ -78,6 +83,29 @@ login_manager.login_view = 'login'
 # Cria o banco de dados na primeira execução se não existir
 with app.app_context():
     db.create_all()
+    # Garante colunas novas sem precisar de migração formal
+    def ensure_ids_agrupados_column():
+        try:
+            db_path = 'users_reoscore.db'
+            if os.path.exists(os.path.join('instance', db_path)):
+                db_path = os.path.join('instance', db_path)
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(ensaio_consolidado)")
+            colunas = [row[1] for row in cursor.fetchall()]
+            if 'ids_agrupados' not in colunas:
+                cursor.execute("ALTER TABLE ensaio_consolidado ADD COLUMN ids_agrupados TEXT")
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Falha ao ajustar esquema do ensaio_consolidado: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    ensure_ids_agrupados_column()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -271,33 +299,21 @@ def criar_operador():
 @login_required
 def rota_atualizar():
     try:
-        # --- PASSO 1: TENTATIVA DE DOWNLOAD VIA SHAREPOINT ---
+        # --- PASSO 1: DOWNLOAD SHAREPOINT ---
         if baixar_excel_sharepoint:
-            print("--- ☁️ Iniciando Sync com SharePoint ---")
             caminho_baixado = preparar_planilha_sharepoint(forcar_download=True)
-            
             if caminho_baixado:
                 flash("✅ Planilha baixada do SharePoint com sucesso!", "success")
             else:
-                flash("⚠️ Falha no download do SharePoint (verifique logs). Usando cache anterior.", "warning")
-        else:
-            print("ℹ️ SharePoint Loader não disponível. Pulando download.")
-        # -----------------------------------------------------
+                flash("⚠️ Falha no download do SharePoint. Usando cache.", "warning")
 
-        # --- PASSO 2: EXECUÇÃO DO ETL (BANCO + PLANILHA) ---
-        resultado = processar_carga_dados()
+        # --- PASSO 2: EXECUÇÃO DO ETL ---
+        stats = processar_carga_dados()
         
-        if resultado:
-            # [NOVO] INJEÇÃO DE CORREÇÃO LOCAL
-            # Aplica as regras do SQLite sobre os dados vindos do SQL Server
-            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
-
-            # Atualiza o cache na memória
-            cache_service.set(resultado)
-            
-            # Pega estatísticas para feedback
-            stats = cache_service.get_stats()
-            flash(f"Dados processados e corrigidos! {stats['registros']} registros carregados. ({stats['tamanho_mb']} MB)", "info")
+        if stats:
+            total = stats.get('total', 0)
+            tempo = stats.get('tempo', 0)
+            flash(f"Base atualizada com sucesso! {total} registros processados em {tempo:.1f}s.", "info")
         else:
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
@@ -305,106 +321,169 @@ def rota_atualizar():
         print(f"❌ Erro Crítico na Rota Atualizar: {e}")
         flash(f"Erro crítico: {str(e)}", "danger")
 
-    return redirect(url_for('dashboard'))
+    # CORREÇÃO AQUI: Redireciona para o novo nome da função da home
+    return redirect(url_for('dashboard_home'))
 
 @app.route('/')
 @login_required
-def dashboard():
-    # Tenta pegar dados do cache
-    dados_cache = cache_service.get()
-
-    # Se cache vazio ou expirado, força carga
-    if dados_cache is None:
-        print("--- Cache expirado ou vazio. Iniciando carga... ---")
-        # Nota: Na carga automática ao abrir, não forçamos o download do SharePoint para ser mais rápido.
-        # O download ocorre apenas no botão "Atualizar Dados".
-        resultado = processar_carga_dados()
-        if resultado:
-            # Aplica correção local também na carga inicial
-            resultado['dados'] = aplicar_sobreposicao_local(resultado['dados'])
-            
-            cache_service.set(resultado)
-            dados_cache = resultado 
-        else:
-            dados_cache = {'dados': [], 'materiais': [], 'ultimo_update': None} 
-
-    # Trabalha com a lista vinda do cache seguro
-    ensaios_filtrados = list(dados_cache['dados'])
-    total_geral = len(ensaios_filtrados)
-    
-    # --- FILTROS DE VIEW ---
-    search = request.args.get('search', '').strip().upper()
-    f_mat = request.args.get('material_filter', '')
-    f_cod = request.args.get('codigo_filter', '').strip()
-    f_acao = request.args.get('acao_filter', '')
-    f_tipo = request.args.get('tipo_ensaio', '')
+def dashboard_home():
+    """
+    ROTA ESTRATÉGICA: Visão geral de KPIs e Gráficos Gerenciais.
+    Não carrega a lista de 50k registros, focando em agregações rápidas.
+    """
+    # Filtros de Período (Único filtro relevante para o Dashboard Global)
     d_start = request.args.get('date_start', '')
     d_end = request.args.get('date_end', '')
     
+    query = EnsaioConsolidado.query
+    
+    if d_start:
+        try: query = query.filter(EnsaioConsolidado.data_hora >= datetime.strptime(d_start, '%Y-%m-%d'))
+        except: pass
+    if d_end:
+        try: query = query.filter(EnsaioConsolidado.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59))
+        except: pass
+
+    # --- CÁLCULO DE KPIS (Agregado) ---
+    stats = query.with_entities(
+        func.count(EnsaioConsolidado.id_ensaio).label('total'),
+        func.avg(EnsaioConsolidado.score_final).label('score_medio'),
+        func.sum(case((or_(EnsaioConsolidado.acao_recomendada.like('%PRIME%'), EnsaioConsolidado.acao_recomendada == 'LIBERAR'), 1), else_=0)).label('aprovados'),
+        func.sum(case((or_(EnsaioConsolidado.acao_recomendada.like('%RESSALVA%'), EnsaioConsolidado.acao_recomendada.like('%CORTAR%')), 1), else_=0)).label('ressalvas'),
+        func.sum(case((EnsaioConsolidado.acao_recomendada.like('%REPROVAR%'), 1), else_=0)).label('reprovados')
+    ).first()
+
+    total = stats.total or 0
+    kpi = {
+        'total': total,
+        'icg': ((stats.aprovados or 0) + (stats.ressalvas or 0)) / total * 100 if total > 0 else 0,
+        'qsm': stats.score_medio or 0,
+        'aprovados': stats.aprovados or 0,
+        'ressalvas': stats.ressalvas or 0,
+        'reprovados': stats.reprovados or 0
+    }
+
+    # --- GRÁFICO DE TENDÊNCIA (Últimos 30 dias com dados) ---
+    trend_data = query.with_entities(
+        func.strftime('%Y-%m-%d', EnsaioConsolidado.data_hora).label('dia'),
+        func.avg(EnsaioConsolidado.score_final).label('media')
+    ).group_by('dia').order_by(desc('dia')).limit(30).all()
+    
+    # Reverte para cronológico
+    trend_data = trend_data[::-1] 
+    
+    chart_trend = {
+        'labels': [t.dia[5:] for t in trend_data], # MM-DD
+        'data': [round(t.media, 1) for t in trend_data]
+    }
+
+    # --- PARETO DE OFENSORES (Simplificado para o Dashboard) ---
+    # Analisa falhas nos registros recentes REPROVADOS
+    subquery_ids = query.filter(EnsaioConsolidado.score_final < 70).with_entities(EnsaioConsolidado.id_ensaio).order_by(EnsaioConsolidado.data_hora.desc()).limit(100).subquery()
+    
+    logs = db.session.query(ScoreResultado.detalhes_log).filter(ScoreResultado.id_ensaio.in_(subquery_ids)).all()
+    ofensores = {}
+    
+    for row in logs:
+        if not row.detalhes_log: continue
+        params = row.detalhes_log.get('params', row.detalhes_log)
+        for p, info in params.items():
+            if isinstance(info, dict) and info.get('nota', 100) < 70:
+                ofensores[p] = ofensores.get(p, 0) + 1
+    
+    pareto_sorted = sorted(ofensores.items(), key=lambda x: x[1], reverse=True)[:5] # Top 5
+    chart_pareto = {
+        'labels': [x[0] for x in pareto_sorted],
+        'data': [x[1] for x in pareto_sorted]
+    }
+
+    last_update_obj = EnsaioConsolidado.query.order_by(EnsaioConsolidado.updated_at.desc()).first()
+    
+    return render_template(
+        'dashboard.html',
+        kpi=kpi,
+        chart_trend=chart_trend,
+        chart_pareto=chart_pareto,
+        date_start=d_start,
+        date_end=d_end,
+        ultimo_update=last_update_obj.updated_at if last_update_obj else None
+    )
+
+@app.route('/qualidade')
+@login_required
+def controle_qualidade():
+    """
+    ROTA OPERACIONAL: Tabela de Lotes, Filtros Avançados, Busca.
+    (Antiga dashboard, agora focada na lista)
+    """
+    # Filtros
+    search = request.args.get('search', '').strip().upper()
+    f_mat = request.args.get('material_filter', '')
+    f_acao = request.args.get('acao_filter', '')
     sort_by = request.args.get('sort', 'data')
     order = request.args.get('order', 'desc')
     page = request.args.get('page', 1, type=int)
-    LIMIT = 20
+    LIMIT = 50 # Mais itens por página na visão operacional
 
-    # Aplicação dos Filtros
+    query = EnsaioConsolidado.query
+
     if search:
-        ensaios_filtrados = [e for e in ensaios_filtrados if search in str(e.lote).upper() or search in str(e.batch) or search in str(e.massa.descricao).upper()]
-    if f_mat:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.massa.descricao == f_mat]
-    if f_cod:
-        ensaios_filtrados = [e for e in ensaios_filtrados if str(e.massa.cod_sankhya) == f_cod]
+        query = query.filter(or_(
+            EnsaioConsolidado.lote.contains(search),
+            EnsaioConsolidado.massa_descricao.contains(search),
+            EnsaioConsolidado.batch.contains(search)
+        ))
+    if f_mat: query = query.filter(EnsaioConsolidado.massa_descricao == f_mat)
     if f_acao:
-        if f_acao == "APROVADOS": ensaios_filtrados = [e for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada]
-        elif f_acao == "RESSALVA": ensaios_filtrados = [e for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada]
-        elif f_acao == "REPROVADO": ensaios_filtrados = [e for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada]
-    if f_tipo:
-        alvo = f_tipo.upper()
-        ensaios_filtrados = [e for e in ensaios_filtrados if getattr(e, 'tipo_ensaio', '').upper() == alvo]
-    if d_start:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora >= datetime.strptime(d_start, '%Y-%m-%d')]
-    if d_end:
-        ensaios_filtrados = [e for e in ensaios_filtrados if e.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59, second=59)]
-
-    # Cálculo de KPIs
-    total_filtrado = len(ensaios_filtrados)
-    kpi = {
-        'total': total_filtrado,
-        'aprovados': sum(1 for e in ensaios_filtrados if "PRIME" in e.acao_recomendada or "LIBERAR" == e.acao_recomendada),
-        'ressalvas': sum(1 for e in ensaios_filtrados if "RESSALVA" in e.acao_recomendada or "CORTAR" in e.acao_recomendada),
-        'reprovados': sum(1 for e in ensaios_filtrados if "REPROVAR" in e.acao_recomendada)
-    }
+        if f_acao == "APROVADOS": query = query.filter(EnsaioConsolidado.score_final >= 70) # Simplificação
+        elif f_acao == "REPROVADO": query = query.filter(EnsaioConsolidado.score_final < 70)
 
     # Ordenação
-    reverse = (order == 'desc')
-    def safe_sort(v): return v if v is not None else -1
-    
-    key_funcs = {
-        'id': lambda x: x.id_ensaio, 'data': lambda x: x.data_hora if x.data_hora else datetime.min,
-        'lote': lambda x: x.lote, 'score': lambda x: x.score_final, 'material': lambda x: x.massa.descricao,
-        'ts2': lambda x: safe_sort(x.valores_medidos.get('Ts2')),
-        't90': lambda x: safe_sort(x.valores_medidos.get('T90')),
-        'visc': lambda x: safe_sort(x.valores_medidos.get('Viscosidade')),
-        'acao': lambda x: x.acao_recomendada, 'temp': lambda x: safe_sort(x.temp_plato)
+    col_map = {
+        'id': EnsaioConsolidado.id_ensaio, 'data': EnsaioConsolidado.data_hora,
+        'lote': EnsaioConsolidado.lote, 'score': EnsaioConsolidado.score_final
     }
-    if sort_by in key_funcs: ensaios_filtrados.sort(key=key_funcs[sort_by], reverse=reverse)
+    col = col_map.get(sort_by, EnsaioConsolidado.data_hora)
+    query = query.order_by(col.asc() if order == 'asc' else col.desc())
 
     # Paginação
-    total_paginas = max(1, math.ceil(total_filtrado / LIMIT))
-    page = min(max(1, page), total_paginas)
-    ensaios_paginados = ensaios_filtrados[(page-1)*LIMIT : page*LIMIT]
+    paginacao = query.paginate(page=page, per_page=LIMIT, error_out=False)
+    
+    # Filtros auxiliares
+    materiais = db.session.query(EnsaioConsolidado.massa_descricao).distinct().order_by(EnsaioConsolidado.massa_descricao).all()
+    materiais_filtro = [{'descricao': m[0]} for m in materiais if m[0]]
 
     context = {
-        'ensaios': ensaios_paginados, 'kpi': kpi,
-        'total_registros_filtrados': total_filtrado, 'total_geral': total_geral,
-        'pagina_atual': page, 'total_paginas': total_paginas,
-        'materiais_filtro': dados_cache['materiais'],
-        'search_term': search, 'material_filter': f_mat, 'codigo_filter': f_cod, 'acao_filter': f_acao, 'tipo_ensaio_filter': f_tipo,
-        'date_start': d_start, 'date_end': d_end, 'sort_by': sort_by, 'order': order,
-        'ultimo_update': dados_cache['ultimo_update']
+        'ensaios': paginacao.items,
+        'total_registros_filtrados': paginacao.total,
+        'pagina_atual': page, 'total_paginas': paginacao.pages,
+        'materiais_filtro': materiais_filtro,
+        'search_term': search, 'material_filter': f_mat, 'acao_filter': f_acao,
+        'sort_by': sort_by, 'order': order
     }
+
+    if request.headers.get('HX-Request'):
+        return render_template('tabela_dados.html', **context)
+        
+    return render_template('controle_qualidade.html', **context)
+
+@app.route('/analise/<int:id_ensaio>')
+@login_required
+def analise_curva(id_ensaio):
+    """
+    ROTA ANALÍTICA: Detalhes profundos de um ensaio específico.
+    """
+    ensaio = EnsaioConsolidado.query.get_or_404(id_ensaio)
     
-    if request.headers.get('HX-Request'): return render_template('tabela_dados.html', **context)
-    return render_template('index.html', **context)
+    # Busca o detalhe do cálculo (logs da engine)
+    resultado = ScoreResultado.query.filter_by(id_ensaio=id_ensaio).order_by(ScoreResultado.id.desc()).first()
+    detalhes_score = resultado.detalhes_log if resultado else {}
+    
+    # Se 'params' estiver aninhado (dependendo da versão da engine)
+    if 'params' in detalhes_score:
+        detalhes_score = detalhes_score['params']
+
+    return render_template('detalhe_curva.html', ensaio=ensaio, detalhes=detalhes_score)
 
 # ==========================================
 # 4. ROTAS DE CONFIGURAÇÃO (ADMIN)
@@ -760,33 +839,35 @@ def salvar_config():
 @app.route('/api/grafico')
 @login_required
 def api_grafico():
-    try:
-        dados_cache = cache_service.get()
-        if not dados_cache:
-            return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
+    # Recupera snapshot do cache no início para evitar NameError em rotas paralelas
+    dados_cache = cache_service.get()
+    if not dados_cache:
+        return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
 
+    try:
         ids_str = request.args.get('ids', '')
-        modo_lote = request.args.get('mode', '') == 'lote' 
-        
-        if not ids_str: return jsonify({})
+        modo_lote = request.args.get('mode', '') == 'lote'
+
+        if not ids_str:
+            return jsonify({})
 
         # 1. IDs das LINHAS selecionadas
         selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
-        
+
         # Limite dinâmico
         limite = 100 if modo_lote else 10
-        
+
         if len(selected_parent_ids) > limite:
             return jsonify({'error': f'Muitos dados ({len(selected_parent_ids)}). Limite é {limite}.'}), 400
 
         all_ids_to_fetch = set()
-        map_id_to_parent = {} 
+        map_id_to_parent = {}
 
         # 2. Expandir IDs
         for cached in dados_cache['dados']:
             cached_id = int(cached.id_ensaio)
             if cached_id in selected_parent_ids:
-                ids_filhos = getattr(cached, 'ids_agrupados', []) or [cached_id]
+                ids_filhos = getattr(cached, 'ids_agrupados_lista', None) or [cached_id]
                 for child_id in ids_filhos:
                     c_id_int = int(child_id)
                     all_ids_to_fetch.add(c_id_int)
@@ -798,15 +879,15 @@ def api_grafico():
         # 3. Busca SQL
         conn = connect_to_database()
         cursor = conn.cursor()
-        
+
         lista_ids = list(all_ids_to_fetch)
         placeholders = ','.join('?' * len(lista_ids))
-        
+
         query = f'''
-            SELECT 
-                V.COD_ENSAIO, 
-                V.TEMPO, 
-                V.TORQUE, 
+            SELECT
+                V.COD_ENSAIO,
+                V.TEMPO,
+                V.TORQUE,
                 E.TEMP_PLATO_INF,
                 E.COD_GRUPO
             FROM dbo.ENSAIO_VALORES V
@@ -814,7 +895,7 @@ def api_grafico():
             WHERE V.COD_ENSAIO IN ({placeholders})
             ORDER BY V.COD_ENSAIO, V.TEMPO
         '''
-        
+
         cursor.execute(query, lista_ids)
         rows = cursor.fetchall()
         conn.close()
@@ -825,37 +906,43 @@ def api_grafico():
         # 4. Processamento
         datasets_reo = {}
         datasets_visc = {}
-        
+
         for row in rows:
             c_id = int(row[0])
             c_time = float(row[1])
             c_val = float(row[2])
             c_temp = float(row[3]) if row[3] else 0
             c_grupo = row[4]
-            
+
             parent = map_id_to_parent.get(c_id)
-            if not parent: continue
-            
+            if not parent:
+                continue
+
             # Classificação
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
             tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
-            
+
             is_viscosity = False
-            
-            if tipo_maquina == 'VISCOSIMETRO': is_viscosity = True
-            elif tipo_maquina == 'REOMETRO': is_viscosity = False
+
+            if tipo_maquina == 'VISCOSIMETRO':
+                is_viscosity = True
+            elif tipo_maquina == 'REOMETRO':
+                is_viscosity = False
             else:
-                if 90 <= c_temp <= 115: is_viscosity = True
-                elif c_temp >= 120: is_viscosity = False
-                else: is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
+                if 90 <= c_temp <= 115:
+                    is_viscosity = True
+                elif c_temp >= 120:
+                    is_viscosity = False
+                else:
+                    is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
 
             target_dict = datasets_visc if is_viscosity else datasets_reo
-            
+
             if c_id not in target_dict:
                 cod_s = parent.massa.cod_sankhya if parent.massa else '??'
                 batch_s = parent.batch if parent.batch else '0'
                 label = f"{cod_s} - Batch {batch_s}"
-                
+
                 # --- NOVO: Classificação do Subtipo para o Filtro ---
                 temp_type = 'GERAL'
                 if not is_viscosity:
@@ -864,7 +951,7 @@ def api_grafico():
 
                 target_dict[c_id] = {
                     'label': label,
-                    'tempType': temp_type, # <--- Enviando para o Frontend
+                    'tempType': temp_type,  # <--- Enviando para o Frontend
                     'data': [],
                     'pointRadius': 0,
                     'borderWidth': 2,
@@ -873,16 +960,16 @@ def api_grafico():
                     # Cores dinâmicas
                     'borderColor': '#dc3545' if temp_type == 'ALTA' else '#0d6efd'
                 }
-            
+
             target_dict[c_id]['data'].append({'x': c_time, 'y': c_val})
 
         return jsonify({
             'reometria': list(datasets_reo.values()),
             'viscosidade': list(datasets_visc.values())
         })
-        
+
     except Exception as e:
-        print(f"ERRO API: {e}")
+        app.logger.exception('ERRO API /api/grafico')
         return jsonify({'error': str(e)}), 500
 
 

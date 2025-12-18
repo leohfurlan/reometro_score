@@ -28,8 +28,6 @@ body {
     overflow-y: auto; /* Scroll apenas na sidebar se o menu for longo */
 }
 
-
-
 #page-content-wrapper {
     flex-grow: 1;
     min-width: 0; /* CRUCIAL: Permite que o flexbox encolha o conteúdo */
@@ -39,51 +37,27 @@ body {
     height: 100vh;
 }
 
-/* --- Sidebar --- */
-#sidebar-wrapper {
-    min-width: 250px;
-    max-width: 250px;
-    min-height: 100vh;
-    background: #212529; /* Dark Sidebar */
-    color: #fff;
-    transition: margin 0.25s ease-out;
-    transition: all 0.3s;
-    z-index: 1000;
-}
-
-/* Oculta a sidebar quando o wrapper estiver com a classe "toggled" */
-#wrapper.toggled #sidebar-wrapper {
-    margin-left: -250px;
-}
-
-#wrapper.toggled #page-content-wrapper {
-    margin-left: 0;
-}
-
-#sidebar-wrapper .sidebar-heading {
-    padding: 1.2rem;
+/* --- Sidebar Styles --- */
+.sidebar-heading {
+    padding: 1.2rem 1.5rem;
     font-size: 1.2rem;
     font-weight: bold;
-    border-bottom: 1px;
-    background: #1a1d20;
-    border-bottom: 1px solid #495057;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    color: #fff;
+    background-color: rgba(0,0,0,0.1);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
 .list-group-item {
     background-color: transparent;
-    color: #adb5bd;
+    color: rgba(255,255,255,0.7);
     border: none;
     padding: 1rem 1.5rem;
     transition: all 0.2s;
 }
 
 .list-group-item:hover {
-    background-color: #343a40;
+    background-color: rgba(255,255,255,0.1);
     color: #fff;
-    cursor: pointer;
 }
 
 .list-group-item.active {
@@ -93,134 +67,61 @@ body {
     border-left: 4px solid #fff;
 }
 
-/* --- Page Content --- */
-#page-content-wrapper {
-    flex-grow: 1; /* Ocupa o espaço restante */
-    min-width: 0; /* TRUQUE CRÍTICO: Permite que o conteúdo encolha se necessário */
-    display: flex;
-    flex-direction: column;
+/* --- Toggles & Responsive --- */
+#wrapper.toggled #sidebar-wrapper {
+    margin-left: -250px;
 }
 
-/* --- Navbar --- */
-.navbar-light {
-    background-color: #fff !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-/* --- Cards & KPIs --- */
-.card {
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
-    transition: transform 0.2s;
-}
-
-.card:hover {
-    transform: translateY(-2px);
-}
-
-.kpi-value {
-    font-size: 1.8rem;
-    font-weight: bold;
-    line-height: 1.2;
-}
-
-.kpi-label {
-    color: #6c757d;
-    font-size: 0.75rem; /* Fonte menor para caber textos longos */
-    font-weight: 700;   /* Negrito para manter a legibilidade */
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 5px;
-    
-    /* A MÁGICA: Garante que fica tudo em uma linha */
-    white-space: nowrap; 
-    overflow: hidden;
-    text-overflow: ellipsis; /* Adiciona "..." se a tela for minúscula */
-}
-
-/* --- TABELA RESPONSIVA (CORREÇÃO DO TRANSBORDO) --- */
-.table-responsive {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    
-    /* Mágica para a tabela não vazar da tela */
-    width: 100%; 
-    overflow-x: auto; /* Cria barra de rolagem horizontal SÓ na tabela */
-    border: 1px solid #dee2e6;
-}
-
-/* Garante que a tabela respeite o container */
-table.table {
-    margin-bottom: 0; /* Remove margem inferior padrão do bootstrap */
-    width: 100%;
-}
-
-/* Colunas Redimensionáveis e Fixas */
-.resizable-col {
-    resize: horizontal;
-    overflow: hidden;
-    min-width: 80px; /* Reduzi um pouco para caber mais coisas */
-    max-width: 400px;
-    vertical-align: middle !important;
-    position: relative;
-}
-
-.table.text-nowrap th, 
-.table.text-nowrap td {
-    white-space: nowrap; /* Dados em uma linha */
-    vertical-align: middle;
-}
-
-/* --- PAGINAÇÃO (CORREÇÃO DO RODAPÉ) --- */
-.pagination-container {
-    background-color: #fff;
-    padding: 10px 15px;
-    border-top: 1px solid #dee2e6;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
-.page-input {
-    width: 50px !important; /* Força largura fixa pequena */
-    text-align: center;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.875rem;
-    margin: 0 5px;
-    display: inline-block;
-}
-
-/* --- TRUNCAMENTO RESPONSIVO --- */
-/* Permite que o texto seja cortado com (...) se a coluna diminuir,
-   mas reapareça se a coluna aumentar. */
+/* --- Helpers de Tabela e Texto --- */
 .truncate-responsive {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: block; /* Necessário para funcionar dentro da tabela */
-    width: 100%;    /* Força a ocupar a largura da coluna */
+    display: block;
+    max-width: 100%;
 }
 
-/* --- BARRA DE SCORE ELÁSTICA --- */
-/* Faz a barra preencher a largura da célula, respeitando o resize */
 .progress-responsive {
     height: 15px;
-    width: 100%;      /* AQUI ESTÁ O SEGREDO: Ocupa toda a largura da coluna */
-    min-width: 50px;  /* Garante que nunca fica invisível */
+    width: 100%;
+    min-width: 50px;
 }
 
-/* Esconde setas do input number */
-input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-
-/* --- CORREÇÃO DO Z-INDEX DO DROPDOWN --- */
-/* Garante que o menu de colunas fique acima do cabeçalho fixo da tabela */
-.dropdown-menu {
-    z-index: 1050 !important; /* Valor maior que o sticky-top (1020) */
+/* --- Cartões de parâmetros da análise --- */
+.param-card {
+    background: linear-gradient(135deg, rgba(13,110,253,0.03), rgba(13,110,253,0.01));
 }
 
-/* Opcional: Se ainda assim cortar, aumente o z-index do botão também */
-.dropdown {
-    position: relative;
-    z-index: 1051;
+.param-card .limit-row {
+    background: #fdfdfd;
+}
+
+.param-card .badge {
+    letter-spacing: 0.3px;
+}
+
+/* --- Barra de Comparação Flutuante --- */
+#compareBar {
+    width: calc(100% - 250px); /* Desconta a sidebar */
+    left: 250px;
+    transition: all 0.3s;
+}
+
+#wrapper.toggled #compareBar {
+    width: 100%;
+    left: 0;
+}
+
+/* Ajuste para telas pequenas */
+@media (max-width: 768px) {
+    #sidebar-wrapper {
+        margin-left: -250px;
+    }
+    #wrapper.toggled #sidebar-wrapper {
+        margin-left: 0;
+    }
+    #compareBar {
+        width: 100%;
+        left: 0;
+    }
 }
