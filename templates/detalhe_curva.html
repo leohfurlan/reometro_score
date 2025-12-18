@@ -34,47 +34,71 @@
     <div class="row g-4">
         <div class="col-lg-4">
             <div class="card shadow-sm border-0 h-100">
-                <div class="card-header bg-white py-3">
-                    <h6 class="fw-bold text-secondary mb-0"><i class="fas fa-ruler-combined me-2"></i>Parâmetros e Limites</h6>
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="fw-bold text-secondary mb-0"><i class="fas fa-ruler-combined me-2"></i>Parâmetros e Limites</h6>
+                        <small class="text-muted">Perfil: {{ ensaio.nome_perfil_usado }}</small>
+                    </div>
+                    {% if ensaio.temp_padrao_usado %}
+                        <span class="badge bg-light text-dark border">Alvo: {{ ensaio.temp_padrao_usado|round(0) }}°C</span>
+                    {% endif %}
                 </div>
-                <div class="card-body p-0">
-                    <ul class="list-group list-group-flush">
+                <div class="card-body">
+                    <div class="row g-3">
                         {% for param, info in detalhes.items() %}
-                        <li class="list-group-item p-3">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="fw-bold fs-5 text-dark">{{ param }}</span>
-                                <span class="badge border {% if info.nota >= 100 %}bg-success text-white{% elif info.nota > 0 %}bg-warning text-dark{% else %}bg-danger text-white{% endif %}">
-                                    Nota: {{ "%.0f"|format(info.nota) }}
-                                </span>
-                            </div>
-
-                            <div class="row g-0 align-items-center mb-2 text-center small fw-bold font-monospace">
-                                <div class="col-3 text-muted">MIN<br><span class="text-dark">{{ info.min }}</span></div>
-                                <div class="col-6 position-relative px-2">
-                                    <div class="progress" style="height: 6px;">
-                                        <div class="progress-bar bg-secondary opacity-25" style="width: 100%"></div>
+                        {% set nota_badge = 'bg-success text-white' if info.nota >= 100 else ('bg-warning text-dark' if info.nota > 0 else 'bg-danger text-white') %}
+                        {% set valor_ok = info.valor_real is not none and info.min is not none and info.max is not none and info.min <= info.valor_real <= info.max %}
+                        <div class="col-12">
+                            <div class="param-card h-100 p-3 border rounded-3 shadow-sm">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <div class="text-uppercase small text-muted fw-bold">Parâmetro</div>
+                                        <div class="fw-bold fs-5 text-dark">{{ param }}</div>
                                     </div>
-                                    <div class="position-absolute top-0 start-50 translate-middle-x mt-2 text-primary" title="Alvo">
-                                        <i class="fas fa-caret-up"></i><br>{{ info.alvo }}
+                                    <div class="text-end">
+                                        <span class="badge {{ nota_badge }} px-3 py-2">Score {{ "%.0f"|format(info.nota) }}</span>
+                                        <div class="small text-muted mt-1">Peso: {{ info.peso }}</div>
                                     </div>
                                 </div>
-                                <div class="col-3 text-muted">MAX<br><span class="text-dark">{{ info.max }}</span></div>
-                            </div>
 
-                            <div class="mt-4 text-center p-2 rounded bg-light border">
-                                <div class="small text-muted text-uppercase">Valor Real Medido</div>
-                                <div class="fs-4 fw-bold {% if info.nota == 0 %}text-danger{% else %}text-dark{% endif %}">
-                                    {{ "%.2f"|format(info.valor_real) if info.valor_real is not none else 'N/A' }}
+                                <div class="mt-3">
+                                    <div class="d-flex justify-content-between small text-muted fw-semibold text-uppercase">
+                                        <span>Mínimo</span>
+                                        <span>Alvo</span>
+                                        <span>Máximo</span>
+                                    </div>
+                                    <div class="limit-row bg-white border rounded-3 px-3 py-2 mt-2">
+                                        <div class="d-flex justify-content-between align-items-center fw-bold text-secondary">
+                                            <span>{{ info.min }}</span>
+                                            <div class="text-primary text-center small">
+                                                <i class="fas fa-caret-up"></i>
+                                                <div class="fw-bold text-dark">{{ info.alvo }}</div>
+                                            </div>
+                                            <span>{{ info.max }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 p-3 rounded-3 border bg-light text-center">
+                                    <div class="small text-muted text-uppercase">Valor Medido</div>
+                                    <div class="d-flex justify-content-center align-items-center gap-2">
+                                        <span class="badge {{ 'bg-success' if valor_ok else 'bg-danger' }} text-white px-3">{{ 'Dentro' if valor_ok else 'Fora' }}</span>
+                                        <span class="fs-4 fw-bold {% if valor_ok %}text-success{% else %}text-danger{% endif %}">
+                                            {{ "%.2f"|format(info.valor_real) if info.valor_real is not none else 'N/A' }}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </li>
+                        </div>
                         {% else %}
-                        <li class="list-group-item text-center text-muted py-5">
-                            <i class="fas fa-ban fa-2x mb-2 opacity-25"></i><br>
-                            Nenhum parâmetro configurado ou avaliado para este material.
-                        </li>
+                        <div class="col-12">
+                            <div class="text-center text-muted py-5 border rounded-3">
+                                <i class="fas fa-ban fa-2x mb-2 opacity-25"></i><br>
+                                Nenhum parâmetro configurado ou avaliado para este material.
+                            </div>
+                        </div>
                         {% endfor %}
-                    </ul>
+                    </div>
                 </div>
             </div>
         </div>

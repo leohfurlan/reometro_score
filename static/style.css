@@ -87,6 +87,19 @@ body {
     min-width: 50px;
 }
 
+/* --- Cartões de parâmetros da análise --- */
+.param-card {
+    background: linear-gradient(135deg, rgba(13,110,253,0.03), rgba(13,110,253,0.01));
+}
+
+.param-card .limit-row {
+    background: #fdfdfd;
+}
+
+.param-card .badge {
+    letter-spacing: 0.3px;
+}
+
 /* --- Barra de Comparação Flutuante --- */
 #compareBar {
     width: calc(100% - 250px); /* Desconta a sidebar */

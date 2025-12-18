@@ -14,6 +14,9 @@ class EnsaioConsolidado(db.Model):
     batch = db.Column(db.String(10))
     cod_sankhya = db.Column(db.Integer, index=True)
     massa_descricao = db.Column(db.String(200))
+
+    # Histórico do agrupamento
+    ids_agrupados = db.Column(db.String)
     
     # Parâmetros Físicos
     temp_plato = db.Column(db.Float)
@@ -69,3 +72,13 @@ class EnsaioConsolidado(db.Model):
     def temp_padrao_usado(self): return None
     @property
     def temp_plato_display(self): return f"{self.temp_plato:.0f}" if self.temp_plato else ""
+
+    @property
+    def ids_agrupados_lista(self):
+        """Retorna a lista de IDs consolidados preservando merges."""
+        if self.ids_agrupados:
+            try:
+                return [int(x) for x in self.ids_agrupados.split(',') if x.strip().isdigit()]
+            except Exception:
+                pass
+        return [self.id_ensaio]

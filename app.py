@@ -83,6 +83,29 @@ login_manager.login_view = 'login'
 # Cria o banco de dados na primeira execução se não existir
 with app.app_context():
     db.create_all()
+    # Garante colunas novas sem precisar de migração formal
+    def ensure_ids_agrupados_column():
+        try:
+            db_path = 'users_reoscore.db'
+            if os.path.exists(os.path.join('instance', db_path)):
+                db_path = os.path.join('instance', db_path)
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(ensaio_consolidado)")
+            colunas = [row[1] for row in cursor.fetchall()]
+            if 'ids_agrupados' not in colunas:
+                cursor.execute("ALTER TABLE ensaio_consolidado ADD COLUMN ids_agrupados TEXT")
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Falha ao ajustar esquema do ensaio_consolidado: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    ensure_ids_agrupados_column()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -842,7 +865,7 @@ def api_grafico():
         for cached in dados_cache['dados']:
             cached_id = int(cached.id_ensaio)
             if cached_id in selected_parent_ids:
-                ids_filhos = getattr(cached, 'ids_agrupados', []) or [cached_id]
+                ids_filhos = getattr(cached, 'ids_agrupados_lista', None) or [cached_id]
                 for child_id in ids_filhos:
                     c_id_int = int(child_id)
                     all_ids_to_fetch.add(c_id_int)
