@@ -3,14 +3,16 @@
 
 {% block content %}
 <div class="container-fluid py-4">
-    
     <div class="row align-items-center mb-4">
         <div class="col-md-8 d-flex align-items-center">
             <a href="{{ url_for('controle_qualidade') }}" class="btn btn-light border me-3 shadow-sm" title="Voltar">
                 <i class="fas fa-arrow-left text-muted"></i>
             </a>
             <div>
-                <h4 class="fw-bold mb-0 text-dark">Lote {{ ensaio.lote }} <small class="text-muted fw-normal ms-2">Batch {{ ensaio.batch }}</small></h4>
+                <h4 class="fw-bold mb-0 text-dark">
+                    Lote {{ ensaio.lote }}
+                    <small class="text-muted fw-normal ms-2">Batch {{ ensaio.batch }}</small>
+                </h4>
                 <div class="text-muted small mt-1">
                     <i class="fas fa-layer-group me-1"></i> {{ ensaio.massa_descricao }}
                     <span class="mx-2">•</span>
@@ -35,46 +37,47 @@
         <div class="col-lg-4">
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-header bg-white py-3">
-                    <h6 class="fw-bold text-secondary mb-0"><i class="fas fa-ruler-combined me-2"></i>Parâmetros e Limites</h6>
+                    <h6 class="fw-bold text-secondary mb-0">
+                        <i class="fas fa-ruler-combined me-2"></i>Parâmetros e Limites
+                    </h6>
                 </div>
-                <div class="card-body p-0">
-                    <ul class="list-group list-group-flush">
-                        {% for param, info in detalhes.items() %}
-                        <li class="list-group-item p-3">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="fw-bold fs-5 text-dark">{{ param }}</span>
-                                <span class="badge border {% if info.nota >= 100 %}bg-success text-white{% elif info.nota > 0 %}bg-warning text-dark{% else %}bg-danger text-white{% endif %}">
-                                    Nota: {{ "%.0f"|format(info.nota) }}
-                                </span>
-                            </div>
-
-                            <div class="row g-0 align-items-center mb-2 text-center small fw-bold font-monospace">
-                                <div class="col-3 text-muted">MIN<br><span class="text-dark">{{ info.min }}</span></div>
-                                <div class="col-6 position-relative px-2">
-                                    <div class="progress" style="height: 6px;">
-                                        <div class="progress-bar bg-secondary opacity-25" style="width: 100%"></div>
-                                    </div>
-                                    <div class="position-absolute top-0 start-50 translate-middle-x mt-2 text-primary" title="Alvo">
-                                        <i class="fas fa-caret-up"></i><br>{{ info.alvo }}
-                                    </div>
-                                </div>
-                                <div class="col-3 text-muted">MAX<br><span class="text-dark">{{ info.max }}</span></div>
-                            </div>
-
-                            <div class="mt-4 text-center p-2 rounded bg-light border">
-                                <div class="small text-muted text-uppercase">Valor Real Medido</div>
-                                <div class="fs-4 fw-bold {% if info.nota == 0 %}text-danger{% else %}text-dark{% endif %}">
-                                    {{ "%.2f"|format(info.valor_real) if info.valor_real is not none else 'N/A' }}
-                                </div>
-                            </div>
-                        </li>
-                        {% else %}
-                        <li class="list-group-item text-center text-muted py-5">
-                            <i class="fas fa-ban fa-2x mb-2 opacity-25"></i><br>
+                <div class="card-body p-3">
+                    {% if detalhes and detalhes|length > 0 %}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Parâmetro</th>
+                                    <th class="text-end">Mín</th>
+                                    <th class="text-end">Alvo</th>
+                                    <th class="text-end">Máx</th>
+                                    <th class="text-end">Medido</th>
+                                    <th class="text-end">Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for param, info in detalhes.items() %}
+                                <tr>
+                                    <td class="fw-bold">{{ param }}</td>
+                                    <td class="text-end">{{ "%.2f"|format(info.min) if info.min is not none else '--' }}</td>
+                                    <td class="text-end">{{ "%.2f"|format(info.alvo) if info.alvo is not none else '--' }}</td>
+                                    <td class="text-end">{{ "%.2f"|format(info.max) if info.max is not none else '--' }}</td>
+                                    <td class="text-end">{{ "%.2f"|format(info.valor_real) if info.valor_real is not none else '--' }}</td>
+                                    <td class="text-end">
+                                        <span class="badge {% if info.nota >= 100 %}bg-success{% elif info.nota > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                            {{ "%.0f"|format(info.nota) }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
                             Nenhum parâmetro configurado ou avaliado para este material.
-                        </li>
-                        {% endfor %}
-                    </ul>
+                        </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -86,7 +89,24 @@
                     <span class="badge bg-light text-dark border">ID: {{ ensaio.id_ensaio }}</span>
                 </div>
                 <div class="card-body position-relative" style="min-height: 450px;">
-                    <canvas id="chartDetail"></canvas>
+                    <div class="text-muted small mb-2">
+                        IDs exibidos (API): <span id="idsEnsaiosExibidos">{{ ensaio.id_ensaio }}</span>
+                        <span class="mx-2">•</span>
+                        Reometria: <span id="idsEnsaiosReo">-</span>
+                        <span class="mx-2">•</span>
+                        Viscosidade: <span id="idsEnsaiosVisc">-</span>
+                    </div>
+
+                    <div id="containerDetailReo" class="mb-4" style="height: 220px; display: none;">
+                        <canvas id="chartDetailReo"></canvas>
+                    </div>
+                    <div id="containerDetailVisc" style="height: 220px; display: none;">
+                        <canvas id="chartDetailVisc"></canvas>
+                    </div>
+                    <div id="msgDetailVazio" class="text-center text-muted py-5 d-none">
+                        Sem dados de curva.
+                    </div>
+
                     <div id="loadingChart" class="position-absolute top-50 start-50 translate-middle text-center">
                         <div class="spinner-border text-primary" role="status"></div>
                         <div class="mt-2 text-muted small">Carregando gráfico...</div>
@@ -100,61 +120,93 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener("DOMContentLoaded", function() {
-        const ctx = document.getElementById('chartDetail').getContext('2d');
         const loader = document.getElementById('loadingChart');
+        const containerReo = document.getElementById('containerDetailReo');
+        const containerVisc = document.getElementById('containerDetailVisc');
+        const msgVazio = document.getElementById('msgDetailVazio');
 
-        fetch(`/api/grafico?ids={{ ensaio.id_ensaio }}`)
-            .then(res => res.json())
-            .then(data => {
-                loader.style.display = 'none';
-                
-                if(data.error) {
-                    alert(data.error);
-                    return;
-                }
+        const ctxReo = document.getElementById('chartDetailReo').getContext('2d');
+        const ctxVisc = document.getElementById('chartDetailVisc').getContext('2d');
 
-                let datasets = [];
-                let yLabel = '';
+        let chartReo = null;
+        let chartVisc = null;
 
-                // Prioriza Reometria, senão Viscosidade
-                if (data.reometria && data.reometria.length > 0) {
-                    datasets = data.reometria;
-                    yLabel = 'Torque (lb.in)';
-                } else if (data.viscosidade && data.viscosidade.length > 0) {
-                    datasets = data.viscosidade;
-                    yLabel = 'Mooney (MU)';
-                } else {
-                    loader.innerHTML = "Sem dados de curva.";
-                    loader.style.display = 'block';
-                    return;
-                }
+        function renderChart(ctx, currentChart, datasets, yLabel) {
+            if (currentChart) currentChart.destroy();
 
-                // Ajuste visual da linha única
+            if (datasets.length === 1) {
                 datasets[0].borderColor = '#0d6efd';
                 datasets[0].backgroundColor = 'rgba(13, 110, 253, 0.1)';
                 datasets[0].fill = true;
                 datasets[0].pointRadius = 0;
                 datasets[0].borderWidth = 3;
-
-                new Chart(ctx, {
-                    type: 'line',
-                    data: { datasets: datasets },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: {
-                            legend: { display: true, position: 'top' },
-                            tooltip: {
-                                callbacks: { title: c => `Tempo: ${c[0].parsed.x}s` }
-                            }
-                        },
-                        scales: {
-                            x: { type: 'linear', title: { display: true, text: 'Tempo (s)' } },
-                            y: { title: { display: true, text: yLabel }, beginAtZero: false }
-                        }
-                    }
+            } else {
+                datasets.forEach(ds => {
+                    ds.pointRadius = 0;
+                    ds.borderWidth = 2;
+                    ds.fill = false;
+                    ds.tension = 0.35;
                 });
+            }
+
+            return new Chart(ctx, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                title: c => `Tempo: ${c[0].parsed.x}s`,
+                                label: function(context) {
+                                    const ds = context.dataset;
+                                    const material = ds.material ? ` (${ds.material})` : '';
+                                    return `${ds.label}: ${context.parsed.y.toFixed(2)}${material}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: 'Tempo (s)' } },
+                        y: { title: { display: true, text: yLabel }, beginAtZero: false }
+                    }
+                }
+            });
+        }
+
+        fetch(`/api/grafico?ids={{ ensaio.id_ensaio }}`)
+            .then(res => res.json())
+            .then(data => {
+                loader.style.display = 'none';
+
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                const idsSpan = document.getElementById('idsEnsaiosExibidos');
+                const idsReoSpan = document.getElementById('idsEnsaiosReo');
+                const idsViscSpan = document.getElementById('idsEnsaiosVisc');
+
+                if (idsSpan) idsSpan.textContent = (data.ids && data.ids.length) ? data.ids.join(', ') : '{{ ensaio.id_ensaio }}';
+                if (idsReoSpan) idsReoSpan.textContent = (data.ids_reometria && data.ids_reometria.length) ? data.ids_reometria.join(', ') : '-';
+                if (idsViscSpan) idsViscSpan.textContent = (data.ids_viscosidade && data.ids_viscosidade.length) ? data.ids_viscosidade.join(', ') : '-';
+
+                const reo = (data.reometria || []);
+                const visc = (data.viscosidade || []);
+
+                const temReo = reo.length > 0;
+                const temVisc = visc.length > 0;
+
+                containerReo.style.display = temReo ? 'block' : 'none';
+                containerVisc.style.display = temVisc ? 'block' : 'none';
+                msgVazio.classList.toggle('d-none', temReo || temVisc);
+
+                if (temReo) chartReo = renderChart(ctxReo, chartReo, reo, 'Torque (lb.in)');
+                if (temVisc) chartVisc = renderChart(ctxVisc, chartVisc, visc, 'Mooney (MU)');
             })
             .catch(err => {
                 console.error(err);

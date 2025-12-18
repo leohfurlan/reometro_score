@@ -209,6 +209,8 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 'material_original': str(amostra).strip(),
                 'data': row['DATA'],
                 'ts2': None, 't90': None, 'visc': None, 'temps': [],
+                'ids_reo': [], 'ids_visc': [],
+                'temps_reo': [], 'temps_visc': [],
                 'metodo_id': metodo_id,
                 'equip_planilha': equip_planilha
             }
@@ -218,17 +220,44 @@ def processar_carga_dados(data_corte='2025-07-01'):
         if reg['metodo_id'] == "FANTASMA" and metodo_id != "FANTASMA": reg['metodo_id'] = metodo_id
         if not reg['massa'] and produto: reg['massa'] = produto
         
-        reg['ids_ensaio'].append(row['COD_ENSAIO'])
+        cod_ensaio = row['COD_ENSAIO']
+        reg['ids_ensaio'].append(cod_ensaio)
         
         v_ts2 = safe_float(row['Ts2'])
         v_t90 = safe_float(row['T90'])
         v_visc = safe_float(row['Viscosidade'])
         v_temp = safe_float(row['TEMP_PLATO_INF'])
+
+        # Classifica o tipo do ensaio (Reometria vs Viscosidade) para persistir temps/ids corretamente.
+        tipo_maquina = _MAPA_GRUPOS.get(grupo, {}).get('tipo', 'INDEFINIDO')
+        is_visc = False
+        if tipo_maquina == 'VISCOSIMETRO':
+            is_visc = True
+        elif tipo_maquina == 'REOMETRO':
+            is_visc = False
+        else:
+            # Fallbacks
+            if v_temp and 90 <= v_temp <= 115:
+                is_visc = True
+            elif v_temp and v_temp >= 120:
+                is_visc = False
+            else:
+                is_visc = bool(v_visc and not (v_ts2 or v_t90))
         
         if v_ts2: reg['ts2'] = v_ts2
         if v_t90: reg['t90'] = v_t90
         if v_visc: reg['visc'] = v_visc
-        if v_temp: reg['temps'].append(v_temp)
+        if v_temp:
+            reg['temps'].append(v_temp)
+            if is_visc:
+                reg['temps_visc'].append(v_temp)
+            else:
+                reg['temps_reo'].append(v_temp)
+
+        if is_visc:
+            reg['ids_visc'].append(cod_ensaio)
+        else:
+            reg['ids_reo'].append(cod_ensaio)
 
     acumuladores_visc = {}
     for dados in dados_agrupados.values():
@@ -252,6 +281,17 @@ def processar_carga_dados(data_corte='2025-07-01'):
             valor_visc = medias_visc[dados['lote_visivel']]
             origem_visc = "Média"
 
+        ids_merge = sorted({int(i) for i in (dados['ids_ensaio'] or []) if i is not None})
+        temps_merge = sorted({float(t) for t in (dados['temps'] or []) if t}, reverse=True)
+
+        ids_reo = sorted({int(i) for i in (dados.get('ids_reo') or []) if i is not None})
+        ids_visc = sorted({int(i) for i in (dados.get('ids_visc') or []) if i is not None})
+
+        temps_reo = sorted({float(t) for t in (dados.get('temps_reo') or []) if t}, reverse=True)
+        temps_visc = sorted({float(t) for t in (dados.get('temps_visc') or []) if t}, reverse=True)
+
+        temp_plato = (temps_reo[0] if temps_reo else (temps_visc[0] if temps_visc else (temps_merge[0] if temps_merge else 0)))
+
         novo_ensaio = EnsaioConsolidado(
             id_ensaio=dados['ids_ensaio'][0],
             data_hora=dados['data'],
@@ -259,11 +299,17 @@ def processar_carga_dados(data_corte='2025-07-01'):
             batch=dados['batch'],
             cod_sankhya=dados['massa'].cod_sankhya,
             massa_descricao=dados['massa'].descricao,
-            temp_plato=dados['temps'][0] if dados['temps'] else 0,
+            temp_plato=temp_plato,
             ts2=dados['ts2'],
             t90=dados['t90'],
             viscosidade=valor_visc,
             origem_viscosidade=origem_visc,
+            ids_agrupados=json.dumps(ids_merge),
+            temps_plato=json.dumps(temps_merge),
+            temp_reo=(temps_reo[0] if temps_reo else None),
+            temp_visc=(temps_visc[0] if temps_visc else None),
+            ids_reo=json.dumps(ids_reo),
+            ids_visc=json.dumps(ids_visc),
             metodo_identificacao=dados['metodo_id'],
             lote_original=dados['lote_original'],
             material_original=dados['material_original'],

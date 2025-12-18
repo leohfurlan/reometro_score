@@ -84,6 +84,37 @@ login_manager.login_view = 'login'
 with app.app_context():
     db.create_all()
 
+    # Migração leve: adiciona colunas novas no consolidado sem precisar de Alembic.
+    try:
+        cols = [r[1] for r in db.session.execute(text("PRAGMA table_info(ensaio_consolidado)")).all()]
+        alter_needed = False
+
+        if 'ids_agrupados' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_agrupados TEXT"))
+            alter_needed = True
+        if 'temps_plato' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temps_plato TEXT"))
+            alter_needed = True
+        if 'temp_reo' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temp_reo REAL"))
+            alter_needed = True
+        if 'temp_visc' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temp_visc REAL"))
+            alter_needed = True
+        if 'ids_reo' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_reo TEXT"))
+            alter_needed = True
+        if 'ids_visc' not in cols:
+            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_visc TEXT"))
+            alter_needed = True
+
+        if alter_needed:
+            db.session.commit()
+            print("Migracao aplicada: colunas de merge adicionadas em ensaio_consolidado.")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Aviso: falha na migracao de ensaio_consolidado: {e}")
+
 @login_manager.user_loader
 def load_user(user_id):
     return Usuario.query.get(int(user_id))
@@ -817,17 +848,14 @@ def salvar_config():
 @login_required
 def api_grafico():
     try:
-        dados_cache = cache_service.get()
-        if not dados_cache:
-            return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
-
         ids_str = request.args.get('ids', '')
         modo_lote = request.args.get('mode', '') == 'lote' 
         
-        if not ids_str: return jsonify({})
+        if not ids_str:
+            return jsonify({})
 
         # 1. IDs das LINHAS selecionadas
-        selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
+        selected_parent_ids = [int(x) for x in ids_str.split(',') if x.strip().isdigit()]
         
         # Limite dinâmico
         limite = 100 if modo_lote else 10
@@ -838,15 +866,34 @@ def api_grafico():
         all_ids_to_fetch = set()
         map_id_to_parent = {} 
 
-        # 2. Expandir IDs
-        for cached in dados_cache['dados']:
-            cached_id = int(cached.id_ensaio)
-            if cached_id in selected_parent_ids:
-                ids_filhos = getattr(cached, 'ids_agrupados', []) or [cached_id]
-                for child_id in ids_filhos:
+        # 2. Metadados locais (SQLite / EnsaioConsolidado) + expansão via ids_agrupados do merge
+        ensaios_base = (
+            EnsaioConsolidado.query
+            .filter(EnsaioConsolidado.id_ensaio.in_(selected_parent_ids))
+            .all()
+        )
+        meta_by_id = {int(e.id_ensaio): e for e in ensaios_base}
+
+        materiais = []
+        for e in ensaios_base:
+            desc = (e.massa_descricao or '').strip()
+            if desc and desc not in materiais:
+                materiais.append(desc)
+
+        for parent_id in selected_parent_ids:
+            parent_meta = meta_by_id.get(int(parent_id))
+            if not parent_meta:
+                all_ids_to_fetch.add(int(parent_id))
+                continue
+
+            ids_filhos = parent_meta.ids_agrupados_list or [int(parent_id)]
+            for child_id in ids_filhos:
+                try:
                     c_id_int = int(child_id)
-                    all_ids_to_fetch.add(c_id_int)
-                    map_id_to_parent[c_id_int] = cached
+                except Exception:
+                    continue
+                all_ids_to_fetch.add(c_id_int)
+                map_id_to_parent[c_id_int] = parent_meta
 
         if not all_ids_to_fetch:
             return jsonify({'error': 'IDs não encontrados no cache.'}), 404
@@ -855,25 +902,32 @@ def api_grafico():
         conn = connect_to_database()
         cursor = conn.cursor()
         
-        lista_ids = list(all_ids_to_fetch)
-        placeholders = ','.join('?' * len(lista_ids))
-        
-        query = f'''
-            SELECT 
-                V.COD_ENSAIO, 
-                V.TEMPO, 
-                V.TORQUE, 
-                E.TEMP_PLATO_INF,
-                E.COD_GRUPO
-            FROM dbo.ENSAIO_VALORES V
-            JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
-            WHERE V.COD_ENSAIO IN ({placeholders})
-            ORDER BY V.COD_ENSAIO, V.TEMPO
-        '''
-        
-        cursor.execute(query, lista_ids)
-        rows = cursor.fetchall()
-        conn.close()
+        lista_ids = sorted(list(all_ids_to_fetch))
+
+        def _chunks(items, chunk_size):
+            for i in range(0, len(items), chunk_size):
+                yield items[i:i + chunk_size]
+
+        rows = []
+        try:
+            for chunk in _chunks(lista_ids, 2000):
+                placeholders = ','.join(['?'] * len(chunk))
+                query = f'''
+                    SELECT 
+                        V.COD_ENSAIO, 
+                        V.TEMPO, 
+                        V.TORQUE, 
+                        E.TEMP_PLATO_INF,
+                        E.COD_GRUPO
+                    FROM dbo.ENSAIO_VALORES V
+                    JOIN dbo.ENSAIO E ON V.COD_ENSAIO = E.COD_ENSAIO
+                    WHERE V.COD_ENSAIO IN ({placeholders})
+                    ORDER BY V.COD_ENSAIO, V.TEMPO
+                '''
+                cursor.execute(query, chunk)
+                rows.extend(cursor.fetchall())
+        finally:
+            conn.close()
 
         if not rows:
             return jsonify({'error': 'Nenhum ponto de curva encontrado.'}), 404
@@ -890,7 +944,6 @@ def api_grafico():
             c_grupo = row[4]
             
             parent = map_id_to_parent.get(c_id)
-            if not parent: continue
             
             # Classificação
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
@@ -903,14 +956,21 @@ def api_grafico():
             else:
                 if 90 <= c_temp <= 115: is_viscosity = True
                 elif c_temp >= 120: is_viscosity = False
-                else: is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
+                else: is_viscosity = bool(getattr(parent, 'viscosidade', None) is not None)
 
             target_dict = datasets_visc if is_viscosity else datasets_reo
             
             if c_id not in target_dict:
-                cod_s = parent.massa.cod_sankhya if parent.massa else '??'
-                batch_s = parent.batch if parent.batch else '0'
-                label = f"{cod_s} - Batch {batch_s}"
+                cod_s = getattr(parent, 'cod_sankhya', None) if parent else None
+                cod_s = str(cod_s) if cod_s is not None else '??'
+
+                batch_s = getattr(parent, 'batch', None) if parent else None
+                batch_s = str(batch_s) if batch_s else '0'
+
+                material_desc = getattr(parent, 'massa_descricao', None) if parent else None
+                material_desc = (str(material_desc).strip() if material_desc else '')
+
+                label = f"{cod_s} - Batch {batch_s} (ID {c_id})"
                 
                 # --- NOVO: Classificação do Subtipo para o Filtro ---
                 temp_type = 'GERAL'
@@ -920,6 +980,7 @@ def api_grafico():
 
                 target_dict[c_id] = {
                     'label': label,
+                    'material': material_desc,
                     'tempType': temp_type, # <--- Enviando para o Frontend
                     'data': [],
                     'pointRadius': 0,
@@ -932,7 +993,14 @@ def api_grafico():
             
             target_dict[c_id]['data'].append({'x': c_time, 'y': c_val})
 
+        ids_reo = sorted([int(k) for k in datasets_reo.keys()])
+        ids_visc = sorted([int(k) for k in datasets_visc.keys()])
+
         return jsonify({
+            'ids': lista_ids,
+            'ids_reometria': ids_reo,
+            'ids_viscosidade': ids_visc,
+            'materiais': materiais,
             'reometria': list(datasets_reo.values()),
             'viscosidade': list(datasets_visc.values())
         })

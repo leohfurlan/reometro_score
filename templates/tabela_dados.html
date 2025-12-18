@@ -36,7 +36,14 @@
                     <input type="checkbox" class="form-check-input curve-selector" value="{{ ensaio.id_ensaio }}">
                 </td>
 
-                <td class="col-id">{{ ensaio.id_ensaio }}</td>
+                <td class="col-id">
+                    <div class="fw-bold">{{ ensaio.id_ensaio }}</div>
+                    {% if ensaio.ids_agrupados_list and ensaio.ids_agrupados_list|length > 1 %}
+                        <div class="text-muted small" style="font-size: 0.7em;" title="Ensaios agrupados: {{ ensaio.ids_agrupados_display }}">
+                            Merge: {{ ensaio.ids_agrupados_list|length }}
+                        </div>
+                    {% endif %}
+                </td>
                 <td class="col-data">{% if ensaio.data_hora %}{{ ensaio.data_hora.strftime('%d/%m/%y') }}<div class="text-muted small" style="font-size: 0.7em;">{{ ensaio.data_hora.strftime('%H:%M') }}</div>{% else %}-{% endif %}</td>
                 
                 <td class="col-material">
