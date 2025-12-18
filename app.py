@@ -39,6 +39,39 @@ except ImportError:
 # Caminho local padrão para o cache baixado do SharePoint
 CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
 
+def recarregar_cache_memoria():
+    """
+    Função auxiliar: Busca todos os dados do SQLite e atualiza o CacheManager.
+    Essencial para as telas de Relatórios e Auditoria funcionarem.
+    """
+    try:
+        print("🔄 Recarregando cache em memória a partir do banco...")
+        # Busca todos os dados ordenados
+        todos_ensaios = EnsaioConsolidado.query.order_by(EnsaioConsolidado.data_hora.desc()).all()
+        
+        if not todos_ensaios:
+            print("⚠️ Banco de dados vazio. Cache não atualizado.")
+            return 0
+
+        # Extrai lista de materiais para filtros (usado na config)
+        materiais_unicos = sorted(list(set(e.massa_descricao for e in todos_ensaios if e.massa_descricao)))
+        
+        # Monta o objeto que as telas esperam
+        dados_para_cache = {
+            'dados': todos_ensaios,
+            'materiais': materiais_unicos,
+            'ultimo_update': datetime.now()
+        }
+        
+        # Salva no Cache Service
+        cache_service.set(dados_para_cache)
+        print(f"✅ Cache atualizado com {len(todos_ensaios)} registros.")
+        return len(todos_ensaios)
+        
+    except Exception as e:
+        print(f"❌ Erro ao recarregar cache: {e}")
+        return 0
+
 def preparar_planilha_sharepoint(forcar_download=False):
     """
     Garante que a planilha venha do SharePoint e define CAMINHO_REG403
@@ -114,6 +147,8 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         print(f"Aviso: falha na migracao de ensaio_consolidado: {e}")
+    if EnsaioConsolidado.query.first():
+        recarregar_cache_memoria()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -250,6 +285,8 @@ carregar_referencias_estaticas()
 # Inicializa o gerenciador com TTL de 30 min e Max 500MB
 cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
+
+
 # ==========================================
 # 2. ROTAS DE AUTENTICAÇÃO
 # ==========================================
@@ -319,9 +356,12 @@ def rota_atualizar():
         stats = processar_carga_dados()
         
         if stats:
+            # --- PASSO 3 (FIX): RECARREGAR O CACHE DA APLICAÇÃO ---
+            qtd_cache = recarregar_cache_memoria() 
+            
             total = stats.get('total', 0)
             tempo = stats.get('tempo', 0)
-            flash(f"Base atualizada com sucesso! {total} registros processados em {tempo:.1f}s.", "info")
+            flash(f"Base atualizada! {total} processados no ETL e {qtd_cache} carregados no Cache ({tempo:.1f}s).", "info")
         else:
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
@@ -329,7 +369,6 @@ def rota_atualizar():
         print(f"❌ Erro Crítico na Rota Atualizar: {e}")
         flash(f"Erro crítico: {str(e)}", "danger")
 
-    # CORREÇÃO AQUI: Redireciona para o novo nome da função da home
     return redirect(url_for('dashboard_home'))
 
 @app.route('/')
