@@ -264,6 +264,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
             t90=dados['t90'],
             viscosidade=valor_visc,
             origem_viscosidade=origem_visc,
+            ids_agrupados=','.join(str(i) for i in dados['ids_ensaio']),
             metodo_identificacao=dados['metodo_id'],
             lote_original=dados['lote_original'],
             material_original=dados['material_original'],

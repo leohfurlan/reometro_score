@@ -83,6 +83,29 @@ login_manager.login_view = 'login'
 # Cria o banco de dados na primeira execução se não existir
 with app.app_context():
     db.create_all()
+    # Garante colunas novas sem precisar de migração formal
+    def ensure_ids_agrupados_column():
+        try:
+            db_path = 'users_reoscore.db'
+            if os.path.exists(os.path.join('instance', db_path)):
+                db_path = os.path.join('instance', db_path)
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(ensaio_consolidado)")
+            colunas = [row[1] for row in cursor.fetchall()]
+            if 'ids_agrupados' not in colunas:
+                cursor.execute("ALTER TABLE ensaio_consolidado ADD COLUMN ids_agrupados TEXT")
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Falha ao ajustar esquema do ensaio_consolidado: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    ensure_ids_agrupados_column()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -816,33 +839,35 @@ def salvar_config():
 @app.route('/api/grafico')
 @login_required
 def api_grafico():
-    try:
-        dados_cache = cache_service.get()
-        if not dados_cache:
-            return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
+    # Recupera snapshot do cache no início para evitar NameError em rotas paralelas
+    dados_cache = cache_service.get()
+    if not dados_cache:
+        return jsonify({'error': 'Cache vazio. Atualize os dados.'}), 400
 
+    try:
         ids_str = request.args.get('ids', '')
-        modo_lote = request.args.get('mode', '') == 'lote' 
-        
-        if not ids_str: return jsonify({})
+        modo_lote = request.args.get('mode', '') == 'lote'
+
+        if not ids_str:
+            return jsonify({})
 
         # 1. IDs das LINHAS selecionadas
         selected_parent_ids = [int(x) for x in ids_str.split(',') if x.isdigit()]
-        
+
         # Limite dinâmico
         limite = 100 if modo_lote else 10
-        
+
         if len(selected_parent_ids) > limite:
             return jsonify({'error': f'Muitos dados ({len(selected_parent_ids)}). Limite é {limite}.'}), 400
 
         all_ids_to_fetch = set()
-        map_id_to_parent = {} 
+        map_id_to_parent = {}
 
         # 2. Expandir IDs
         for cached in dados_cache['dados']:
             cached_id = int(cached.id_ensaio)
             if cached_id in selected_parent_ids:
-                ids_filhos = getattr(cached, 'ids_agrupados', []) or [cached_id]
+                ids_filhos = getattr(cached, 'ids_agrupados_lista', None) or [cached_id]
                 for child_id in ids_filhos:
                     c_id_int = int(child_id)
                     all_ids_to_fetch.add(c_id_int)
@@ -854,15 +879,15 @@ def api_grafico():
         # 3. Busca SQL
         conn = connect_to_database()
         cursor = conn.cursor()
-        
+
         lista_ids = list(all_ids_to_fetch)
         placeholders = ','.join('?' * len(lista_ids))
-        
+
         query = f'''
-            SELECT 
-                V.COD_ENSAIO, 
-                V.TEMPO, 
-                V.TORQUE, 
+            SELECT
+                V.COD_ENSAIO,
+                V.TEMPO,
+                V.TORQUE,
                 E.TEMP_PLATO_INF,
                 E.COD_GRUPO
             FROM dbo.ENSAIO_VALORES V
@@ -870,7 +895,7 @@ def api_grafico():
             WHERE V.COD_ENSAIO IN ({placeholders})
             ORDER BY V.COD_ENSAIO, V.TEMPO
         '''
-        
+
         cursor.execute(query, lista_ids)
         rows = cursor.fetchall()
         conn.close()
@@ -881,37 +906,43 @@ def api_grafico():
         # 4. Processamento
         datasets_reo = {}
         datasets_visc = {}
-        
+
         for row in rows:
             c_id = int(row[0])
             c_time = float(row[1])
             c_val = float(row[2])
             c_temp = float(row[3]) if row[3] else 0
             c_grupo = row[4]
-            
+
             parent = map_id_to_parent.get(c_id)
-            if not parent: continue
-            
+            if not parent:
+                continue
+
             # Classificação
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
             tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
-            
+
             is_viscosity = False
-            
-            if tipo_maquina == 'VISCOSIMETRO': is_viscosity = True
-            elif tipo_maquina == 'REOMETRO': is_viscosity = False
+
+            if tipo_maquina == 'VISCOSIMETRO':
+                is_viscosity = True
+            elif tipo_maquina == 'REOMETRO':
+                is_viscosity = False
             else:
-                if 90 <= c_temp <= 115: is_viscosity = True
-                elif c_temp >= 120: is_viscosity = False
-                else: is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
+                if 90 <= c_temp <= 115:
+                    is_viscosity = True
+                elif c_temp >= 120:
+                    is_viscosity = False
+                else:
+                    is_viscosity = (getattr(parent, 'tipo_ensaio', '').upper() == 'VISCOSIDADE')
 
             target_dict = datasets_visc if is_viscosity else datasets_reo
-            
+
             if c_id not in target_dict:
                 cod_s = parent.massa.cod_sankhya if parent.massa else '??'
                 batch_s = parent.batch if parent.batch else '0'
                 label = f"{cod_s} - Batch {batch_s}"
-                
+
                 # --- NOVO: Classificação do Subtipo para o Filtro ---
                 temp_type = 'GERAL'
                 if not is_viscosity:
@@ -920,7 +951,7 @@ def api_grafico():
 
                 target_dict[c_id] = {
                     'label': label,
-                    'tempType': temp_type, # <--- Enviando para o Frontend
+                    'tempType': temp_type,  # <--- Enviando para o Frontend
                     'data': [],
                     'pointRadius': 0,
                     'borderWidth': 2,
@@ -929,16 +960,16 @@ def api_grafico():
                     # Cores dinâmicas
                     'borderColor': '#dc3545' if temp_type == 'ALTA' else '#0d6efd'
                 }
-            
+
             target_dict[c_id]['data'].append({'x': c_time, 'y': c_val})
 
         return jsonify({
             'reometria': list(datasets_reo.values()),
             'viscosidade': list(datasets_visc.values())
         })
-        
+
     except Exception as e:
-        print(f"ERRO API: {e}")
+        app.logger.exception('ERRO API /api/grafico')
         return jsonify({'error': str(e)}), 500
 
 
