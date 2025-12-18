@@ -11,7 +11,7 @@ import os
 import statistics 
 import json
 import sqlite3
-from sqlalchemy import or_, func, case, desc, and_ # Adicionado para conexão local
+from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexão local
 
 
 # Configurações e Modelos
