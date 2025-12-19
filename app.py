@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_bcrypt import Bcrypt
+
 from models.usuario import db, Usuario
 from models.consolidado import EnsaioConsolidado # Novo Modelo
 from cache_manager import CacheManager
@@ -117,7 +117,6 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_reoscore.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
-bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -307,7 +306,7 @@ def login():
         
         user = Usuario.query.filter_by(username=username).first()
         
-        if user and user.check_password(password, bcrypt):
+        if user and user.check_password(password):
             login_user(user)
             return redirect(url_for('dashboard_home'))
         else:
@@ -327,8 +326,8 @@ def criar_admin():
     if Usuario.query.filter_by(username='admin').first():
         return "Admin já existe."
     
-    hashed_pw = bcrypt.generate_password_hash('senha123').decode('utf-8')
-    novo_admin = Usuario(username='admin', password_hash=hashed_pw, role='admin')
+    novo_admin = Usuario(username='admin', role='admin')
+    novo_admin.set_password('senha123')
     db.session.add(novo_admin)
     db.session.commit()
     return "Admin criado com sucesso! (User: admin / Pass: senha123)"
@@ -338,8 +337,8 @@ def criar_operador():
     if Usuario.query.filter_by(username='operador').first():
         return "Usuário 'operador' já existe."
     
-    hashed_pw = bcrypt.generate_password_hash('vulca123').decode('utf-8')
-    novo_user = Usuario(username='operador', password_hash=hashed_pw, role='operador')
+    novo_user = Usuario(username='operador', role='operador')
+    novo_user.set_password('vulca123')
     db.session.add(novo_user)
     db.session.commit()
     return "Usuário 'operador' criado com sucesso! (User: operador / Pass: vulca123)"
@@ -688,12 +687,16 @@ def adicionar_usuario():
     username = request.form.get('username')
     password = request.form.get('password')
     role = request.form.get('role')
-    
+
+    if not username or not password or not role:
+        flash("Preencha usuário, senha e perfil.", "warning")
+        return redirect(url_for('pagina_config', _anchor='usuarios'))
+
     if Usuario.query.filter_by(username=username).first():
         flash(f"Usuário '{username}' já existe.", "warning")
     else:
-        hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-        novo_user = Usuario(username=username, password_hash=hashed_pw, role=role)
+        novo_user = Usuario(username=username, role=role)
+        novo_user.set_password(password)
         db.session.add(novo_user)
         db.session.commit()
         flash(f"Usuário '{username}' criado com sucesso!", "success")
@@ -730,7 +733,7 @@ def editar_usuario():
     
     # Só atualiza a senha se for fornecida
     if nova_senha and nova_senha.strip():
-        user.password_hash = bcrypt.generate_password_hash(nova_senha).decode('utf-8')
+        user.set_password(nova_senha)
         
     try:
         db.session.commit()

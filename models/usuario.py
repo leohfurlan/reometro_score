@@ -1,5 +1,6 @@
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # Instância do SQLAlchemy (será inicializada com o app no app.py)
 db = SQLAlchemy()
@@ -18,19 +19,18 @@ class Usuario(UserMixin, db.Model):
     # Níveis de acesso: 'admin' ou 'operador'
     role = db.Column(db.String(50), default='operador', nullable=False)
 
-    def set_password(self, password, bcrypt):
+    def set_password(self, password):
         """
         Recebe a senha em texto puro, gera o hash seguro e salva no objeto.
-        Requer o objeto 'bcrypt' configurado no app.
         """
-        self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
+        self.password_hash = generate_password_hash(password)
 
-    def check_password(self, password, bcrypt):
+    def check_password(self, password):
         """
         Verifica se a senha fornecida corresponde ao hash salvo no banco.
         Retorna True se correta, False caso contrário.
         """
-        return bcrypt.check_password_hash(self.password_hash, password)
+        return check_password_hash(self.password_hash, password)
 
     @property
     def is_admin(self):
