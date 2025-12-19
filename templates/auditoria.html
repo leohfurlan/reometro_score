@@ -10,7 +10,7 @@
             <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-chalkboard-teacher me-2"></i>Ensinar Sistema</h2>
             <p class="text-muted small">Corrija a identificação de lotes e materiais. As correções têm prioridade máxima sobre o Excel.</p>
         </div>
-        <a href="{{ url_for('rota_atualizar') }}" class="btn btn-primary btn-sm shadow-sm" onclick="return confirm('Isso irá recarregar todos os dados do zero. Continuar?');">
+        <a href="{{ url_for('rota_atualizar', next=request.full_path.rstrip('?')) }}" class="btn btn-primary btn-sm shadow-sm" data-loading="true" data-loading-text="Recarregando base..." onclick="if(confirm('Isso irá recarregar todos os dados do zero. Continuar?')){ativarModalCarregamento('Recarregando base...', 'Aplicando correções e atualizando os dados.'); return true;} return false;">
             <i class="fas fa-sync me-1"></i> Aplicar Correções e Recarregar
         </a>
     </div>

@@ -1,3 +1,79 @@
+// ---------------------------------------------
+// Loading modal global (AtualizaÃ§Ã£o / HTMX / NavegaÃ§Ã£o)
+// ---------------------------------------------
+(() => {
+    let loadingModalInstance = null;
+
+    const getLoadingEls = () => {
+        const modalEl = document.getElementById('globalLoadingModal');
+        const titleEl = document.getElementById('globalLoadingTitle');
+        const subtitleEl = document.getElementById('globalLoadingSubtitle');
+        return { modalEl, titleEl, subtitleEl };
+    };
+
+    const ensureModal = () => {
+        const { modalEl } = getLoadingEls();
+        if (!modalEl) return null;
+
+        if (loadingModalInstance) return loadingModalInstance;
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+
+        loadingModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+        return loadingModalInstance;
+    };
+
+    const show = (title, subtitle) => {
+        const { titleEl, subtitleEl } = getLoadingEls();
+        if (titleEl && title) titleEl.textContent = title;
+        if (subtitleEl) subtitleEl.textContent = subtitle || 'Por favor, aguarde.';
+
+        const modal = ensureModal();
+        if (modal) modal.show();
+    };
+
+    const hide = () => {
+        const modal = ensureModal();
+        if (modal) modal.hide();
+    };
+
+    window.ativarModalCarregamento = (titulo, subtitulo) => {
+        show(titulo || 'Atualizando base...', subtitulo || 'Isso pode levar alguns segundos.');
+        return true;
+    };
+
+    window.fecharModalCarregamento = () => {
+        hide();
+    };
+
+    // HTMX: mostra enquanto carrega partials
+    document.addEventListener('htmx:beforeRequest', () => {
+        show('Carregando...', 'Atualizando a tela.');
+    });
+
+    document.addEventListener('htmx:afterRequest', () => {
+        hide();
+    });
+
+    document.addEventListener('htmx:responseError', () => {
+        show('Erro ao carregar', 'Tente novamente.');
+        setTimeout(hide, 1200);
+    });
+
+    // Cliques em links/botÃµes que fazem refresh/ETL (data-loading="true")
+    document.addEventListener('click', (event) => {
+        const el = event.target && event.target.closest && event.target.closest('[data-loading="true"]');
+        if (!el) return;
+
+        const msg = el.getAttribute('data-loading-text') || 'Atualizando base...';
+        show(msg, 'Isso pode levar alguns segundos.');
+    });
+
+    // Se o usuÃ¡rio voltar (bfcache), garante que o modal nÃ£o fique preso
+    window.addEventListener('pageshow', () => {
+        hide();
+    });
+})();
+
 const initUI = () => {
     // ---------------------------------------------
     // 1. Sidebar toggle

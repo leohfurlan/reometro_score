@@ -11,6 +11,7 @@ import os
 import statistics 
 import json
 import sqlite3
+from urllib.parse import urlparse, urljoin
 from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexão local
 
 
@@ -38,6 +39,13 @@ except ImportError:
 
 # Caminho local padrão para o cache baixado do SharePoint
 CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
+
+def _is_safe_redirect_url(target: str) -> bool:
+    if not target:
+        return False
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
 
 def recarregar_cache_memoria():
     """
@@ -368,6 +376,10 @@ def rota_atualizar():
     except Exception as e:
         print(f"❌ Erro Crítico na Rota Atualizar: {e}")
         flash(f"Erro crítico: {str(e)}", "danger")
+
+    next_url = request.args.get('next') or request.referrer
+    if next_url and _is_safe_redirect_url(next_url):
+        return redirect(next_url)
 
     return redirect(url_for('dashboard_home'))
 

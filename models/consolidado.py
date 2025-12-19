@@ -1,6 +1,69 @@
 from datetime import datetime
 import json
+import os
 from models.usuario import db
+from models.massa import Parametro
+
+CONFIG_MASSAS_FILE = "config_massas.json"
+_CONFIG_MASSAS_CACHE = None
+_CONFIG_MASSAS_MTIME = None
+
+def _get_config_massas():
+    global _CONFIG_MASSAS_CACHE, _CONFIG_MASSAS_MTIME
+    try:
+        mtime = os.path.getmtime(CONFIG_MASSAS_FILE)
+    except OSError:
+        return {}
+
+    if _CONFIG_MASSAS_CACHE is None or _CONFIG_MASSAS_MTIME != mtime:
+        try:
+            with open(CONFIG_MASSAS_FILE, "r", encoding="utf-8") as f:
+                _CONFIG_MASSAS_CACHE = json.load(f) or {}
+        except Exception:
+            _CONFIG_MASSAS_CACHE = {}
+        _CONFIG_MASSAS_MTIME = mtime
+
+    return _CONFIG_MASSAS_CACHE or {}
+
+def _build_perfis_from_config(cod_sankhya: int):
+    specs = _get_config_massas().get(str(cod_sankhya), {}) or {}
+    perfis = {"alta_cinza": {}, "alta_preto": {}, "baixa": {}, "alta": {}}
+
+    for chave_param, valores in specs.items():
+        perfil = None
+        if chave_param.startswith("alta_cinza_"):
+            perfil = "alta_cinza"
+        elif chave_param.startswith("alta_preto_"):
+            perfil = "alta_preto"
+        elif chave_param.startswith("alta_"):
+            perfil = "alta"
+        elif chave_param.startswith("baixa_"):
+            perfil = "baixa"
+
+        if not perfil:
+            continue
+
+        nome_real = chave_param.replace(f"{perfil}_", "", 1)
+
+        if nome_real in ("temp_padrao", "tempo_total"):
+            perfis[perfil][nome_real] = valores
+            continue
+
+        if isinstance(valores, dict):
+            perfis[perfil][nome_real] = Parametro(
+                nome=nome_real,
+                peso=valores.get("peso", 10),
+                alvo=valores.get("alvo", 0),
+                minimo=valores.get("min", 0),
+                maximo=valores.get("max", 0),
+            )
+
+    if perfis.get("alta") and not perfis.get("alta_cinza"):
+        perfis["alta_cinza"] = perfis["alta"].copy()
+    if perfis.get("alta") and not perfis.get("alta_preto"):
+        perfis["alta_preto"] = perfis["alta"].copy()
+
+    return perfis
 
 class EnsaioConsolidado(db.Model):
     __tablename__ = 'ensaio_consolidado'
@@ -50,7 +113,10 @@ class EnsaioConsolidado(db.Model):
             def __init__(self, cod, desc):
                 self.cod_sankhya = cod
                 self.descricao = desc
-                self.parametros = {} # Mock para evitar erro no template
+                self.cod = cod
+                self.nome = desc
+                self.perfis = _build_perfis_from_config(cod) if cod else {"alta_cinza": {}, "alta_preto": {}, "baixa": {}, "alta": {}}
+                self.parametros = self.perfis.get("alta") or {}  # Compatibilidade com templates antigos
         return MassaFacade(self.cod_sankhya, self.massa_descricao)
 
     @property

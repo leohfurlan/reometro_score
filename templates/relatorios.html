@@ -22,7 +22,7 @@
             <div class="fw-bold">Base ainda não carregada</div>
             <div class="small">Clique em "Atualizar Dados" para gerar os relatórios.</div>
         </div>
-        <a class="btn btn-warning btn-sm fw-bold" href="{{ url_for('rota_atualizar') }}">
+        <a class="btn btn-warning btn-sm fw-bold" href="{{ url_for('rota_atualizar', next=request.full_path.rstrip('?')) }}" data-loading="true" data-loading-text="Atualizando dados...">
             <i class="fas fa-sync-alt me-1"></i> Atualizar Dados
         </a>
     </div>
