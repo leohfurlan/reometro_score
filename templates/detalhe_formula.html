@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="mb-3">
+        <a href="{{ url_for('lista_formulas') }}" class="text-decoration-none text-secondary">
+            &larr; Voltar para Lista
+        </a>
+    </div>
+
+    {% set composto_catalogo = catalogo.get(formula.cd_produto) %}
+    {% set nome_composto = (formula.ds_composto or '').strip() %}
+    {% if (not nome_composto or nome_composto.startswith('Fórmula ') or nome_composto.startswith('Formula ')) and composto_catalogo and composto_catalogo.descricao %}
+        {% set nome_composto = composto_catalogo.descricao %}
+    {% endif %}
+    {% if not nome_composto %}
+        {% set nome_composto = 'Fórmula ' ~ formula.cd_produto %}
+    {% endif %}
+
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card border-primary mb-3">
+                <div class="card-header bg-primary text-white d-flex justify-content-between">
+                    <h4 class="mb-0">{{ nome_composto }}</h4>
+                    <span class="badge bg-light text-dark">Cód: {{ formula.cd_produto }}</span>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                             <p class="mb-1"><strong>Status:</strong> {{ 'Ativo' if formula.ativo else 'Inativo' }}</p>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <p class="mb-0"><strong>Data Revisão:</strong>
+                                {% if formula.dt_revisao %}
+                                    {{ formula.dt_revisao.strftime('%d/%m/%Y') }}
+                                {% else %}
+                                    <span class="text-muted">Não informada</span>
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">📋 Composição (Matérias-Primas)</h5>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-bordered mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 100px;">Cód. MP</th>
+                                <th>Descrição do Ingrediente</th>
+
+                                {% if current_user.is_admin %}
+                                    <th class="table-warning text-center" style="width: 150px;">PHR (Qtd)</th>
+                                {% else %}
+                                    <th class="text-center text-muted" style="width: 150px;">PHR</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in formula.itens %}
+                            {% set produto_catalogo = catalogo.get(item.cd_materia_prima) %}
+                            {% set nome_mp = (item.ds_materia_prima or '').strip() %}
+                            {% if not nome_mp and produto_catalogo and produto_catalogo.descricao %}
+                                {% set nome_mp = produto_catalogo.descricao %}
+                            {% endif %}
+
+                            <tr>
+                                <td class="text-center text-muted">{{ item.cd_materia_prima }}</td>
+
+                                <td>
+                                    {% if nome_mp %}
+                                        {{ nome_mp }}
+                                    {% else %}
+                                        <span class="text-danger fst-italic">Matéria-prima não encontrada no catálogo</span>
+                                    {% endif %}
+                                </td>
+
+                                {% if current_user.is_admin %}
+                                    <td class="text-center fw-bold text-dark">{{ item.qt_phr }}</td>
+                                {% else %}
+                                    <td class="text-center text-muted"><i class="fas fa-lock"></i></td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+
+                            {% if current_user.is_admin %}
+                            <tr class="table-warning">
+                                <td colspan="2" class="text-end fw-bold">TOTAL:</td>
+                                <td class="text-center fw-bold">
+                                    {{ formula.itens | sum(attribute='qt_phr') | round(2) }}
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -21,6 +21,7 @@ from services.config_manager import carregar_regras_acao, salvar_regras_acao, sa
 from services.learning_service import ensinar_lote
 from services.report_service import gerar_estrutura_relatorio
 from models.score_versioning import ScoreResultado
+from models.formula import Formula, FormulaItem
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
@@ -1311,6 +1312,29 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
         order=order
     )
 
+
+# --- ROTAS DE FORMULAÇÃO ---
+@app.route('/formulas')
+@login_required
+def lista_formulas():
+    formulas = Formula.query.order_by(Formula.cd_produto).all()
+    # Passamos o catálogo também, caso precise corrigir nomes na listagem
+    return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
+
+@app.route('/formulas/<int:cd_produto>')
+@login_required
+def detalhe_formula(cd_produto):
+    formula = Formula.query.get_or_404(cd_produto)
+    
+    # INJEÇÃO DE DEPENDÊNCIA:
+    # Passamos o catálogo completo para o template fazer o "De/Para" em tempo real
+    catalogo = get_catalogo_codigo()
+    
+    return render_template(
+        'detalhe_formula.html', 
+        formula=formula,
+        catalogo=catalogo
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)

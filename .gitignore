@@ -25,3 +25,5 @@ users_reoscore.db
 instance/*.db
 *.db
 instance/users_reoscore.db
+*.csv
+scripts/
