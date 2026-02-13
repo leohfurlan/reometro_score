@@ -11,8 +11,10 @@ import os
 import statistics 
 import json
 import sqlite3
+import unicodedata
 from urllib.parse import urlparse, urljoin
 from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexão local
+from sqlalchemy.orm import load_only
 
 
 # Configurações e Modelos
@@ -130,28 +132,39 @@ with app.app_context():
         cols = [r[1] for r in db.session.execute(text("PRAGMA table_info(ensaio_consolidado)")).all()]
         alter_needed = False
 
-        if 'ids_agrupados' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_agrupados TEXT"))
-            alter_needed = True
-        if 'temps_plato' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temps_plato TEXT"))
-            alter_needed = True
-        if 'temp_reo' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temp_reo REAL"))
-            alter_needed = True
-        if 'temp_visc' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN temp_visc REAL"))
-            alter_needed = True
-        if 'ids_reo' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_reo TEXT"))
-            alter_needed = True
-        if 'ids_visc' not in cols:
-            db.session.execute(text("ALTER TABLE ensaio_consolidado ADD COLUMN ids_visc TEXT"))
-            alter_needed = True
+        # Mantém compatibilidade com bancos locais legados.
+        colunas_esperadas = {
+            "updated_at": "DATETIME",
+            "dureza": "REAL",
+            "densidade": "REAL",
+            "abrasao": "REAL",
+            "resiliencia": "REAL",
+            "tensao_ruptura": "REAL",
+            "alongamento": "REAL",
+            "rasgo": "REAL",
+            "modulo_100": "REAL",
+            "modulo_300": "REAL",
+            "origem_lab_file": "TEXT",
+            "ids_agrupados": "TEXT",
+            "temps_plato": "TEXT",
+            "temp_reo": "REAL",
+            "temp_visc": "REAL",
+            "ids_reo": "TEXT",
+            "ids_visc": "TEXT",
+            "origem_viscosidade": "TEXT",
+            "metodo_identificacao": "TEXT",
+            "lote_original": "TEXT",
+            "material_original": "TEXT",
+        }
+
+        for nome_coluna, tipo_sql in colunas_esperadas.items():
+            if nome_coluna not in cols:
+                db.session.execute(text(f"ALTER TABLE ensaio_consolidado ADD COLUMN {nome_coluna} {tipo_sql}"))
+                alter_needed = True
 
         if alter_needed:
             db.session.commit()
-            print("Migracao aplicada: colunas de merge adicionadas em ensaio_consolidado.")
+            print("Migracao aplicada: schema de ensaio_consolidado atualizado.")
     except Exception as e:
         db.session.rollback()
         print(f"Aviso: falha na migracao de ensaio_consolidado: {e}")
@@ -475,16 +488,42 @@ def controle_qualidade():
     ROTA OPERACIONAL: Tabela de Lotes, Filtros Avançados, Busca.
     (Antiga dashboard, agora focada na lista)
     """
+    is_htmx = bool(request.headers.get('HX-Request'))
+
     # Filtros
     search = request.args.get('search', '').strip().upper()
     f_mat = request.args.get('material_filter', '')
     f_acao = request.args.get('acao_filter', '')
+    d_start = request.args.get('date_start', '')
+    d_end = request.args.get('date_end', '')
+    f_codigo = request.args.get('codigo_filter', '').strip()
+    f_tipo_ensaio = request.args.get('tipo_ensaio', '')
     sort_by = request.args.get('sort', 'data')
     order = request.args.get('order', 'desc')
-    page = request.args.get('page', 1, type=int)
+    page = max(request.args.get('page', 1, type=int), 1)
     LIMIT = 50 # Mais itens por página na visão operacional
 
-    query = EnsaioConsolidado.query
+    # Carrega apenas campos usados na tabela para reduzir custo por página.
+    query = EnsaioConsolidado.query.options(load_only(
+        EnsaioConsolidado.id_ensaio,
+        EnsaioConsolidado.data_hora,
+        EnsaioConsolidado.lote,
+        EnsaioConsolidado.batch,
+        EnsaioConsolidado.cod_sankhya,
+        EnsaioConsolidado.massa_descricao,
+        EnsaioConsolidado.temp_plato,
+        EnsaioConsolidado.temp_reo,
+        EnsaioConsolidado.temp_visc,
+        EnsaioConsolidado.ts2,
+        EnsaioConsolidado.t90,
+        EnsaioConsolidado.viscosidade,
+        EnsaioConsolidado.origem_viscosidade,
+        EnsaioConsolidado.score_final,
+        EnsaioConsolidado.acao_recomendada,
+        EnsaioConsolidado.metodo_identificacao,
+        EnsaioConsolidado.ids_agrupados,
+        EnsaioConsolidado.temps_plato
+    ))
 
     if search:
         query = query.filter(or_(
@@ -492,15 +531,42 @@ def controle_qualidade():
             EnsaioConsolidado.massa_descricao.contains(search),
             EnsaioConsolidado.batch.contains(search)
         ))
-    if f_mat: query = query.filter(EnsaioConsolidado.massa_descricao == f_mat)
+    if f_mat:
+        query = query.filter(EnsaioConsolidado.massa_descricao == f_mat)
+
     if f_acao:
-        if f_acao == "APROVADOS": query = query.filter(EnsaioConsolidado.score_final >= 70) # Simplificação
-        elif f_acao == "REPROVADO": query = query.filter(EnsaioConsolidado.score_final < 70)
+        if f_acao == "APROVADOS":
+            query = query.filter(EnsaioConsolidado.score_final >= 70) # Simplificação
+        elif f_acao == "REPROVADO":
+            query = query.filter(EnsaioConsolidado.score_final < 70)
+
+    if d_start:
+        try:
+            query = query.filter(EnsaioConsolidado.data_hora >= datetime.strptime(d_start, '%Y-%m-%d'))
+        except Exception:
+            pass
+    if d_end:
+        try:
+            query = query.filter(EnsaioConsolidado.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59))
+        except Exception:
+            pass
+
+    if f_codigo.isdigit():
+        query = query.filter(EnsaioConsolidado.cod_sankhya == int(f_codigo))
+
+    if f_tipo_ensaio == 'REO':
+        query = query.filter(EnsaioConsolidado.ts2.isnot(None), EnsaioConsolidado.t90.isnot(None))
+    elif f_tipo_ensaio == 'VISC':
+        query = query.filter(EnsaioConsolidado.viscosidade.isnot(None))
 
     # Ordenação
     col_map = {
         'id': EnsaioConsolidado.id_ensaio, 'data': EnsaioConsolidado.data_hora,
-        'lote': EnsaioConsolidado.lote, 'score': EnsaioConsolidado.score_final
+        'material': EnsaioConsolidado.massa_descricao,
+        'lote': EnsaioConsolidado.lote, 'temp': EnsaioConsolidado.temp_plato,
+        'ts2': EnsaioConsolidado.ts2, 't90': EnsaioConsolidado.t90,
+        'visc': EnsaioConsolidado.viscosidade,
+        'score': EnsaioConsolidado.score_final, 'acao': EnsaioConsolidado.acao_recomendada
     }
     col = col_map.get(sort_by, EnsaioConsolidado.data_hora)
     query = query.order_by(col.asc() if order == 'asc' else col.desc())
@@ -508,20 +574,23 @@ def controle_qualidade():
     # Paginação
     paginacao = query.paginate(page=page, per_page=LIMIT, error_out=False)
     
-    # Filtros auxiliares
-    materiais = db.session.query(EnsaioConsolidado.massa_descricao).distinct().order_by(EnsaioConsolidado.massa_descricao).all()
-    materiais_filtro = [{'descricao': m[0]} for m in materiais if m[0]]
+    # Filtros auxiliares: só no render completo; paginação HTMX não usa o select de materiais.
+    materiais_filtro = []
+    if not is_htmx:
+        materiais = db.session.query(EnsaioConsolidado.massa_descricao).distinct().order_by(EnsaioConsolidado.massa_descricao).all()
+        materiais_filtro = [{'descricao': m[0]} for m in materiais if m[0]]
 
     context = {
         'ensaios': paginacao.items,
         'total_registros_filtrados': paginacao.total,
         'pagina_atual': page, 'total_paginas': paginacao.pages,
         'materiais_filtro': materiais_filtro,
+        'codigo_filter': f_codigo, 'date_start': d_start, 'date_end': d_end, 'tipo_ensaio_filter': f_tipo_ensaio,
         'search_term': search, 'material_filter': f_mat, 'acao_filter': f_acao,
         'sort_by': sort_by, 'order': order
     }
 
-    if request.headers.get('HX-Request'):
+    if is_htmx:
         return render_template('tabela_dados.html', **context)
         
     return render_template('controle_qualidade.html', **context)
@@ -1146,6 +1215,171 @@ def salvar_correcao():
 # ROTAS NOVAS (RELATÓRIOS E GESTÃO)
 # ==========================================
 
+MAPA_PROPRIEDADES_FISICAS = {
+    'dureza': {
+        'label': 'Dureza',
+        'sigla': 'Dur',
+        'unidade': 'Shore A',
+        'spec_keys': ['Dureza', 'dureza'],
+    },
+    'densidade': {
+        'label': 'Densidade',
+        'sigla': 'Dens',
+        'unidade': 'g/cm3',
+        'spec_keys': ['Densidade', 'densidade'],
+    },
+    'abrasao': {
+        'label': 'Abrasao',
+        'sigla': 'Abr',
+        'unidade': 'mm3',
+        'spec_keys': ['Abrasao', 'Abrasão', 'abrasao'],
+    },
+    'resiliencia': {
+        'label': 'Resiliencia',
+        'sigla': 'Res',
+        'unidade': '%',
+        'spec_keys': ['Resiliencia', 'Resiliência', 'resiliencia'],
+    },
+    'tensao_ruptura': {
+        'label': 'Tensao Ruptura',
+        'sigla': 'TR',
+        'unidade': 'MPa',
+        'spec_keys': ['TensaoRuptura', 'Tensao Ruptura', 'Tensão Ruptura', 'tensao_ruptura'],
+    },
+    'alongamento': {
+        'label': 'Alongamento',
+        'sigla': 'Along',
+        'unidade': '%',
+        'spec_keys': ['Alongamento', 'alongamento'],
+    },
+    'rasgo': {
+        'label': 'Resistencia ao Rasgo',
+        'sigla': 'Rasgo',
+        'unidade': 'N/mm',
+        'spec_keys': ['Rasgo', 'rasgo'],
+    },
+}
+
+
+def _normalizar_chave_config(chave):
+    txt = str(chave or '').strip().lower()
+    txt = unicodedata.normalize('NFKD', txt).encode('ascii', 'ignore').decode('ascii')
+    txt = txt.replace('-', '_').replace(' ', '_')
+    while '__' in txt:
+        txt = txt.replace('__', '_')
+    return txt
+
+
+def _to_float_or_none(valor):
+    try:
+        if valor is None:
+            return None
+        return float(valor)
+    except Exception:
+        return None
+
+
+def _obter_limites_spec(spec):
+    if spec is None:
+        return None, None
+
+    minimo = _to_float_or_none(getattr(spec, 'minimo', None))
+    maximo = _to_float_or_none(getattr(spec, 'maximo', None))
+
+    if isinstance(spec, dict):
+        minimo = _to_float_or_none(spec.get('minimo', spec.get('min', minimo)))
+        maximo = _to_float_or_none(spec.get('maximo', spec.get('max', maximo)))
+
+    return minimo, maximo
+
+
+def _encontrar_spec_fisica(perfil_alta, perfil_baixa, candidatos):
+    chaves_candidatas = {_normalizar_chave_config(c) for c in candidatos}
+
+    for perfil in (perfil_alta or {}, perfil_baixa or {}):
+        if not isinstance(perfil, dict):
+            continue
+        for chave, valor in perfil.items():
+            if _normalizar_chave_config(chave) in chaves_candidatas:
+                return valor
+    return None
+
+
+def _calcular_resumo_propriedades_fisicas(ensaios):
+    if not ensaios:
+        return []
+
+    ensaio_ref = ensaios[0]
+    perfil_alta = (
+        ensaio_ref.massa.perfis.get('alta_cinza')
+        or ensaio_ref.massa.perfis.get('alta_preto')
+        or ensaio_ref.massa.perfis.get('alta')
+        or {}
+    )
+    perfil_baixa = ensaio_ref.massa.perfis.get('baixa') or {}
+
+    saida = []
+    for nome_attr, meta in MAPA_PROPRIEDADES_FISICAS.items():
+        valores = []
+        for ens in ensaios:
+            vf = _to_float_or_none(getattr(ens, nome_attr, None))
+            if vf is not None and vf > 0:
+                valores.append(vf)
+
+        media_v = statistics.mean(valores) if valores else None
+        min_v = min(valores) if valores else None
+        max_v = max(valores) if valores else None
+
+        spec = _encontrar_spec_fisica(perfil_alta, perfil_baixa, meta['spec_keys'])
+        spec_min, spec_max = _obter_limites_spec(spec)
+        tem_spec = (spec_min is not None) or (spec_max is not None)
+
+        fora = False
+        if tem_spec and media_v is not None:
+            if spec_min is not None and media_v < spec_min:
+                fora = True
+            if spec_max is not None and media_v > spec_max:
+                fora = True
+
+        if media_v is None:
+            status = 'sem_dado'
+        elif not tem_spec:
+            status = 'sem_spec'
+        elif fora:
+            status = 'fora'
+        else:
+            status = 'ok'
+
+        saida.append({
+            'key': nome_attr,
+            'label': meta['label'],
+            'sigla': meta['sigla'],
+            'unidade': meta['unidade'],
+            'qtd': len(valores),
+            'media': media_v,
+            'min': min_v,
+            'max': max_v,
+            'spec_min': spec_min,
+            'spec_max': spec_max,
+            'fora_faixa': fora,
+            'tem_spec': tem_spec,
+            'status': status,
+        })
+
+    return saida
+
+
+def _resumo_status_propriedades_fisicas(props):
+    resumo = {'ok': 0, 'fora': 0, 'sem_spec': 0, 'sem_dado': 0, 'avaliadas': 0}
+    for p in props:
+        status = p.get('status')
+        if status in resumo:
+            resumo[status] += 1
+        if status in ('ok', 'fora'):
+            resumo['avaliadas'] += 1
+    return resumo
+
+
 @app.route('/relatorios')
 @login_required
 def pagina_relatorios():
@@ -1200,6 +1434,11 @@ def detalhes_lotes_massa(cod_sankhya):
     # Filtro de Busca
     if search_lote:
         lotes_lista = [l for l in lotes_lista if search_lote in str(l['numero']).upper()]
+
+    for lote in lotes_lista:
+        props = _calcular_resumo_propriedades_fisicas(lote.get('batches', []))
+        lote['propriedades_fisicas'] = props
+        lote['resumo_props_fisicas'] = _resumo_status_propriedades_fisicas(props)
     
     # Ordenação
     reverse = (order == 'desc')
@@ -1301,6 +1540,9 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
         'tem_alta': bool(coleta['alta']['Ts2'] or coleta['alta']['T90']),
         'tem_baixa': bool(coleta['baixa']['Ts2'] or coleta['baixa']['T90'])
     }
+
+    # 5. Resumo e avaliacao das propriedades fisicas do lote
+    dados_lote['propriedades_fisicas'] = _calcular_resumo_propriedades_fisicas(ensaios_do_lote)
 
     return render_template(
         'detalhe_lote.html', 

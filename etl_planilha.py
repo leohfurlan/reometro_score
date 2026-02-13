@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import warnings
+import re
 from dotenv import load_dotenv
 
 # Carrega as variáveis do arquivo .env
@@ -27,6 +28,23 @@ def _resolver_caminho_planilha():
         return CACHE_PADRAO_SHAREPOINT
 
     return None
+
+def normalizar_lote_planilha(lote_raw):
+    """
+    Normaliza o lote vindo do Excel.
+    Remove artefato comum de célula numérica (ex: '10091.0' -> '10091').
+    """
+    if pd.isna(lote_raw):
+        return ""
+
+    lote = str(lote_raw).strip().upper()
+    if not lote or lote == "NAN":
+        return ""
+
+    if re.fullmatch(r"\d+\.0+", lote):
+        lote = lote.split(".", 1)[0]
+
+    return lote
 
 def carregar_dicionario_lotes():
     caminho_arquivo = _resolver_caminho_planilha()
@@ -97,15 +115,16 @@ def carregar_dicionario_lotes():
 
                 # Limpeza dos dados
                 df = df.dropna(subset=['LOTE', 'MASSA'])
-                df['LOTE'] = df['LOTE'].astype(str).str.strip().str.upper()
+                df['LOTE'] = df['LOTE'].apply(normalizar_lote_planilha)
                 df['MASSA'] = df['MASSA'].astype(str).str.strip()
+                df = df[df['LOTE'] != '']
                 
                 # Filtra lixo (lotes com menos de 3 caracteres)
                 df = df[df['LOTE'].str.len() > 2] 
                 
                 # Itera para montar o dicionário rico
                 for _, row in df.iterrows():
-                    lote = str(row['LOTE']).strip().upper()
+                    lote = row['LOTE']
                     if len(lote) < 3: continue
                     
                     massa = str(row['MASSA']).strip()

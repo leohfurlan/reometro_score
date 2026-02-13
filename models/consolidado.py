@@ -85,6 +85,20 @@ class EnsaioConsolidado(db.Model):
     t90 = db.Column(db.Float)
     viscosidade = db.Column(db.Float)
     
+    # --- Novas Propriedades Físicas (Vindas das Planilhas de Laboratório) ---
+    dureza = db.Column(db.Float)          # Shore A
+    densidade = db.Column(db.Float)       # g/cm³
+    abrasao = db.Column(db.Float)         # mm³
+    resiliencia = db.Column(db.Float)     # %
+    tensao_ruptura = db.Column(db.Float)  # MPa
+    alongamento = db.Column(db.Float)     # %
+    rasgo = db.Column(db.Float)           # N/mm
+    modulo_100 = db.Column(db.Float)      # MPa
+    modulo_300 = db.Column(db.Float)      # MPa
+    
+    # Metadados de rastreio
+    origem_lab_file = db.Column(db.String(255)) # Nome do arquivo de onde veio
+
     # Informações do merge (agregação lote/batch)
     ids_agrupados = db.Column(db.Text)   # JSON list[int]
     temps_plato = db.Column(db.Text)     # JSON list[float]

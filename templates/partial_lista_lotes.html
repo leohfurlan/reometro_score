@@ -7,6 +7,28 @@
     <td class="text-center fw-bold text-secondary border-start">{{ "%.2f"|format(lote.medias.Ts2) if lote.medias.Ts2 else '-' }}</td>
     <td class="text-center fw-bold text-secondary">{{ "%.2f"|format(lote.medias.T90) if lote.medias.T90 else '-' }}</td>
     <td class="text-center fw-bold text-secondary">{{ "%.1f"|format(lote.medias.Visc) if lote.medias.Visc else '-' }}</td>
+
+    <td class="text-center" style="min-width: 360px;">
+        <div class="d-flex flex-wrap gap-1 justify-content-center">
+            {% for p in lote.propriedades_fisicas %}
+                {% if p.status == 'ok' %}
+                    {% set badge_cls = 'bg-success bg-opacity-10 text-success' %}
+                {% elif p.status == 'fora' %}
+                    {% set badge_cls = 'bg-danger bg-opacity-10 text-danger' %}
+                {% elif p.status == 'sem_spec' %}
+                    {% set badge_cls = 'bg-info bg-opacity-10 text-info' %}
+                {% else %}
+                    {% set badge_cls = 'bg-secondary bg-opacity-10 text-secondary' %}
+                {% endif %}
+                <span class="badge {{ badge_cls }} border" title="{{ p.label }}{% if p.media is not none %}: {{ '%.2f'|format(p.media) }} {{ p.unidade }}{% endif %}">
+                    {{ p.sigla }}: {{ "%.1f"|format(p.media) if p.media is not none else '-' }}
+                </span>
+            {% endfor %}
+        </div>
+        <div class="small text-muted mt-1">
+            OK {{ lote.resumo_props_fisicas.ok }} | Fora {{ lote.resumo_props_fisicas.fora }} | Sem spec {{ lote.resumo_props_fisicas.sem_spec }}
+        </div>
+    </td>
     
     <td class="text-center">
         <div class="d-flex align-items-center justify-content-center">

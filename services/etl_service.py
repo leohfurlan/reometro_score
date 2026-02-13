@@ -42,6 +42,51 @@ def chunk_list(lista, tamanho):
     for i in range(0, len(lista), tamanho):
         yield lista[i:i + tamanho]
 
+def _obter_dados_lote_planilha(chave_lote):
+    """
+    Resolve lote no dicionário da planilha com compatibilidade para chaves antigas
+    no formato numérico com '.0' (ex: '10091.0').
+    """
+    if not chave_lote:
+        return None
+
+    chave = str(chave_lote).strip().upper()
+    if not chave:
+        return None
+
+    dados = _MAPA_LOTES_PLANILHA.get(chave)
+    if dados is not None:
+        return dados
+
+    if re.fullmatch(r'\d+', chave):
+        return _MAPA_LOTES_PLANILHA.get(f"{chave}.0")
+
+    if re.fullmatch(r'\d+\.0+', chave):
+        return _MAPA_LOTES_PLANILHA.get(chave.split('.', 1)[0])
+
+    return None
+
+def _gerar_candidatos_numericos(token_num):
+    """
+    Gera candidatos de lote a partir de um bloco numérico.
+    Quando detecta sufixo de zeros longos (ruído típico do reômetro),
+    tenta versões progressivamente aparadas.
+    """
+    base = (token_num or '').lstrip('0') or '0'
+    if not base:
+        return []
+
+    candidatos = [base]
+
+    # Só remove zeros à direita quando há forte indício de sufixo artificial.
+    if re.search(r'0{4,}$', base):
+        atual = base
+        while atual.endswith('0') and len(atual) > 3:
+            atual = atual[:-1]
+            candidatos.append(atual)
+
+    return candidatos
+
 def carregar_referencias_estaticas():
     """
     Carrega mapas de configuração, incluindo o Aprendizado Manual.
@@ -97,14 +142,25 @@ def extrair_lote_da_string(texto_sujo):
     if '*' in texto:
         partes = texto.split('*')
         if len(partes) >= 2:
-            candidato = partes[1].strip().lstrip('0')
-            if not candidato: candidato = '0'
-            if candidato in _MAPA_LOTES_PLANILHA: return candidato, "Asterisco"
-    if texto in _MAPA_LOTES_PLANILHA: return texto, "Exato"
+            for parte in partes[1:]:
+                parte_limpa = parte.strip()
+                if _obter_dados_lote_planilha(parte_limpa) is not None:
+                    if re.fullmatch(r'\d+\.0+', parte_limpa):
+                        return parte_limpa.split('.', 1)[0], "Asterisco"
+                    return parte_limpa, "Asterisco"
+                for num in reversed(re.findall(r'\d+', parte)):
+                    for candidato in _gerar_candidatos_numericos(num):
+                        if _obter_dados_lote_planilha(candidato) is not None:
+                            return candidato, "Asterisco"
+    if _obter_dados_lote_planilha(texto) is not None:
+        if re.fullmatch(r'\d+\.0+', texto):
+            return texto.split('.', 1)[0], "Exato"
+        return texto, "Exato"
     todos_numeros = re.findall(r'\d+', texto)
     for num in reversed(todos_numeros): 
-        candidato = num.lstrip('0')
-        if candidato in _MAPA_LOTES_PLANILHA: return candidato, "Regex"
+        for candidato in _gerar_candidatos_numericos(num):
+            if _obter_dados_lote_planilha(candidato) is not None:
+                return candidato, "Regex"
     return None, None
 
 def match_nome_inteligente(texto_bruto):
@@ -183,7 +239,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
             if not lote_clean: lote_clean, _ = extrair_lote_da_string(amostra)
             if lote_clean:
                 lote_final = lote_clean
-                dados_planilha = _MAPA_LOTES_PLANILHA.get(lote_final)
+                dados_planilha = _obter_dados_lote_planilha(lote_final)
                 if isinstance(dados_planilha, dict) and 'massa' not in dados_planilha:
                     ano = str(row['DATA'].year)
                     dados_planilha = dados_planilha.get(ano) or list(dados_planilha.values())[-1]

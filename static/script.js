@@ -3,6 +3,8 @@
 // ---------------------------------------------
 (() => {
     let loadingModalInstance = null;
+    let htmxLoadingTimer = null;
+    let htmxModalShown = false;
 
     const getLoadingEls = () => {
         const modalEl = document.getElementById('globalLoadingModal');
@@ -45,18 +47,33 @@
         hide();
     };
 
-    // HTMX: mostra enquanto carrega partials
-    document.addEventListener('htmx:beforeRequest', () => {
-        show('Carregando...', 'Atualizando a tela.');
+    // HTMX: só mostra modal se a requisição demorar um pouco.
+    document.addEventListener('htmx:beforeRequest', (event) => {
+        const path = event?.detail?.requestConfig?.path || '';
+        const isQualidade = path.includes('/qualidade');
+        const title = isQualidade ? 'Carregando página...' : 'Carregando...';
+        const subtitle = isQualidade ? 'Consultando dados da listagem.' : 'Atualizando a tela.';
+
+        clearTimeout(htmxLoadingTimer);
+        htmxLoadingTimer = setTimeout(() => {
+            show(title, subtitle);
+            htmxModalShown = true;
+        }, 180);
     });
 
     document.addEventListener('htmx:afterRequest', () => {
-        hide();
+        clearTimeout(htmxLoadingTimer);
+        if (htmxModalShown) {
+            hide();
+            htmxModalShown = false;
+        }
     });
 
     document.addEventListener('htmx:responseError', () => {
+        clearTimeout(htmxLoadingTimer);
         show('Erro ao carregar', 'Tente novamente.');
         setTimeout(hide, 1200);
+        htmxModalShown = false;
     });
 
     // Cliques em links/botÃµes que fazem refresh/ETL (data-loading="true")

@@ -353,6 +353,64 @@
                 </div>
             </div>
 
+            <div class="modern-card mb-2">
+                <div class="card-header-modern">
+                    <span><i class="fas fa-flask-vial me-2 text-success"></i>Propriedades Fisicas do Lote</span>
+                </div>
+                <div class="card-body-compact">
+                    <div class="table-responsive">
+                        <table class="specs-table text-success">
+                            <thead>
+                                <tr>
+                                    <th style="width: 20%">Propriedade</th>
+                                    <th class="text-center" style="width: 12%">Spec Min</th>
+                                    <th class="text-center" style="width: 12%">Spec Max</th>
+                                    <th class="text-center" style="width: 14%">Media</th>
+                                    <th class="text-center" style="width: 12%">Min</th>
+                                    <th class="text-center" style="width: 12%">Max</th>
+                                    <th class="text-center" style="width: 8%">n</th>
+                                    <th class="text-center" style="width: 10%">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for p in lote.propriedades_fisicas %}
+                                <tr>
+                                    <td class="fw-bold">{{ p.label }}</td>
+                                    <td class="text-center">{{ "%.2f"|format(p.spec_min) if p.tem_spec and p.spec_min is not none else '-' }}</td>
+                                    <td class="text-center">{{ "%.2f"|format(p.spec_max) if p.tem_spec and p.spec_max is not none else '-' }}</td>
+                                    <td class="text-center {% if p.fora_faixa %}value-alert fw-bold{% endif %}">
+                                        {% if p.media is not none %}
+                                            {% if p.fora_faixa %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
+                                            {{ "%.2f"|format(p.media) }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">{{ "%.2f"|format(p.min) if p.min is not none else '-' }}</td>
+                                    <td class="text-center">{{ "%.2f"|format(p.max) if p.max is not none else '-' }}</td>
+                                    <td class="text-center">{{ p.qtd }}</td>
+                                    <td class="text-center">
+                                        {% if p.media is none %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary border">Sem dado</span>
+                                        {% elif not p.tem_spec %}
+                                            <span class="badge bg-info bg-opacity-10 text-info border">Sem spec</span>
+                                        {% elif p.fora_faixa %}
+                                            <span class="badge bg-danger bg-opacity-10 text-danger border">Fora</span>
+                                        {% else %}
+                                            <span class="badge bg-success bg-opacity-10 text-success border">OK</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-muted x-small mt-2">
+                        Avaliacao por media do lote. Campos: dureza, densidade, abrasao, resiliencia, tensao de ruptura, alongamento e resistencia ao rasgo.
+                    </div>
+                </div>
+            </div>
+
             <div class="modern-card">
                 <div class="card-header-modern">
                     <div class="d-flex align-items-center">
