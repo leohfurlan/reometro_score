@@ -19,11 +19,21 @@ from sqlalchemy.orm import load_only
 
 # Configurações e Modelos
 from config import Config
-from services.config_manager import carregar_regras_acao, salvar_regras_acao, salvar_configuracao
+from services.config_manager import (
+    carregar_configuracoes,
+    carregar_regras_acao,
+    salvar_regras_acao,
+    salvar_configuracao,
+)
 from services.learning_service import ensinar_lote
 from services.report_service import gerar_estrutura_relatorio
 from models.score_versioning import ScoreResultado
 from models.formula import Formula, FormulaItem
+try:
+    from services.simulador_ia_service import SimuladorIAService
+except Exception as e:
+    SimuladorIAService = None
+    print(f"Aviso: Servico de simulacao IA indisponivel: {e}")
 
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
@@ -122,6 +132,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+# Inicializa o cache cedo para ficar disponivel durante o bootstrap.
+cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
 # Cria o banco de dados na primeira execução se não existir
 with app.app_context():
@@ -302,9 +315,6 @@ else:
     print("⚠️ Aviso: Planilha do SharePoint não configurada. Use 'Atualizar Dados' para sincronizar.")
 
 carregar_referencias_estaticas()
-
-# Inicializa o gerenciador com TTL de 30 min e Max 500MB
-cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
 
 
@@ -625,6 +635,7 @@ def pagina_config():
     
     # === PARTE 1: CONFIGURAÇÃO DE MATERIAIS ===
     regras_acao = carregar_regras_acao()
+    configs_massas = carregar_configuracoes()
 
     query = request.args.get('q', '').strip().upper()
     filtro_tipo = request.args.get('tipo', '')
@@ -728,6 +739,7 @@ def pagina_config():
         'config.html', 
         # Dados Materiais
         produtos=produtos_paginados,
+        configs_massas=configs_massas,
         regras_acao=regras_acao,
         query=query, filtro_tipo=filtro_tipo, filtro_status=filtro_status,
         pagina_atual_mat=page_mat, total_paginas_mat=total_paginas_mat, total_itens_mat=total_itens,
@@ -874,6 +886,17 @@ def salvar_config():
     def i(val): return int(val) if val and val.strip() else 0
     
     specs = {}
+    cfg_atual_produto = (carregar_configuracoes().get(str(cod), {}) or {})
+    if isinstance(cfg_atual_produto, dict):
+        for chave_custom in (
+            'regra_abrasao_5n',
+            'abrasao_5n_dureza_min',
+            'abrasao_5n_dureza_max',
+            'abrasao_metodologia_5n_dureza_min',
+            'abrasao_metodologia_5n_dureza_max',
+        ):
+            if chave_custom in cfg_atual_produto:
+                specs[chave_custom] = cfg_atual_produto[chave_custom]
     
     # --- 1. CAPTURA DE CABEÇALHO (TEMP/TEMPO) ---
     # Captura Cinza
@@ -904,6 +927,16 @@ def salvar_config():
     tempo_baixa = f(request.form.get('baixa_tempo_total'))
     if t_baixa: specs['baixa_temp_padrao'] = t_baixa
     if tempo_baixa: specs['baixa_tempo_total'] = tempo_baixa
+
+    # Regra opcional da metodologia de abrasao 5 N (se vier da UI)
+    ab5n_min = f(request.form.get('abrasao_5n_dureza_min'))
+    ab5n_max = f(request.form.get('abrasao_5n_dureza_max'))
+    if ab5n_min is not None or ab5n_max is not None:
+        regra_existente = specs.get('regra_abrasao_5n', {}) if isinstance(specs.get('regra_abrasao_5n'), dict) else {}
+        specs['regra_abrasao_5n'] = {
+            'dureza_min': ab5n_min if ab5n_min is not None else regra_existente.get('dureza_min', 40.0),
+            'dureza_max': ab5n_max if ab5n_max is not None else regra_existente.get('dureza_max', 50.0),
+        }
 
     # --- 2. CAPTURA DE PARÂMETROS (LIMITES) ---
     params = ['Ts2', 'T90', 'Viscosidade']
@@ -961,6 +994,58 @@ def salvar_config():
                 "min": min_b if min_b is not None else 0, "alvo": alvo_b if alvo_b is not None else 0,
                 "max": max_b if max_b is not None else 0, "peso": peso_b
             }
+
+    # --- 3. ESPECIFICACOES DE PROPRIEDADES FISICAS ---
+    def add_spec_fisica(nome, min_v=None, max_v=None):
+        if min_v is None and max_v is None:
+            return
+        specs[f"baixa_{nome}"] = {
+            "min": min_v,
+            "alvo": None,
+            "max": max_v,
+            "peso": 0
+        }
+
+    # Min/Max
+    add_spec_fisica(
+        "Dureza",
+        f(request.form.get("fisica_Dureza_min")),
+        f(request.form.get("fisica_Dureza_max")),
+    )
+    add_spec_fisica(
+        "Densidade",
+        f(request.form.get("fisica_Densidade_min")),
+        f(request.form.get("fisica_Densidade_max")),
+    )
+    add_spec_fisica(
+        "Resiliencia",
+        f(request.form.get("fisica_Resiliencia_min")),
+        f(request.form.get("fisica_Resiliencia_max")),
+    )
+
+    # Apenas Max
+    add_spec_fisica(
+        "Abrasao",
+        None,
+        f(request.form.get("fisica_Abrasao_max")),
+    )
+
+    # Apenas Min
+    add_spec_fisica(
+        "TensaoRuptura",
+        f(request.form.get("fisica_TensaoRuptura_min")),
+        None,
+    )
+    add_spec_fisica(
+        "Alongamento",
+        f(request.form.get("fisica_Alongamento_min")),
+        None,
+    )
+    add_spec_fisica(
+        "Rasgo",
+        f(request.form.get("fisica_Rasgo_min")),
+        None,
+    )
 
     salvar_configuracao(cod, specs)
     carregar_referencias_estaticas()
@@ -1380,6 +1465,72 @@ def _resumo_status_propriedades_fisicas(props):
     return resumo
 
 
+def _obter_regra_abrasao_5n(cod_sankhya):
+    """
+    Busca no config_massas.json os limites de dureza para metodologia de abrasao 5 N.
+    Fallback padrao: min 40 / max 50 Shore A.
+    """
+    regra = {'dureza_min': 40.0, 'dureza_max': 50.0}
+    try:
+        cfg = carregar_configuracoes().get(str(cod_sankhya), {}) or {}
+        if not isinstance(cfg, dict):
+            return regra
+
+        bloco = cfg.get('regra_abrasao_5n') if isinstance(cfg.get('regra_abrasao_5n'), dict) else {}
+
+        min_candidates = [
+            bloco.get('dureza_min'),
+            bloco.get('min'),
+            cfg.get('abrasao_5n_dureza_min'),
+            cfg.get('abrasao_metodologia_5n_dureza_min'),
+        ]
+        max_candidates = [
+            bloco.get('dureza_max'),
+            bloco.get('max'),
+            cfg.get('abrasao_5n_dureza_max'),
+            cfg.get('abrasao_metodologia_5n_dureza_max'),
+        ]
+
+        for v in min_candidates:
+            fv = _to_float_or_none(v)
+            if fv is not None:
+                regra['dureza_min'] = fv
+                break
+
+        for v in max_candidates:
+            fv = _to_float_or_none(v)
+            if fv is not None:
+                regra['dureza_max'] = fv
+                break
+    except Exception:
+        pass
+
+    return regra
+
+
+def _usa_metodologia_abrasao_5n(props, regra_abrasao_5n=None):
+    """
+    abrasao usa metodologia 5 N quando a especificacao de dureza do composto
+    estiver dentro da faixa configurada.
+    """
+    prop_dureza = next((p for p in props if p.get('key') == 'dureza'), None)
+    if not prop_dureza:
+        return False
+
+    spec_min = _to_float_or_none(prop_dureza.get('spec_min'))
+    spec_max = _to_float_or_none(prop_dureza.get('spec_max'))
+    if spec_min is None or spec_max is None:
+        return False
+
+    regra = regra_abrasao_5n or {'dureza_min': 40.0, 'dureza_max': 50.0}
+    ref_min = _to_float_or_none(regra.get('dureza_min'))
+    ref_max = _to_float_or_none(regra.get('dureza_max'))
+    if ref_min is None or ref_max is None:
+        ref_min, ref_max = 40.0, 50.0
+
+    return spec_min >= ref_min and spec_max <= ref_max
+
+
 @app.route('/relatorios')
 @login_required
 def pagina_relatorios():
@@ -1426,6 +1577,7 @@ def detalhes_lotes_massa(cod_sankhya):
     
     # --- Lógica de Ordenação e Filtro da Lista de Lotes ---
     lotes_lista = list(massa_node['lotes'].values())
+    regra_abrasao_5n = _obter_regra_abrasao_5n(cod_sankhya)
     
     sort_by = request.args.get('sort', 'data')
     order = request.args.get('order', 'desc')
@@ -1439,6 +1591,8 @@ def detalhes_lotes_massa(cod_sankhya):
         props = _calcular_resumo_propriedades_fisicas(lote.get('batches', []))
         lote['propriedades_fisicas'] = props
         lote['resumo_props_fisicas'] = _resumo_status_propriedades_fisicas(props)
+        lote['metodologia_abrasao_5n'] = _usa_metodologia_abrasao_5n(props, regra_abrasao_5n)
+        lote['regra_abrasao_5n'] = regra_abrasao_5n
     
     # Ordenação
     reverse = (order == 'desc')
@@ -1542,7 +1696,12 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
     }
 
     # 5. Resumo e avaliacao das propriedades fisicas do lote
+    regra_abrasao_5n = _obter_regra_abrasao_5n(cod_sankhya)
     dados_lote['propriedades_fisicas'] = _calcular_resumo_propriedades_fisicas(ensaios_do_lote)
+    dados_lote['metodologia_abrasao_5n'] = _usa_metodologia_abrasao_5n(
+        dados_lote['propriedades_fisicas'], regra_abrasao_5n
+    )
+    dados_lote['regra_abrasao_5n'] = regra_abrasao_5n
 
     return render_template(
         'detalhe_lote.html', 
@@ -1556,6 +1715,127 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
 
 
 # --- ROTAS DE FORMULAÇÃO ---
+def _normalizar_chave_mp(chave):
+    raw = str(chave or '').strip().lower()
+    if not raw:
+        return None
+
+    if raw.startswith('mp_'):
+        raw = raw[3:]
+
+    if not raw.isdigit():
+        return None
+
+    return f"mp_{int(raw)}"
+
+
+def _ingredientes_da_formula(formula):
+    ingredientes = {}
+    for item in formula.itens:
+        chave = _normalizar_chave_mp(item.cd_materia_prima)
+        phr = _to_float_or_none(item.qt_phr)
+        if not chave or phr is None:
+            continue
+        ingredientes[chave] = float(phr)
+    return ingredientes
+
+
+def _parse_ingredientes_payload(payload):
+    saida = {}
+    if not isinstance(payload, dict):
+        return saida
+
+    for chave, valor in payload.items():
+        chave_norm = _normalizar_chave_mp(chave)
+        phr = _to_float_or_none(valor)
+        if not chave_norm or phr is None:
+            continue
+        saida[chave_norm] = float(phr)
+
+    return saida
+
+
+@app.route('/api/xai/treinar', methods=['POST'])
+@login_required
+def api_xai_treinar():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if SimuladorIAService is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de IA indisponivel. Verifique as dependencias xgboost/shap.'
+        }), 503
+
+    try:
+        resultado = SimuladorIAService.treinar_modelo()
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as e:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha no treinamento: {e}'}), 500
+
+
+@app.route('/api/xai/simular/<int:cd_produto>', methods=['POST'])
+@login_required
+def api_xai_simular_formula(cd_produto):
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if SimuladorIAService is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de IA indisponivel. Verifique as dependencias xgboost/shap.'
+        }), 503
+
+    formula = Formula.query.get(cd_produto)
+    if not formula:
+        return jsonify({'status': 'erro', 'mensagem': 'Formula nao encontrada.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    usar_formula_base_raw = payload.get('usar_formula_base', True)
+    if isinstance(usar_formula_base_raw, str):
+        usar_formula_base = usar_formula_base_raw.strip().lower() not in ('0', 'false', 'no', 'off')
+    else:
+        usar_formula_base = bool(usar_formula_base_raw)
+
+    ingredientes = _ingredientes_da_formula(formula) if usar_formula_base else {}
+    ajustes = _parse_ingredientes_payload(payload.get('ingredientes', {}))
+    ingredientes.update(ajustes)
+
+    if not ingredientes:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Nenhum ingrediente valido foi informado para simulacao.'
+        }), 400
+
+    try:
+        resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+    except Exception as e:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha na simulacao: {e}'}), 500
+
+    if isinstance(resultado, dict) and resultado.get('erro'):
+        return jsonify({'status': 'erro', 'mensagem': resultado.get('erro')}), 400
+
+    impactos = (resultado or {}).get('impacto_ingredientes') or {}
+    impactos_ordenados = sorted(impactos.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    return jsonify({
+        'status': 'sucesso',
+        'cd_produto': cd_produto,
+        'ingredientes_utilizados': ingredientes,
+        'propriedades_estimadas': {
+            'dureza': {
+                'valor': (resultado or {}).get('dureza_prevista'),
+                'unidade': (resultado or {}).get('unidade', 'Shore A')
+            }
+        },
+        'xai': {
+            'base_value': (resultado or {}).get('base_value'),
+            'impacto_ingredientes': dict(impactos_ordenados)
+        }
+    }), 200
+
+
 @app.route('/formulas')
 @login_required
 def lista_formulas():
@@ -1575,7 +1855,8 @@ def detalhe_formula(cd_produto):
     return render_template(
         'detalhe_formula.html', 
         formula=formula,
-        catalogo=catalogo
+        catalogo=catalogo,
+        simulador_ia_disponivel=(SimuladorIAService is not None)
     )
 
 if __name__ == '__main__':

@@ -11,6 +11,16 @@
     <td class="text-center" style="min-width: 360px;">
         <div class="d-flex flex-wrap gap-1 justify-content-center">
             {% for p in lote.propriedades_fisicas %}
+                {% if p.key == 'densidade' %}
+                    {% set fmt_badge = "%.3f" %}
+                    {% set fmt_tooltip = "%.3f" %}
+                {% elif p.key in ['abrasao', 'resiliencia'] %}
+                    {% set fmt_badge = "%.0f" %}
+                    {% set fmt_tooltip = "%.0f" %}
+                {% else %}
+                    {% set fmt_badge = "%.1f" %}
+                    {% set fmt_tooltip = "%.2f" %}
+                {% endif %}
                 {% if p.status == 'ok' %}
                     {% set badge_cls = 'bg-success bg-opacity-10 text-success' %}
                 {% elif p.status == 'fora' %}
@@ -20,14 +30,23 @@
                 {% else %}
                     {% set badge_cls = 'bg-secondary bg-opacity-10 text-secondary' %}
                 {% endif %}
-                <span class="badge {{ badge_cls }} border" title="{{ p.label }}{% if p.media is not none %}: {{ '%.2f'|format(p.media) }} {{ p.unidade }}{% endif %}">
-                    {{ p.sigla }}: {{ "%.1f"|format(p.media) if p.media is not none else '-' }}
+                <span class="badge {{ badge_cls }} border" title="{{ p.label }}{% if p.media is not none %}: {{ fmt_tooltip|format(p.media) }} {{ p.unidade }}{% endif %}">
+                    {{ p.sigla }}: {{ fmt_badge|format(p.media) if p.media is not none else '-' }}
                 </span>
             {% endfor %}
         </div>
         <div class="small text-muted mt-1">
             OK {{ lote.resumo_props_fisicas.ok }} | Fora {{ lote.resumo_props_fisicas.fora }} | Sem spec {{ lote.resumo_props_fisicas.sem_spec }}
         </div>
+        {% if lote.metodologia_abrasao_5n %}
+        <div class="small text-primary mt-1">
+            <i class="fas fa-info-circle me-1"></i>
+            Abrasao: metodologia 5 N
+            {% if lote.regra_abrasao_5n %}
+                (dureza {{ "%.1f"|format(lote.regra_abrasao_5n.dureza_min) }} a {{ "%.1f"|format(lote.regra_abrasao_5n.dureza_max) }})
+            {% endif %}
+        </div>
+        {% endif %}
     </td>
     
     <td class="text-center">

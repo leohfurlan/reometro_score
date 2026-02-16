@@ -108,6 +108,7 @@
                         </th>
                         <th class="resizable-col">Perfis Ativos</th>
                         <th class="resizable-col">Status</th>
+                        <th class="resizable-col">Specs Físicas</th>
                         <th class="text-end pe-4">Ação</th>
                     </tr>
                 </thead>
@@ -143,6 +144,41 @@
                                 <span class="badge bg-light text-secondary border">Pendente</span>
                             {% endif %}
                         </td>
+                        <td>
+                            {% set perfis_fis_tbl = prod.perfis.get('baixa', {}) if prod.perfis else {} %}
+                            {% if not perfis_fis_tbl and prod.perfis %}
+                                {% set perfis_fis_tbl = prod.perfis.get('alta', {}) %}
+                            {% endif %}
+                            {% set t_dureza = perfis_fis_tbl.get('Dureza') or perfis_fis_tbl.get('dureza') %}
+                            {% set t_densidade = perfis_fis_tbl.get('Densidade') or perfis_fis_tbl.get('densidade') %}
+                            {% set t_resil = perfis_fis_tbl.get('Resiliencia') or perfis_fis_tbl.get('resiliencia') %}
+                            {% set t_abrasao = perfis_fis_tbl.get('Abrasao') or perfis_fis_tbl.get('abrasao') %}
+                            {% set t_tr = perfis_fis_tbl.get('TensaoRuptura') or perfis_fis_tbl.get('Tensao Ruptura') or perfis_fis_tbl.get('tensao_ruptura') %}
+                            {% set t_along = perfis_fis_tbl.get('Alongamento') or perfis_fis_tbl.get('alongamento') %}
+                            {% set t_rasgo = perfis_fis_tbl.get('Rasgo') or perfis_fis_tbl.get('rasgo') %}
+
+                            {% if t_dureza or t_densidade or t_resil or t_abrasao or t_tr or t_along or t_rasgo %}
+                                <div class="d-flex flex-wrap gap-1" style="max-width: 430px;">
+                                    {% if t_dureza and t_dureza.minimo is not none and t_dureza.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur {{ "%.0f"|format(t_dureza.minimo) }}-{{ "%.0f"|format(t_dureza.maximo) }}</span>{% endif %}
+                                    {% if t_dureza and t_dureza.minimo is not none and t_dureza.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur >= {{ "%.0f"|format(t_dureza.minimo) }}</span>{% endif %}
+                                    {% if t_dureza and t_dureza.maximo is not none and t_dureza.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur <= {{ "%.0f"|format(t_dureza.maximo) }}</span>{% endif %}
+
+                                    {% if t_densidade and t_densidade.minimo is not none and t_densidade.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens {{ "%.3f"|format(t_densidade.minimo) }}-{{ "%.3f"|format(t_densidade.maximo) }}</span>{% endif %}
+                                    {% if t_densidade and t_densidade.minimo is not none and t_densidade.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens >= {{ "%.3f"|format(t_densidade.minimo) }}</span>{% endif %}
+                                    {% if t_densidade and t_densidade.maximo is not none and t_densidade.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens <= {{ "%.3f"|format(t_densidade.maximo) }}</span>{% endif %}
+
+                                    {% if t_resil and t_resil.minimo is not none and t_resil.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Res {{ "%.0f"|format(t_resil.minimo) }}-{{ "%.0f"|format(t_resil.maximo) }}</span>{% endif %}
+                                    {% if t_resil and t_resil.minimo is not none and t_resil.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Res >= {{ "%.0f"|format(t_resil.minimo) }}</span>{% endif %}
+                                    {% if t_resil and t_resil.maximo is not none and t_resil.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Res <= {{ "%.0f"|format(t_resil.maximo) }}</span>{% endif %}
+                                    {% if t_abrasao and t_abrasao.maximo is not none %}<span class="badge bg-warning bg-opacity-10 text-warning border">Abr <= {{ "%.0f"|format(t_abrasao.maximo) }}</span>{% endif %}
+                                    {% if t_tr and t_tr.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">TR >= {{ "%.1f"|format(t_tr.minimo) }}</span>{% endif %}
+                                    {% if t_along and t_along.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">Along >= {{ "%.0f"|format(t_along.minimo) }}</span>{% endif %}
+                                    {% if t_rasgo and t_rasgo.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">Rasgo >= {{ "%.1f"|format(t_rasgo.minimo) }}</span>{% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
                         <td class="text-end pe-3">
                             <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
                                 <i class="fas fa-edit me-1"></i> Editar
@@ -152,7 +188,7 @@
                     {% endfor %}
                     {% if produtos|length == 0 %}
                     <tr>
-                        <td colspan="5" class="text-center py-5 text-muted bg-white">
+                        <td colspan="6" class="text-center py-5 text-muted bg-white">
                             <i class="fas fa-search fa-2x mb-3 opacity-25"></i><br>
                             Nenhum produto encontrado.
                         </td>
@@ -606,6 +642,21 @@
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
             <div class="modal-dialog modal-xl">
                 <form action="/salvar_config" method="POST">
+                    {% set cfg_prod = configs_massas.get(prod.cod_sankhya ~ '', {}) if configs_massas else {} %}
+                    {% set regra_ab5n = cfg_prod.get('regra_abrasao_5n', {}) if cfg_prod.get('regra_abrasao_5n') else {} %}
+                    {% set ab5n_min = regra_ab5n.get('dureza_min', regra_ab5n.get('min', cfg_prod.get('abrasao_5n_dureza_min', cfg_prod.get('abrasao_metodologia_5n_dureza_min', 40)))) %}
+                    {% set ab5n_max = regra_ab5n.get('dureza_max', regra_ab5n.get('max', cfg_prod.get('abrasao_5n_dureza_max', cfg_prod.get('abrasao_metodologia_5n_dureza_max', 50)))) %}
+                    {% set perfis_fis = prod.perfis.get('baixa', {}) if prod.perfis else {} %}
+                    {% if not perfis_fis and prod.perfis %}
+                        {% set perfis_fis = prod.perfis.get('alta', {}) %}
+                    {% endif %}
+                    {% set sp_dureza = perfis_fis.get('Dureza') or perfis_fis.get('dureza') %}
+                    {% set sp_densidade = perfis_fis.get('Densidade') or perfis_fis.get('densidade') %}
+                    {% set sp_resiliencia = perfis_fis.get('Resiliencia') or perfis_fis.get('resiliencia') %}
+                    {% set sp_abrasao = perfis_fis.get('Abrasao') or perfis_fis.get('abrasao') %}
+                    {% set sp_tensao = perfis_fis.get('TensaoRuptura') or perfis_fis.get('Tensao Ruptura') or perfis_fis.get('tensao_ruptura') %}
+                    {% set sp_alongamento = perfis_fis.get('Alongamento') or perfis_fis.get('alongamento') %}
+                    {% set sp_rasgo = perfis_fis.get('Rasgo') or perfis_fis.get('rasgo') %}
                     <div class="modal-content">
                         <div class="modal-header bg-light">
                             <div>
@@ -725,6 +776,86 @@
                                         <div class="col-3"><input type="number" min="0" max="10" class="form-control form-control-sm text-center text-primary fw-bold" name="baixa_{{ param }}_peso" value="{{ p_val.peso if p_val else 10 }}"></div>
                                     </div>
                                     {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="card mb-3 border-success border-opacity-25 shadow-sm">
+                                <div class="card-header bg-success bg-opacity-10 text-success fw-bold">
+                                    <i class="fas fa-vial me-2"></i>Especificacoes de Propriedades Fisicas
+                                </div>
+                                <div class="card-body p-2">
+                                    <div class="row g-1 fw-bold text-muted x-small text-center mb-1">
+                                        <div class="col-4 text-start ps-3">Propriedade</div>
+                                        <div class="col-4">Minimo</div>
+                                        <div class="col-4">Maximo</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Dureza (Shore A)</div>
+                                        <div class="col-4"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="fisica_Dureza_min" value="{{ sp_dureza.minimo if sp_dureza and sp_dureza.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="fisica_Dureza_max" value="{{ sp_dureza.maximo if sp_dureza and sp_dureza.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Densidade (g/cm3)</div>
+                                        <div class="col-4"><input type="number" step="0.001" class="form-control form-control-sm text-center" name="fisica_Densidade_min" value="{{ sp_densidade.minimo if sp_densidade and sp_densidade.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="0.001" class="form-control form-control-sm text-center" name="fisica_Densidade_max" value="{{ sp_densidade.maximo if sp_densidade and sp_densidade.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Resiliencia (%)</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Resiliencia_min" value="{{ sp_resiliencia.minimo if sp_resiliencia and sp_resiliencia.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Resiliencia_max" value="{{ sp_resiliencia.maximo if sp_resiliencia and sp_resiliencia.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Abrasao (mm3)</div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Abrasao_max" value="{{ sp_abrasao.maximo if sp_abrasao and sp_abrasao.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Tensao de Ruptura (MPa)</div>
+                                        <div class="col-4"><input type="number" step="0.1" class="form-control form-control-sm text-center" name="fisica_TensaoRuptura_min" value="{{ sp_tensao.minimo if sp_tensao and sp_tensao.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Alongamento da Ruptura (%)</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Alongamento_min" value="{{ sp_alongamento.minimo if sp_alongamento and sp_alongamento.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-0 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Resistencia ao Rasgo (N/mm)</div>
+                                        <div class="col-4"><input type="number" step="0.1" class="form-control form-control-sm text-center" name="fisica_Rasgo_min" value="{{ sp_rasgo.minimo if sp_rasgo and sp_rasgo.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-2 border-info border-opacity-25 shadow-sm">
+                                <div class="card-header bg-info bg-opacity-10 text-info fw-bold d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-ruler-combined me-2"></i>Regra da Abrasao (5 N)</span>
+                                    <span class="badge bg-white text-info border border-info">Configuravel</span>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-muted fw-bold mb-1">Dureza Min (Shore A)</label>
+                                            <input type="number" step="0.1" class="form-control form-control-sm" name="abrasao_5n_dureza_min" value="{{ ab5n_min }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-muted fw-bold mb-1">Dureza Max (Shore A)</label>
+                                            <input type="number" step="0.1" class="form-control form-control-sm" name="abrasao_5n_dureza_max" value="{{ ab5n_max }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="small text-muted">
+                                                A abrasao sera sinalizada como <span class="fw-bold text-primary">metodologia 5 N</span>
+                                                quando a faixa de dureza da especificacao estiver dentro desses limites.
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -374,20 +374,32 @@
                             </thead>
                             <tbody>
                                 {% for p in lote.propriedades_fisicas %}
+                                {% if p.key == 'densidade' %}
+                                    {% set fmt_val = "%.3f" %}
+                                {% elif p.key in ['abrasao', 'resiliencia'] %}
+                                    {% set fmt_val = "%.0f" %}
+                                {% else %}
+                                    {% set fmt_val = "%.2f" %}
+                                {% endif %}
                                 <tr>
-                                    <td class="fw-bold">{{ p.label }}</td>
-                                    <td class="text-center">{{ "%.2f"|format(p.spec_min) if p.tem_spec and p.spec_min is not none else '-' }}</td>
-                                    <td class="text-center">{{ "%.2f"|format(p.spec_max) if p.tem_spec and p.spec_max is not none else '-' }}</td>
+                                    <td class="fw-bold">
+                                        {{ p.label }}
+                                        {% if p.key == 'abrasao' and lote.metodologia_abrasao_5n %}
+                                            <span class="badge bg-primary bg-opacity-10 text-primary border ms-1">5 N</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">{{ fmt_val|format(p.spec_min) if p.tem_spec and p.spec_min is not none else '-' }}</td>
+                                    <td class="text-center">{{ fmt_val|format(p.spec_max) if p.tem_spec and p.spec_max is not none else '-' }}</td>
                                     <td class="text-center {% if p.fora_faixa %}value-alert fw-bold{% endif %}">
                                         {% if p.media is not none %}
                                             {% if p.fora_faixa %}<i class="fas fa-exclamation-triangle me-1"></i>{% endif %}
-                                            {{ "%.2f"|format(p.media) }}
+                                            {{ fmt_val|format(p.media) }}
                                         {% else %}
                                             -
                                         {% endif %}
                                     </td>
-                                    <td class="text-center">{{ "%.2f"|format(p.min) if p.min is not none else '-' }}</td>
-                                    <td class="text-center">{{ "%.2f"|format(p.max) if p.max is not none else '-' }}</td>
+                                    <td class="text-center">{{ fmt_val|format(p.min) if p.min is not none else '-' }}</td>
+                                    <td class="text-center">{{ fmt_val|format(p.max) if p.max is not none else '-' }}</td>
                                     <td class="text-center">{{ p.qtd }}</td>
                                     <td class="text-center">
                                         {% if p.media is none %}
@@ -408,6 +420,17 @@
                     <div class="text-muted x-small mt-2">
                         Avaliacao por media do lote. Campos: dureza, densidade, abrasao, resiliencia, tensao de ruptura, alongamento e resistencia ao rasgo.
                     </div>
+                    {% if lote.metodologia_abrasao_5n %}
+                    <div class="text-primary x-small mt-1">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Regra aplicada: abrasao com metodologia de 5 N
+                        {% if lote.regra_abrasao_5n %}
+                            (dureza entre {{ "%.1f"|format(lote.regra_abrasao_5n.dureza_min) }} e {{ "%.1f"|format(lote.regra_abrasao_5n.dureza_max) }} Shore A).
+                        {% else %}
+                            (faixa de dureza configurada).
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
             </div>
 

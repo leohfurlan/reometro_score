@@ -149,3 +149,7 @@ static/: CSS e JavaScript.
 tools/: Scripts auxiliares de manutenção e ETL.
 
 Desenvolvido para uso interno no Laboratório de Qualidade.
+
+## Documentacao adicional
+
+- Motor XAI (treinamento, simulacao e explicabilidade): `docs/motor_xai.md`
