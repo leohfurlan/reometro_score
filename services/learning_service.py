@@ -1,6 +1,8 @@
 import json
 import os
 
+from services.local_learning_repo import upsert
+
 ARQUIVO_APRENDIZADO = "aprendizado_lotes.json"
 
 def carregar_aprendizado():
@@ -26,27 +28,9 @@ def carregar_aprendizado():
         print(f"⚠️ Erro ao ler aprendizado: {e}")
         return {}
 
-def ensinar_lote(string_original, lote_correto, nome_massa):
-    dados = carregar_aprendizado()
-    
-    # Chave é sempre a string suja original NORMALIZADA
-    # Isso deve bater com o .strip().upper() do ETL
+def ensinar_lote(string_original, lote_correto, nome_massa, usuario=None):
     key = str(string_original).strip().upper()
-    
-    # Se o lote correto vier vazio, usa a chave (mas limpa)
-    if not lote_correto:
-        lote_correto = key
-        
-    dados[key] = {
-        'lote_real': str(lote_correto).strip().upper(),
-        'massa': str(nome_massa).strip().upper()
-    }
-    
-    try:
-        with open(ARQUIVO_APRENDIZADO, 'w', encoding='utf-8') as f:
-            json.dump(dados, f, indent=4, ensure_ascii=False)
-        print(f"🧠 Aprendizado salvo: '{key}' -> Lote '{lote_correto}' / Massa '{nome_massa}'")
-        return True
-    except Exception as e:
-        print(f"❌ Erro ao salvar aprendizado: {e}")
-        return False
+    lote = (str(lote_correto).strip().upper() if lote_correto else key)
+    massa = str(nome_massa).strip().upper()
+    upsert(key, lote, massa, usuario=usuario)
+    return True

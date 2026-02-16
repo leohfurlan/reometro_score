@@ -59,6 +59,22 @@
         background: #fbfcfe;
     }
 
+    .mp-search-wrap {
+        position: relative;
+    }
+
+    .mp-suggestions {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        right: 0;
+        max-height: 220px;
+        overflow-y: auto;
+        z-index: 40;
+        border: 1px solid #d8dee8;
+        border-radius: 10px;
+    }
+
     .sim-btn-main {
         background: var(--sim-accent);
         border-color: var(--sim-accent);
@@ -177,9 +193,29 @@
     const shapChartEl = document.getElementById('shapChart');
     const shapEmptyEl = document.getElementById('shapChartEmpty');
 
+    function normalizeTerm(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase()
+            .trim();
+    }
+
+    const materiasPrimasNormalizadas = materiasPrimas
+        .map((item) => ({
+            codigo: String(item.codigo || '').trim(),
+            nome: String(item.nome || '').trim(),
+            nomeBusca: normalizeTerm(item.nome)
+        }))
+        .filter((item) => item.codigo && item.nome);
+
+    const mpPorCodigo = new Map(
+        materiasPrimasNormalizadas.map((item) => [item.codigo, item])
+    );
+
     const nomePorChave = new Map(
-        materiasPrimas.map((item) => [
-            `mp_${String(item.codigo).trim()}`,
+        materiasPrimasNormalizadas.map((item) => [
+            `mp_${item.codigo}`,
             `${item.nome} (${item.codigo})`
         ])
     );
@@ -212,7 +248,7 @@
             ? '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Simulando...'
             : '<i class="fas fa-flask me-2"></i> Simular Resultado';
 
-        containerEl.querySelectorAll('select, input, button.btn-remover').forEach((el) => {
+        containerEl.querySelectorAll('input, button.btn-remover, .mp-suggestion-item').forEach((el) => {
             el.disabled = isLoading;
         });
     }
@@ -228,23 +264,86 @@
         phrTotalEl.textContent = formatNumber(total, 2);
     }
 
-    function createSelectElement() {
-        const selectEl = document.createElement('select');
-        selectEl.className = 'form-select mp-select';
+    function filtrarMateriasPrimas(codigoFiltro, descricaoFiltro) {
+        const cod = String(codigoFiltro || '').trim();
+        const desc = normalizeTerm(descricaoFiltro);
 
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = 'Selecione uma materia-prima';
-        selectEl.appendChild(placeholder);
+        return materiasPrimasNormalizadas
+            .filter((item) => {
+                if (cod && !item.codigo.includes(cod)) {
+                    return false;
+                }
+                if (desc && !item.nomeBusca.includes(desc)) {
+                    return false;
+                }
+                return true;
+            })
+            .slice(0, 20);
+    }
 
-        materiasPrimas.forEach((mp) => {
-            const option = document.createElement('option');
-            option.value = String(mp.codigo);
-            option.textContent = `${mp.nome} (${mp.codigo})`;
-            selectEl.appendChild(option);
+    function hideSuggestions(row) {
+        const suggestionsEl = row?.querySelector('.mp-suggestions');
+        if (!suggestionsEl) {
+            return;
+        }
+        suggestionsEl.classList.add('d-none');
+        suggestionsEl.replaceChildren();
+    }
+
+    function renderSuggestions(row) {
+        if (!row) {
+            return;
+        }
+
+        const codeInputEl = row.querySelector('.mp-code-input');
+        const searchInputEl = row.querySelector('.mp-search-input');
+        const suggestionsEl = row.querySelector('.mp-suggestions');
+        if (!codeInputEl || !searchInputEl || !suggestionsEl) {
+            return;
+        }
+
+        const codigoFiltro = codeInputEl.value.trim();
+        const descricaoFiltro = searchInputEl.value.trim();
+        if (!codigoFiltro && !descricaoFiltro) {
+            hideSuggestions(row);
+            return;
+        }
+
+        const resultados = filtrarMateriasPrimas(codigoFiltro, descricaoFiltro);
+        suggestionsEl.replaceChildren();
+
+        if (!resultados.length) {
+            const emptyItem = document.createElement('div');
+            emptyItem.className = 'list-group-item small text-muted';
+            emptyItem.textContent = 'Nenhuma matéria-prima encontrada.';
+            suggestionsEl.appendChild(emptyItem);
+            suggestionsEl.classList.remove('d-none');
+            return;
+        }
+
+        resultados.forEach((item) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'list-group-item list-group-item-action mp-suggestion-item';
+            btn.dataset.codigo = item.codigo;
+            btn.dataset.nome = item.nome;
+            btn.textContent = `${item.nome} (${item.codigo})`;
+            suggestionsEl.appendChild(btn);
         });
 
-        return selectEl;
+        suggestionsEl.classList.remove('d-none');
+    }
+
+    function selecionarMateriaPrima(row, codigo, nome) {
+        const codeInputEl = row?.querySelector('.mp-code-input');
+        const searchInputEl = row?.querySelector('.mp-search-input');
+        if (!codeInputEl || !searchInputEl) {
+            return;
+        }
+
+        codeInputEl.value = String(codigo || '').trim();
+        searchInputEl.value = String(nome || '').trim();
+        hideSuggestions(row);
     }
 
     function createIngredienteRow() {
@@ -254,16 +353,41 @@
         const inner = document.createElement('div');
         inner.className = 'row g-2 align-items-end';
 
+        const colCodigo = document.createElement('div');
+        colCodigo.className = 'col-12 col-md-3';
+        const labelCodigo = document.createElement('label');
+        labelCodigo.className = 'form-label small text-muted mb-1';
+        labelCodigo.textContent = 'Codigo MP';
+        const inputCodigo = document.createElement('input');
+        inputCodigo.type = 'text';
+        inputCodigo.className = 'form-control mp-code-input';
+        inputCodigo.placeholder = 'Ex: 105';
+        inputCodigo.inputMode = 'numeric';
+        inputCodigo.autocomplete = 'off';
+        colCodigo.appendChild(labelCodigo);
+        colCodigo.appendChild(inputCodigo);
+
         const colMp = document.createElement('div');
-        colMp.className = 'col-12 col-md-7';
+        colMp.className = 'col-12 col-md-5';
         const labelMp = document.createElement('label');
         labelMp.className = 'form-label small text-muted mb-1';
-        labelMp.textContent = 'Materia-prima';
+        labelMp.textContent = 'Descricao MP (filtro)';
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'mp-search-wrap';
+        const inputMp = document.createElement('input');
+        inputMp.type = 'text';
+        inputMp.className = 'form-control mp-search-input';
+        inputMp.placeholder = 'Digite o nome da MP...';
+        inputMp.autocomplete = 'off';
+        const suggestions = document.createElement('div');
+        suggestions.className = 'list-group mp-suggestions d-none';
+        searchWrap.appendChild(inputMp);
+        searchWrap.appendChild(suggestions);
         colMp.appendChild(labelMp);
-        colMp.appendChild(createSelectElement());
+        colMp.appendChild(searchWrap);
 
         const colPhr = document.createElement('div');
-        colPhr.className = 'col-8 col-md-3';
+        colPhr.className = 'col-8 col-md-2';
         const labelPhr = document.createElement('label');
         labelPhr.className = 'form-label small text-muted mb-1';
         labelPhr.textContent = 'PHR';
@@ -284,6 +408,7 @@
         btnRemove.innerHTML = '<i class="fas fa-trash"></i>';
         colRemove.appendChild(btnRemove);
 
+        inner.appendChild(colCodigo);
         inner.appendChild(colMp);
         inner.appendChild(colPhr);
         inner.appendChild(colRemove);
@@ -301,10 +426,20 @@
         const ingredientes = {};
 
         containerEl.querySelectorAll('.ingrediente-row').forEach((row) => {
-            const codigo = row.querySelector('.mp-select')?.value?.trim();
+            const codigoInput = row.querySelector('.mp-code-input')?.value?.trim();
+            const descricaoInput = row.querySelector('.mp-search-input')?.value?.trim();
             const phr = Number(row.querySelector('.phr-input')?.value);
 
-            if (!codigo || !Number.isFinite(phr) || phr <= 0) {
+            let codigo = codigoInput;
+            if (!codigo && descricaoInput) {
+                const descricaoNorm = normalizeTerm(descricaoInput);
+                const exatos = materiasPrimasNormalizadas.filter((item) => item.nomeBusca === descricaoNorm);
+                if (exatos.length === 1) {
+                    codigo = exatos[0].codigo;
+                }
+            }
+
+            if (!codigo || !mpPorCodigo.has(codigo) || !Number.isFinite(phr) || phr <= 0) {
                 return;
             }
 
@@ -438,6 +573,15 @@
     btnAddEl.addEventListener('click', addIngredienteRow);
 
     containerEl.addEventListener('click', (event) => {
+        const suggestionBtn = event.target.closest('.mp-suggestion-item');
+        if (suggestionBtn) {
+            const row = suggestionBtn.closest('.ingrediente-row');
+            if (row) {
+                selecionarMateriaPrima(row, suggestionBtn.dataset.codigo, suggestionBtn.dataset.nome);
+            }
+            return;
+        }
+
         const btn = event.target.closest('.btn-remover');
         if (!btn) {
             return;
@@ -449,8 +593,10 @@
         }
 
         if (containerEl.children.length === 1) {
-            row.querySelector('.mp-select').value = '';
+            row.querySelector('.mp-code-input').value = '';
+            row.querySelector('.mp-search-input').value = '';
             row.querySelector('.phr-input').value = '';
+            hideSuggestions(row);
         } else {
             row.remove();
         }
@@ -461,7 +607,47 @@
     containerEl.addEventListener('input', (event) => {
         if (event.target.classList.contains('phr-input')) {
             updatePhrTotal();
+            return;
         }
+
+        if (
+            event.target.classList.contains('mp-code-input') ||
+            event.target.classList.contains('mp-search-input')
+        ) {
+            const row = event.target.closest('.ingrediente-row');
+            renderSuggestions(row);
+        }
+    });
+
+    containerEl.addEventListener('focusin', (event) => {
+        if (
+            event.target.classList.contains('mp-code-input') ||
+            event.target.classList.contains('mp-search-input')
+        ) {
+            const row = event.target.closest('.ingrediente-row');
+            renderSuggestions(row);
+        }
+    });
+
+    containerEl.addEventListener('focusout', (event) => {
+        if (
+            event.target.classList.contains('mp-code-input') ||
+            event.target.classList.contains('mp-search-input')
+        ) {
+            const row = event.target.closest('.ingrediente-row');
+            setTimeout(() => {
+                if (row && !row.contains(document.activeElement)) {
+                    hideSuggestions(row);
+                }
+            }, 120);
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (containerEl.contains(event.target)) {
+            return;
+        }
+        containerEl.querySelectorAll('.ingrediente-row').forEach((row) => hideSuggestions(row));
     });
 
     formEl.addEventListener('submit', submitSimulacao);

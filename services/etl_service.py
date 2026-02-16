@@ -17,7 +17,7 @@ from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import aplicar_configuracoes_no_catalogo
-from services.learning_service import carregar_aprendizado
+from services.local_learning_repo import load_map as carregar_aprendizado_sqlite
 
 # --- VARIÁVEIS DE REFERÊNCIA (CACHE DO MÓDULO) ---
 _CATALOGO_CODIGO = {}
@@ -133,8 +133,8 @@ def carregar_referencias_estaticas():
                 _DE_PARA_CORRECOES = json.load(f)
         except: pass
 
-    _MAPA_APRENDIZADO = carregar_aprendizado()
-    print(f"   🧠 Memória carregada: {len(_MAPA_APRENDIZADO)} correções manuais.")
+    _MAPA_APRENDIZADO = carregar_aprendizado_sqlite()
+    print(f" Memória carregada (SQLite): {len(_MAPA_APRENDIZADO)} correções manuais.")
 
 def extrair_lote_da_string(texto_sujo):
     if not texto_sujo: return None, None

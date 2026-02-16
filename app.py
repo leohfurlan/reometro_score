@@ -69,6 +69,7 @@ def recarregar_cache_memoria():
         print("🔄 Recarregando cache em memória a partir do banco...")
         # Busca todos os dados ordenados
         todos_ensaios = EnsaioConsolidado.query.order_by(EnsaioConsolidado.data_hora.desc()).all()
+        todos_ensaios = aplicar_sobreposicao_local(todos_ensaios)
         
         if not todos_ensaios:
             print("⚠️ Banco de dados vazio. Cache não atualizado.")
@@ -278,9 +279,7 @@ def aplicar_sobreposicao_local(dados_brutos):
                 # APLICA A CORREÇÃO NO OBJETO EM MEMÓRIA
                 ensaio.lote = regra['lote']
                 
-                # Se tiver objeto de massa, atualiza a descrição visualmente
-                if ensaio.massa:
-                    ensaio.massa.descricao = regra['massa']
+                ensaio.massa_descricao = regra['massa']
                 
                 # Marca como corrigido manualmente
                 ensaio.metodo_identificacao = "MANUAL"
@@ -1274,19 +1273,7 @@ def salvar_correcao():
     time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     try:
-        conn = get_local_db()
-        cursor = conn.cursor()
-        
-        # INSERT OR REPLACE atualizado com as novas colunas
-        cursor.execute("""
-            INSERT OR REPLACE INTO aprendizado_local 
-            (chave_original, lote_novo, massa_nova, usuario_log, data_log)
-            VALUES (?, ?, ?, ?, ?)
-        """, (key_original, lote_clean, massa_clean, user_log, time_log))
-        
-        conn.commit()
-        conn.close()
-        
+        ensinar_lote(key_original, lote_clean, massa_clean, usuario=user_log)
         flash(f"✅ Regra salva! (Log: {user_log} às {time_log})", "success")
         
     except Exception as e:
