@@ -1,0 +1,487 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Simulador IA | ReoScore Vulcaflex{% endblock %}
+
+{% block content %}
+<style>
+    .simulador-wrapper {
+        --sim-accent: #d32f2f;
+        --sim-accent-dark: #b71c1c;
+        --sim-soft: #fff4f4;
+        --sim-border: #eceff3;
+    }
+
+    .sim-card {
+        border: 1px solid var(--sim-border);
+        border-radius: 16px;
+        box-shadow: 0 12px 32px rgba(20, 27, 45, 0.06);
+        background: #ffffff;
+    }
+
+    .sim-card .card-header {
+        border-bottom: 1px solid var(--sim-border);
+        background: #ffffff;
+        border-radius: 16px 16px 0 0;
+    }
+
+    .sim-kpi {
+        background: linear-gradient(140deg, #ffffff 0%, var(--sim-soft) 100%);
+        border: 1px solid #ffdcdc;
+        border-radius: 16px;
+        padding: 1.25rem;
+    }
+
+    .sim-kpi-label {
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        color: #6c757d;
+        margin-bottom: 0.35rem;
+    }
+
+    .sim-kpi-value {
+        font-size: clamp(2rem, 3vw, 2.9rem);
+        line-height: 1;
+        font-weight: 700;
+        color: var(--sim-accent-dark);
+    }
+
+    .sim-kpi-unit {
+        font-size: 1rem;
+        color: #495057;
+        margin-left: 0.35rem;
+    }
+
+    .ingrediente-row {
+        border: 1px solid var(--sim-border);
+        border-radius: 12px;
+        padding: 0.65rem;
+        background: #fbfcfe;
+    }
+
+    .sim-btn-main {
+        background: var(--sim-accent);
+        border-color: var(--sim-accent);
+        font-weight: 600;
+    }
+
+    .sim-btn-main:hover,
+    .sim-btn-main:focus {
+        background: var(--sim-accent-dark);
+        border-color: var(--sim-accent-dark);
+    }
+
+    #shapChart {
+        min-height: 410px;
+    }
+
+    .sim-empty-chart {
+        min-height: 410px;
+        border: 1px dashed #ccd4de;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: #6c757d;
+        background: #fafbfd;
+        padding: 1.25rem;
+    }
+</style>
+
+<div class="simulador-wrapper">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h2 class="mb-1">Simulador de Receita com IA</h2>
+            <p class="text-muted mb-0">Monte uma formulacao e veja previsao de dureza com explicabilidade SHAP.</p>
+        </div>
+        <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis px-3 py-2">P&D</span>
+    </div>
+
+    <div id="simuladorAlert" class="alert d-none" role="alert"></div>
+
+    <div class="row g-4">
+        <div class="col-12 col-xl-5">
+            <div class="card sim-card h-100">
+                <div class="card-header p-3">
+                    <h5 class="mb-0">Bancada de Formulacao</h5>
+                </div>
+                <div class="card-body p-3 p-lg-4">
+                    <form id="formSimulador" novalidate>
+                        <div id="ingredientesContainer" class="vstack gap-2"></div>
+
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
+                            <button type="button" id="btnAdicionarIngrediente" class="btn btn-outline-secondary">
+                                <i class="fas fa-plus me-1"></i> Adicionar Ingrediente
+                            </button>
+                            <small class="text-muted">PHR total: <strong id="phrTotal">0.00</strong></small>
+                        </div>
+
+                        <button type="submit" id="btnSimular" class="btn btn-danger sim-btn-main w-100 mt-4 py-3">
+                            <i class="fas fa-flask me-2"></i> Simular Resultado
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-7">
+            <div class="card sim-card mb-4">
+                <div class="card-header p-3">
+                    <h5 class="mb-0">Resultado da IA</h5>
+                </div>
+                <div class="card-body p-3 p-lg-4">
+                    <div class="sim-kpi">
+                        <div class="sim-kpi-label">Dureza prevista</div>
+                        <div class="d-flex align-items-end flex-wrap">
+                            <div id="previsaoValor" class="sim-kpi-value">--</div>
+                            <div id="previsaoUnidade" class="sim-kpi-unit">Shore A</div>
+                        </div>
+                        <div class="text-muted small mt-2" id="baseValueText">Base do modelo: --</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card sim-card">
+                <div class="card-header p-3">
+                    <h5 class="mb-0">Explicabilidade (SHAP)</h5>
+                </div>
+                <div class="card-body p-3 p-lg-4">
+                    <div id="shapChartEmpty" class="sim-empty-chart">
+                        Execute uma simulacao para visualizar o impacto de cada materia-prima.
+                    </div>
+                    <div id="shapChart" class="d-none"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(() => {
+    const materiasPrimas = {{ materias_primas | tojson }};
+    const simuladorDisponivel = {{ simulador_ia_disponivel | tojson }};
+
+    const formEl = document.getElementById('formSimulador');
+    const containerEl = document.getElementById('ingredientesContainer');
+    const btnAddEl = document.getElementById('btnAdicionarIngrediente');
+    const btnSubmitEl = document.getElementById('btnSimular');
+    const alertEl = document.getElementById('simuladorAlert');
+    const phrTotalEl = document.getElementById('phrTotal');
+
+    const previsaoValorEl = document.getElementById('previsaoValor');
+    const previsaoUnidadeEl = document.getElementById('previsaoUnidade');
+    const baseValueTextEl = document.getElementById('baseValueText');
+
+    const shapChartEl = document.getElementById('shapChart');
+    const shapEmptyEl = document.getElementById('shapChartEmpty');
+
+    const nomePorChave = new Map(
+        materiasPrimas.map((item) => [
+            `mp_${String(item.codigo).trim()}`,
+            `${item.nome} (${item.codigo})`
+        ])
+    );
+
+    function formatNumber(value, digits = 2) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) {
+            return '--';
+        }
+        return num.toLocaleString('pt-BR', {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits
+        });
+    }
+
+    function showAlert(type, message) {
+        alertEl.className = `alert alert-${type}`;
+        alertEl.textContent = message;
+        alertEl.classList.remove('d-none');
+    }
+
+    function hideAlert() {
+        alertEl.classList.add('d-none');
+    }
+
+    function setLoadingState(isLoading) {
+        btnSubmitEl.disabled = isLoading;
+        btnAddEl.disabled = isLoading;
+        btnSubmitEl.innerHTML = isLoading
+            ? '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Simulando...'
+            : '<i class="fas fa-flask me-2"></i> Simular Resultado';
+
+        containerEl.querySelectorAll('select, input, button.btn-remover').forEach((el) => {
+            el.disabled = isLoading;
+        });
+    }
+
+    function updatePhrTotal() {
+        let total = 0;
+        containerEl.querySelectorAll('.phr-input').forEach((input) => {
+            const val = Number(input.value);
+            if (Number.isFinite(val) && val > 0) {
+                total += val;
+            }
+        });
+        phrTotalEl.textContent = formatNumber(total, 2);
+    }
+
+    function createSelectElement() {
+        const selectEl = document.createElement('select');
+        selectEl.className = 'form-select mp-select';
+
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Selecione uma materia-prima';
+        selectEl.appendChild(placeholder);
+
+        materiasPrimas.forEach((mp) => {
+            const option = document.createElement('option');
+            option.value = String(mp.codigo);
+            option.textContent = `${mp.nome} (${mp.codigo})`;
+            selectEl.appendChild(option);
+        });
+
+        return selectEl;
+    }
+
+    function createIngredienteRow() {
+        const row = document.createElement('div');
+        row.className = 'ingrediente-row';
+
+        const inner = document.createElement('div');
+        inner.className = 'row g-2 align-items-end';
+
+        const colMp = document.createElement('div');
+        colMp.className = 'col-12 col-md-7';
+        const labelMp = document.createElement('label');
+        labelMp.className = 'form-label small text-muted mb-1';
+        labelMp.textContent = 'Materia-prima';
+        colMp.appendChild(labelMp);
+        colMp.appendChild(createSelectElement());
+
+        const colPhr = document.createElement('div');
+        colPhr.className = 'col-8 col-md-3';
+        const labelPhr = document.createElement('label');
+        labelPhr.className = 'form-label small text-muted mb-1';
+        labelPhr.textContent = 'PHR';
+        const inputPhr = document.createElement('input');
+        inputPhr.type = 'number';
+        inputPhr.className = 'form-control phr-input';
+        inputPhr.placeholder = '0.00';
+        inputPhr.step = '0.01';
+        inputPhr.min = '0';
+        colPhr.appendChild(labelPhr);
+        colPhr.appendChild(inputPhr);
+
+        const colRemove = document.createElement('div');
+        colRemove.className = 'col-4 col-md-2';
+        const btnRemove = document.createElement('button');
+        btnRemove.type = 'button';
+        btnRemove.className = 'btn btn-outline-danger w-100 btn-remover';
+        btnRemove.innerHTML = '<i class="fas fa-trash"></i>';
+        colRemove.appendChild(btnRemove);
+
+        inner.appendChild(colMp);
+        inner.appendChild(colPhr);
+        inner.appendChild(colRemove);
+
+        row.appendChild(inner);
+        return row;
+    }
+
+    function addIngredienteRow() {
+        containerEl.appendChild(createIngredienteRow());
+        updatePhrTotal();
+    }
+
+    function collectIngredientes() {
+        const ingredientes = {};
+
+        containerEl.querySelectorAll('.ingrediente-row').forEach((row) => {
+            const codigo = row.querySelector('.mp-select')?.value?.trim();
+            const phr = Number(row.querySelector('.phr-input')?.value);
+
+            if (!codigo || !Number.isFinite(phr) || phr <= 0) {
+                return;
+            }
+
+            const chave = `mp_${codigo}`;
+            ingredientes[chave] = (ingredientes[chave] || 0) + phr;
+        });
+
+        return ingredientes;
+    }
+
+    function renderResultado(previsao, unidade, baseValue) {
+        previsaoValorEl.textContent = formatNumber(previsao, 2);
+        previsaoUnidadeEl.textContent = unidade || 'Shore A';
+        baseValueTextEl.textContent = `Base do modelo: ${formatNumber(baseValue, 2)} ${unidade || 'Shore A'}`;
+    }
+
+    function renderEmptyChart() {
+        shapChartEl.classList.add('d-none');
+        shapEmptyEl.classList.remove('d-none');
+        if (window.Plotly) {
+            Plotly.purge(shapChartEl);
+        }
+    }
+
+    function renderShapChart(shapValues) {
+        const entries = Object.entries(shapValues || {}).filter(([, v]) => Number.isFinite(Number(v)));
+        if (!entries.length) {
+            renderEmptyChart();
+            showAlert('warning', 'Simulacao concluida, mas nao houve impactos SHAP relevantes para exibir.');
+            return;
+        }
+
+        const sorted = entries
+            .map(([k, v]) => [k, Number(v)])
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .slice(0, 25);
+
+        const labels = sorted.map(([key]) => nomePorChave.get(key) || key);
+        const values = sorted.map(([, val]) => val);
+        const colors = values.map((val) => (val >= 0 ? '#198754' : '#dc3545'));
+
+        const trace = {
+            type: 'bar',
+            orientation: 'h',
+            y: labels,
+            x: values,
+            marker: { color: colors },
+            text: values.map((val) => `${val >= 0 ? '+' : ''}${val.toFixed(3)}`),
+            textposition: 'outside',
+            cliponaxis: false,
+            hovertemplate: '%{y}<br>Impacto SHAP: %{x:.3f}<extra></extra>'
+        };
+
+        const layout = {
+            margin: { l: 230, r: 40, t: 8, b: 45 },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            xaxis: {
+                title: 'Contribuicao na dureza prevista',
+                gridcolor: '#e7ebf0',
+                zeroline: true,
+                zerolinewidth: 1,
+                zerolinecolor: '#7a848f'
+            },
+            yaxis: {
+                autorange: 'reversed',
+                automargin: true
+            },
+            showlegend: false
+        };
+
+        const config = {
+            responsive: true,
+            displayModeBar: false
+        };
+
+        shapEmptyEl.classList.add('d-none');
+        shapChartEl.classList.remove('d-none');
+        Plotly.newPlot(shapChartEl, [trace], layout, config);
+    }
+
+    async function submitSimulacao(event) {
+        event.preventDefault();
+        hideAlert();
+
+        const ingredientes = collectIngredientes();
+        if (!Object.keys(ingredientes).length) {
+            showAlert('warning', 'Informe ao menos um ingrediente com PHR maior que zero.');
+            return;
+        }
+
+        setLoadingState(true);
+
+        try {
+            const response = await fetch('{{ url_for("simulador") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ingredientes })
+            });
+
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (e) {
+                data = {};
+            }
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.erro || 'Falha ao executar simulacao.');
+            }
+
+            renderResultado(data.previsao, data.unidade, data.base_value);
+            renderShapChart(data.shap_values || {});
+        } catch (error) {
+            showAlert('danger', error.message || 'Erro inesperado durante a simulacao.');
+            renderEmptyChart();
+        } finally {
+            setLoadingState(false);
+            updatePhrTotal();
+        }
+    }
+
+    function bootstrapForm() {
+        containerEl.innerHTML = '';
+        addIngredienteRow();
+        addIngredienteRow();
+        renderEmptyChart();
+        updatePhrTotal();
+    }
+
+    btnAddEl.addEventListener('click', addIngredienteRow);
+
+    containerEl.addEventListener('click', (event) => {
+        const btn = event.target.closest('.btn-remover');
+        if (!btn) {
+            return;
+        }
+
+        const row = btn.closest('.ingrediente-row');
+        if (!row) {
+            return;
+        }
+
+        if (containerEl.children.length === 1) {
+            row.querySelector('.mp-select').value = '';
+            row.querySelector('.phr-input').value = '';
+        } else {
+            row.remove();
+        }
+
+        updatePhrTotal();
+    });
+
+    containerEl.addEventListener('input', (event) => {
+        if (event.target.classList.contains('phr-input')) {
+            updatePhrTotal();
+        }
+    });
+
+    formEl.addEventListener('submit', submitSimulacao);
+
+    bootstrapForm();
+
+    if (!simuladorDisponivel) {
+        showAlert('warning', 'Servico de IA indisponivel no momento. Verifique o modelo e dependencias.');
+        btnSubmitEl.disabled = true;
+        btnAddEl.disabled = true;
+        containerEl.querySelectorAll('select, input, button').forEach((el) => {
+            el.disabled = true;
+        });
+        return;
+    }
+
+    if (!materiasPrimas.length) {
+        showAlert('warning', 'Nenhuma materia-prima foi encontrada no catalogo para simulacao.');
+        btnSubmitEl.disabled = true;
+    }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Contratos API | ReoScore Vulcaflex{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h2 class="mb-1">Contratos de API (XAI)</h2>
+            <p class="text-muted mb-0">Referencia rapida para integracao com treino e simulacao de formula.</p>
+        </div>
+        <span class="badge text-bg-dark">POST endpoints</span>
+    </div>
+
+    <div class="alert alert-info border-0 shadow-sm">
+        <strong>Escopo atual:</strong> APIs protegidas por login e permissao de admin.
+        {% if docs_xai_disponivel %}
+            Documentacao detalhada: <code>docs/motor_xai.md</code>.
+        {% else %}
+            O arquivo <code>docs/motor_xai.md</code> nao foi encontrado neste ambiente.
+        {% endif %}
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white">
+            <code>POST /api/xai/treinar</code>
+        </div>
+        <div class="card-body">
+            <p class="mb-2"><strong>Objetivo:</strong> Treinar/atualizar o modelo de dureza.</p>
+            <p class="mb-3"><strong>Permissao:</strong> usuario autenticado com papel <code>admin</code>.</p>
+
+            <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">HTTP</th>
+                            <th>Significado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>200</code></td><td>Treino concluido com sucesso.</td></tr>
+                        <tr><td><code>400</code></td><td>Erro de regra de negocio (ex.: dados insuficientes).</td></tr>
+                        <tr><td><code>403</code></td><td>Usuario sem permissao.</td></tr>
+                        <tr><td><code>503</code></td><td>Servico de IA indisponivel.</td></tr>
+                        <tr><td><code>500</code></td><td>Erro inesperado.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <label class="form-label small text-muted mb-1">Exemplo de resposta</label>
+            <pre class="bg-dark text-light rounded p-3 mb-0"><code>{
+  "status": "sucesso",
+  "r2": 0.99
+}</code></pre>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white">
+            <code>POST /api/xai/simular/&lt;cd_produto&gt;</code>
+        </div>
+        <div class="card-body">
+            <p class="mb-2"><strong>Objetivo:</strong> Simular dureza prevista e impactos XAI para uma formula.</p>
+            <p class="mb-3"><strong>Permissao:</strong> usuario autenticado com papel <code>admin</code>.</p>
+
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-lg-6">
+                    <label class="form-label small text-muted mb-1">Body JSON aceito</label>
+                    <pre class="bg-dark text-light rounded p-3 mb-0"><code>{
+  "usar_formula_base": true,
+  "ingredientes": {
+    "mp_105": 52.0,
+    "204": 3.1
+  }
+}</code></pre>
+                </div>
+                <div class="col-12 col-lg-6">
+                    <label class="form-label small text-muted mb-1">Resposta de sucesso</label>
+                    <pre class="bg-dark text-light rounded p-3 mb-0"><code>{
+  "status": "sucesso",
+  "cd_produto": 839,
+  "ingredientes_utilizados": {
+    "mp_105": 52.0
+  },
+  "propriedades_estimadas": {
+    "dureza": {
+      "valor": 51.78,
+      "unidade": "Shore A"
+    }
+  },
+  "xai": {
+    "base_value": 58.24,
+    "impacto_ingredientes": {
+      "mp_105": -0.42
+    }
+  }
+}</code></pre>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">HTTP</th>
+                            <th>Significado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>200</code></td><td>Simulacao concluida.</td></tr>
+                        <tr><td><code>400</code></td><td>Body invalido, modelo indisponivel ou erro de negocio.</td></tr>
+                        <tr><td><code>403</code></td><td>Usuario sem permissao.</td></tr>
+                        <tr><td><code>404</code></td><td>Formula nao encontrada.</td></tr>
+                        <tr><td><code>503</code></td><td>Servico de IA indisponivel.</td></tr>
+                        <tr><td><code>500</code></td><td>Erro inesperado.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

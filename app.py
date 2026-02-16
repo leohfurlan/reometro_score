@@ -1755,6 +1755,107 @@ def _parse_ingredientes_payload(payload):
     return saida
 
 
+def _listar_materias_primas_catalogo():
+    catalogo = get_catalogo_codigo() or {}
+    produtos = list(catalogo.values())
+
+    # Se houver classificacao por tipo no catalogo, filtra apenas materia-prima.
+    tem_tipo_catalogo = any(str(getattr(p, 'tipo', '') or '').strip() for p in produtos)
+
+    materias_primas = []
+    for produto in produtos:
+        tipo = str(getattr(produto, 'tipo', '') or '').strip().upper()
+        if tem_tipo_catalogo and tipo != 'MATERIA_PRIMA':
+            continue
+
+        codigo = getattr(produto, 'cod_sankhya', None)
+        descricao = str(getattr(produto, 'descricao', '') or '').strip()
+        if codigo is None or not descricao:
+            continue
+
+        try:
+            codigo_norm = int(codigo)
+        except Exception:
+            codigo_norm = str(codigo).strip()
+            if not codigo_norm:
+                continue
+
+        materias_primas.append({
+            'codigo': codigo_norm,
+            'nome': descricao
+        })
+
+    materias_primas.sort(key=lambda x: str(x['nome']).upper())
+    return materias_primas
+
+
+@app.route('/simulador', methods=['GET', 'POST'])
+@login_required
+def simulador():
+    if request.method == 'GET':
+        return render_template(
+            'simulador.html',
+            materias_primas=_listar_materias_primas_catalogo(),
+            simulador_ia_disponivel=(SimuladorIAService is not None)
+        )
+
+    if SimuladorIAService is None:
+        return jsonify({
+            'success': False,
+            'erro': 'Servico de IA indisponivel. Verifique as dependencias xgboost/shap.'
+        }), 503
+
+    payload = request.get_json(silent=True) or {}
+    ingredientes = _parse_ingredientes_payload(payload.get('ingredientes', {}))
+    if not ingredientes:
+        return jsonify({
+            'success': False,
+            'erro': 'Nenhum ingrediente valido foi informado para simulacao.'
+        }), 400
+
+    try:
+        resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'erro': f'Falha na simulacao: {e}'
+        }), 500
+
+    if isinstance(resultado, dict) and resultado.get('erro'):
+        return jsonify({
+            'success': False,
+            'erro': resultado.get('erro')
+        }), 400
+
+    impacto_ingredientes = (resultado or {}).get('impacto_ingredientes') or {}
+    chaves_receita = set(ingredientes.keys())
+    shap_values = {}
+
+    # Mantem no retorno apenas MPs efetivamente informadas na receita.
+    for chave, valor in impacto_ingredientes.items():
+        if chave not in chaves_receita:
+            continue
+        val_float = _to_float_or_none(valor)
+        if val_float is None:
+            continue
+        shap_values[chave] = val_float
+
+    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita.
+    for chave in chaves_receita:
+        if chave not in shap_values:
+            shap_values[chave] = 0.0
+
+    shap_values = dict(sorted(shap_values.items(), key=lambda item: abs(item[1]), reverse=True))
+
+    return jsonify({
+        'success': True,
+        'previsao': _to_float_or_none((resultado or {}).get('dureza_prevista')),
+        'unidade': (resultado or {}).get('unidade', 'Shore A'),
+        'shap_values': shap_values,
+        'base_value': _to_float_or_none((resultado or {}).get('base_value'))
+    }), 200
+
+
 @app.route('/api/xai/treinar', methods=['POST'])
 @login_required
 def api_xai_treinar():
@@ -1817,7 +1918,24 @@ def api_xai_simular_formula(cd_produto):
         return jsonify({'status': 'erro', 'mensagem': resultado.get('erro')}), 400
 
     impactos = (resultado or {}).get('impacto_ingredientes') or {}
-    impactos_ordenados = sorted(impactos.items(), key=lambda x: abs(x[1]), reverse=True)
+    chaves_receita = set(ingredientes.keys())
+    impactos_filtrados = {}
+
+    # Mantem no retorno apenas MPs efetivamente usadas na simulacao.
+    for chave, valor in impactos.items():
+        if chave not in chaves_receita:
+            continue
+        val_float = _to_float_or_none(valor)
+        if val_float is None:
+            continue
+        impactos_filtrados[chave] = val_float
+
+    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita.
+    for chave in chaves_receita:
+        if chave not in impactos_filtrados:
+            impactos_filtrados[chave] = 0.0
+
+    impactos_ordenados = sorted(impactos_filtrados.items(), key=lambda x: abs(x[1]), reverse=True)
 
     return jsonify({
         'status': 'sucesso',
@@ -1834,6 +1952,16 @@ def api_xai_simular_formula(cd_produto):
             'impacto_ingredientes': dict(impactos_ordenados)
         }
     }), 200
+
+
+@app.route('/contratos-api')
+@login_required
+def pagina_contratos_api():
+    docs_xai_path = os.path.join(app.root_path, 'docs', 'motor_xai.md')
+    return render_template(
+        'contratos_api.html',
+        docs_xai_disponivel=os.path.exists(docs_xai_path)
+    )
 
 
 @app.route('/formulas')
