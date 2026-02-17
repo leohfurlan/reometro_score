@@ -79,28 +79,29 @@
                             {% endif %}
                         </td>
                         
-                        <form action="{{ url_for('salvar_correcao') }}" method="POST" id="form-{{ ensaio.id_ensaio }}">
-                            <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
-                            <td>
-                                <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
-                                       value="{{ ensaio.lote }}" placeholder="Ex: 9563">
-                            </td>
-                            <td>
-                                <select name="massa" class="form-select form-select-sm" required>
-                                    <option value="" disabled {% if not ensaio.massa %}selected{% endif %}>Selecione...</option>
-                                    {% for mat in materiais %}
-                                        <option value="{{ mat.descricao }}" {% if ensaio.massa and ensaio.massa.descricao == mat.descricao %}selected{% endif %}>
-                                            {{ mat.descricao }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                            </td>
-                            <td class="text-end pe-3">
-                                <button type="submit" form="form-{{ ensaio.id_ensaio }}" class="btn btn-success btn-sm shadow-sm" title="Salvar Aprendizado">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                            </td>
-                        </form>
+                        {% set form_id = 'form_auditoria_' ~ ensaio.id_ensaio %}
+                        <td>
+                            <form id="{{ form_id }}" action="{{ url_for('salvar_correcao') }}" method="POST" class="d-none">
+                                <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
+                            </form>
+                            <input type="text" name="novo_lote" form="{{ form_id }}" class="form-control form-control-sm fw-bold text-primary"
+                                   value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                        </td>
+                        <td>
+                            <select name="massa" form="{{ form_id }}" class="form-select form-select-sm" required>
+                                <option value="" disabled {% if not ensaio.massa or not ensaio.massa.descricao %}selected{% endif %}>Selecione...</option>
+                                {% for mat in materiais %}
+                                    <option value="{{ mat }}" {% if ensaio.massa and ensaio.massa.descricao and ensaio.massa.descricao|upper == mat|upper %}selected{% endif %}>
+                                        {{ mat }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-end pe-3">
+                            <button type="submit" form="{{ form_id }}" class="btn btn-success btn-sm shadow-sm" title="Salvar Aprendizado">
+                                <i class="fas fa-check"></i>
+                            </button>
+                        </td>
                     </tr>
                     {% else %}
                     <tr>

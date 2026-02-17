@@ -14,7 +14,7 @@ def carregar_configuracoes():
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"⚠️ Erro ao ler config: {e}")
+        print(f"Erro ao ler config: {e}")
         return {}
 
 def salvar_configuracao(cod_sankhya, specs):
@@ -26,7 +26,7 @@ def salvar_configuracao(cod_sankhya, specs):
     
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(dados, f, indent=4)
-    print(f"💾 Configuração salva para o produto {cod_sankhya}")
+    print(f"Configuração salva para o produto {cod_sankhya}")
 
 def aplicar_configuracoes_no_catalogo(catalogo_objetos):
     configs = carregar_configuracoes()
@@ -80,7 +80,7 @@ def aplicar_configuracoes_no_catalogo(catalogo_objetos):
 
             count += 1
     
-    print(f"✅ Configurações aplicadas em {count} produtos.")
+    print(f"Configurações aplicadas em {count} produtos.")
 
 
 # --- NOVAS FUNÇÕES PARA REGRAS DE AÇÃO ---
@@ -98,7 +98,7 @@ def obter_regras_padrao():
 def carregar_regras_acao():
     # Se o arquivo não existe, cria o padrão
     if not os.path.exists(REGRAS_FILE):
-        print("ℹ️ Arquivo de regras não encontrado. Criando padrão...")
+        print("Arquivo de regras não encontrado. Criando padrão...")
         padrao = obter_regras_padrao()
         salvar_regras_acao(padrao)
         return padrao
@@ -120,13 +120,13 @@ def carregar_regras_acao():
         # --- CORREÇÃO DO SEU ERRO AQUI ---
         # Se o arquivo existe mas está vazio/corrompido (JSONDecodeError), 
         # nós forçamos a reescrita com os valores padrão para consertar.
-        print(f"⚠️ Arquivo de regras corrompido ou vazio ({e}). Restaurando padrões...")
+        print(f"Arquivo de regras corrompido ou vazio ({e}). Restaurando padrões...")
         padrao = obter_regras_padrao()
         salvar_regras_acao(padrao)
         return padrao
         
     except Exception as e:
-        print(f"⚠️ Erro inesperado ao ler regras: {e}")
+        print(f"Erro inesperado ao ler regras: {e}")
         return obter_regras_padrao()
 
 def salvar_regras_acao(lista_regras):
@@ -135,4 +135,4 @@ def salvar_regras_acao(lista_regras):
     
     with open(REGRAS_FILE, 'w', encoding='utf-8') as f:
         json.dump(lista_regras, f, indent=4)
-    print("💾 Regras de Ação atualizadas.")
+    print("Regras de Ação atualizadas.")

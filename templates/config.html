@@ -10,8 +10,12 @@
         <p class="text-muted small">Gerencie especificações, regras e usuários do sistema.</p>
     </div>
     
-    <a href="{{ url_for('dashboard_home') }}" class="btn btn-success shadow-sm">
-        <i class="fas fa-check-circle me-2"></i>Salvar e Sair
+    <a href="{{ url_for('rota_aplicar_correcoes', next=request.full_path.rstrip('?')) }}"
+       class="btn btn-success shadow-sm"
+       data-loading="true"
+       data-loading-text="Aplicando correcoes..."
+       onclick="if(confirm('Aplicar correcoes salvas agora?')){ativarModalCarregamento('Aplicando correcoes...', 'Atualizando os lotes corrigidos sem recarregar o ETL completo.'); return true;} return false;">
+        <i class="fas fa-check-circle me-2"></i>Salvar e Aplicar
     </a>
 </div>
 
@@ -474,28 +478,29 @@
                                 {% endif %}
                             </td>
                             
-                            <form action="{{ url_for('salvar_correcao') }}" method="POST">
-                                <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
-                                <td>
-                                    <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
-                                           value="{{ ensaio.lote }}" placeholder="Ex: 9563">
-                                </td>
-                                <td>
-                                    <select name="massa" class="form-select form-select-sm" required>
-                                        <option value="" disabled {% if not ensaio.massa %}selected{% endif %}>Selecione...</option>
-                                        {% for mat in materiais_audit %}
-                                            <option value="{{ mat.descricao }}" {% if ensaio.massa and ensaio.massa.descricao == mat.descricao %}selected{% endif %}>
-                                                {{ mat.descricao }}
-                                            </option>
-                                        {% endfor %}
-                                    </select>
-                                </td>
-                                <td class="text-end pe-3">
-                                    <button type="submit" class="btn btn-success btn-sm shadow-sm" title="Salvar">
-                                        <i class="fas fa-check"></i>
-                                    </button>
-                                </td>
-                            </form>
+                            {% set form_id = 'form_ensinar_' ~ ensaio.id_ensaio %}
+                            <td>
+                                <form id="{{ form_id }}" action="{{ url_for('salvar_correcao') }}" method="POST" class="d-none">
+                                    <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
+                                </form>
+                                <input type="text" name="novo_lote" form="{{ form_id }}" class="form-control form-control-sm fw-bold text-primary"
+                                       value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                            </td>
+                            <td>
+                                <select name="massa" form="{{ form_id }}" class="form-select form-select-sm" required>
+                                    <option value="" disabled {% if not ensaio.massa or not ensaio.massa.descricao %}selected{% endif %}>Selecione...</option>
+                                    {% for mat in materiais_audit %}
+                                        <option value="{{ mat }}" {% if ensaio.massa and ensaio.massa.descricao and ensaio.massa.descricao|upper == mat|upper %}selected{% endif %}>
+                                            {{ mat }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td class="text-end pe-3">
+                                <button type="submit" form="{{ form_id }}" class="btn btn-success btn-sm shadow-sm" title="Salvar">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                            </td>
                         </tr>
                         {% else %}
                         <tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro para auditar.</td></tr>

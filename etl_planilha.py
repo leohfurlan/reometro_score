@@ -49,18 +49,18 @@ def normalizar_lote_planilha(lote_raw):
 def carregar_dicionario_lotes():
     caminho_arquivo = _resolver_caminho_planilha()
     
-    print(f"--- 📂 ETL: Carregando Planilha de Lotes ---")
+    print(f"---  ETL: Carregando Planilha de Lotes ---")
     
     if not caminho_arquivo:
-        print("❌ ERRO: Caminho do arquivo do SharePoint não definido. Execute a sincronização primeiro.")
+        print("ERRO: Caminho do arquivo do SharePoint não definido. Execute a sincronização primeiro.")
         return {}
 
     if not os.path.exists(caminho_arquivo):
-        print("❌ ERRO: Arquivo de lote não encontrado.")
-        print(f"   -> Caminho buscado: {caminho_arquivo}")
+        print("ERRO: Arquivo de lote não encontrado.")
+        print(f"  -> Caminho buscado: {caminho_arquivo}")
         return {}
 
-    # print(f"   > Lendo arquivo: ...{str(caminho_arquivo)[-40:]}")
+    # print(f"  > Lendo arquivo: ...{str(caminho_arquivo)[-40:]}")
 
     # 2. Clone Temporário 
     # (Mantemos essa prática para evitar travar o arquivo se ele estiver aberto no Excel localmente)
@@ -70,7 +70,7 @@ def carregar_dicionario_lotes():
     try:
         shutil.copy2(caminho_arquivo, caminho_clone)
     except Exception as e:
-        print(f"⚠️ Aviso: Não foi possível criar cópia temporária. Tentando ler direto. Erro: {e}")
+        print(f"Aviso: Não foi possível criar cópia temporária. Tentando ler direto. Erro: {e}")
         caminho_clone = caminho_arquivo
 
     mapa_lote_massa = {}
@@ -142,19 +142,19 @@ def carregar_dicionario_lotes():
                     }
                 
             except Exception as e:
-                print(f"⚠️ Aviso na aba '{aba}': {e}")
+                print(f"Aviso na aba '{aba}': {e}")
         
         xls.close()
                 
     except Exception as e:
-        print(f"❌ Erro crítico ao ler planilha Excel: {e}")
+        print(f"Erro crítico ao ler planilha Excel: {e}")
     finally:
         # Remove o arquivo temporário se ele foi criado
         if caminho_clone != caminho_arquivo and os.path.exists(caminho_clone):
             try: os.remove(caminho_clone)
             except: pass
 
-    print(f"✅ SUCESSO: {len(mapa_lote_massa)} lotes carregados da planilha.")
+    print(f"SUCESSO: {len(mapa_lote_massa)} lotes carregados da planilha.")
     return mapa_lote_massa
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 from difflib import get_close_matches
 
-# --- NOVAS IMPORTAÇÕES (ARQUITETURA V13) ---
+# --- NOVAS IMPORTAÃ‡Ã•ES (ARQUITETURA V13) ---
 from models.usuario import db
 from models.consolidado import EnsaioConsolidado
 from models.score_versioning import ScoreVersao, ScoreResultado
@@ -17,9 +17,9 @@ from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import aplicar_configuracoes_no_catalogo
-from services.local_learning_repo import load_map as carregar_aprendizado_sqlite
+from services.learning_service import carregar_aprendizado_mapa
 
-# --- VARIÁVEIS DE REFERÊNCIA (CACHE DO MÓDULO) ---
+# --- VARIÃVEIS DE REFERÃŠNCIA (CACHE DO MÃ“DULO) ---
 _CATALOGO_CODIGO = {}
 _CATALOGO_NOME = {}
 _MAPA_LOTES_PLANILHA = {}
@@ -27,7 +27,7 @@ _MAPA_GRUPOS = {}
 _DE_PARA_CORRECOES = {}
 _MAPA_APRENDIZADO = {}
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÃ‡Ã•ES AUXILIARES ---
 
 def safe_float(val):
     if val is None: return None
@@ -44,8 +44,8 @@ def chunk_list(lista, tamanho):
 
 def _obter_dados_lote_planilha(chave_lote):
     """
-    Resolve lote no dicionário da planilha com compatibilidade para chaves antigas
-    no formato numérico com '.0' (ex: '10091.0').
+    Resolve lote no dicionÃ¡rio da planilha com compatibilidade para chaves antigas
+    no formato numÃ©rico com '.0' (ex: '10091.0').
     """
     if not chave_lote:
         return None
@@ -68,42 +68,152 @@ def _obter_dados_lote_planilha(chave_lote):
 
 def _gerar_candidatos_numericos(token_num):
     """
-    Gera candidatos de lote a partir de um bloco numérico.
-    Quando detecta sufixo de zeros longos (ruído típico do reômetro),
-    tenta versões progressivamente aparadas.
+    Gera candidatos de lote a partir de um bloco numÃ©rico.
+    Quando detecta sufixo de zeros longos (ruÃ­do tÃ­pico do reÃ´metro),
+    tenta versÃµes progressivamente aparadas.
     """
-    base = (token_num or '').lstrip('0') or '0'
-    if not base:
+    bruto = re.sub(r'\D', '', str(token_num or ''))
+    if not bruto:
         return []
 
-    candidatos = [base]
+    candidatos = []
 
-    # Só remove zeros à direita quando há forte indício de sufixo artificial.
-    if re.search(r'0{4,}$', base):
+    def _add(valor):
+        v = (valor or '').lstrip('0') or '0'
+        if v and v not in candidatos:
+            candidatos.append(v)
+
+    _add(bruto)
+
+    base = bruto.lstrip('0')
+    if not base:
+        return candidatos
+
+    _add(base)
+
+    # Remove sufixo longo de zeros (ruido comum no reometro).
+    if re.search(r'0{3,}$', base):
         atual = base
         while atual.endswith('0') and len(atual) > 3:
             atual = atual[:-1]
-            candidatos.append(atual)
+            _add(atual)
+
+    # Caso com zeros no meio + sufixo curto (ex: 001010100001 -> 10101).
+    tam = len(base)
+    for tam_prefixo in range(4, min(8, tam - 3) + 1):
+        for tam_sufixo in (1, 2, 3):
+            if tam_prefixo + tam_sufixo >= tam:
+                continue
+            miolo = base[tam_prefixo: tam - tam_sufixo]
+            sufixo = base[tam - tam_sufixo:]
+            if len(miolo) >= 3 and set(miolo) == {'0'}:
+                prefixo = base[:tam_prefixo]
+                _add(prefixo)
+                _add(f"{prefixo}{sufixo}")
 
     return candidatos
 
+
+def _compact_lote_key(texto):
+    return re.sub(r'[^A-Z0-9]', '', str(texto or '').strip().upper())
+
+
+def _parece_data(token):
+    """
+    Evita confundir datas (ddmmyyyy / yyyymmdd) com lote.
+    """
+    t = str(token or '').strip()
+    if not re.fullmatch(r'\d{8}', t):
+        return False
+
+    try:
+        dia = int(t[:2]); mes = int(t[2:4]); ano = int(t[4:])
+        if 1 <= dia <= 31 and 1 <= mes <= 12 and 2000 <= ano <= 2100:
+            return True
+    except Exception:
+        pass
+
+    try:
+        ano = int(t[:4]); mes = int(t[4:6]); dia = int(t[6:])
+        if 2000 <= ano <= 2100 and 1 <= mes <= 12 and 1 <= dia <= 31:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _lote_generico_valido(token):
+    t = str(token or '').strip()
+    if not re.fullmatch(r'\d+', t):
+        return False
+    if len(t) < 4:
+        return False
+    if set(t) == {'0'}:
+        return False
+    if _parece_data(t):
+        return False
+    if len(t) > 8 and re.search(r'0{3,}$', t) and _parece_data(t[:8]):
+        return False
+    if len(t) > 8 and _parece_data(t[:8]) and set(t[8:]) == {'0'}:
+        return False
+    return True
+
+
+def _ordenar_candidatos_genericos(candidatos):
+    def _rank(c):
+        tam = len(c)
+        faixa = 0 if 4 <= tam <= 7 else (1 if tam <= 10 else 2)
+        zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
+        return (faixa, zeros_fim, tam)
+
+    uniq = []
+    for c in candidatos:
+        if c not in uniq:
+            uniq.append(c)
+    return sorted(uniq, key=_rank)
+
+
+def _extrair_por_numeros(texto, exigir_mapa):
+    for num in reversed(re.findall(r'\d+', texto)):
+        candidatos = _gerar_candidatos_numericos(num)
+        if exigir_mapa:
+            for candidato in candidatos:
+                if _obter_dados_lote_planilha(candidato) is not None:
+                    return candidato
+        else:
+            for candidato in _ordenar_candidatos_genericos(candidatos):
+                if _lote_generico_valido(candidato):
+                    return candidato
+    return None
+
+
+def _score_lote_limpo(candidato, origem):
+    c = str(candidato or '').strip()
+    if not c:
+        return (99, 99, 99, 99)
+    origem_rank = 0 if origem in {"Asterisco", "Exato", "Regex"} else 1
+    faixa = 0 if 4 <= len(c) <= 7 else (1 if len(c) <= 10 else 2)
+    zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
+    return (origem_rank, faixa, zeros_fim, len(c))
+
 def carregar_referencias_estaticas():
     """
-    Carrega mapas de configuração, incluindo o Aprendizado Manual.
+    Carrega mapas de configuraÃ§Ã£o, incluindo o Aprendizado Manual.
     """
     global _CATALOGO_CODIGO, _CATALOGO_NOME, _MAPA_LOTES_PLANILHA, _MAPA_GRUPOS, _DE_PARA_CORRECOES, _MAPA_APRENDIZADO
     
-    print("--- 🔄 ETL: Carregando referências estáticas... ---")
+    print("---  ETL: Carregando referÃªncias estÃ¡ticas... ---")
     
     try:
         _CATALOGO_CODIGO, _CATALOGO_NOME = importar_catalogo_sankhya()
         aplicar_configuracoes_no_catalogo(_CATALOGO_CODIGO)
     except Exception as e:
-        print(f"⚠️ Erro no Sankhya: {e}")
+        print(f"Erro no Sankhya: {e}")
 
     _MAPA_LOTES_PLANILHA = carregar_dicionario_lotes()
     
-    print("   > Carregando Grupos de Máquinas do SQL Server...")
+    print("  > Carregando Grupos de MÃ¡quinas do SQL Server...")
     _MAPA_GRUPOS = {}
     conn = None
     try:
@@ -121,9 +231,9 @@ def carregar_referencias_estaticas():
             elif "VISC" in c_nome: tipo_normalizado = "VISCOSIMETRO"
             elif "REO" in c_nome or "MDR" in c_nome: tipo_normalizado = "REOMETRO"
             _MAPA_GRUPOS[c_grupo] = {'tipo': tipo_normalizado, 'descricao': c_nome}
-        print(f"   ✅ {len(_MAPA_GRUPOS)} grupos carregados.")
+        print(f"   {len(_MAPA_GRUPOS)} grupos carregados.")
     except Exception as e:
-        print(f"⚠️ Erro ao carregar Grupos do SQL: {e}")
+        print(f"Erro ao carregar Grupos do SQL: {e}")
     finally:
         if conn: conn.close()
 
@@ -133,8 +243,18 @@ def carregar_referencias_estaticas():
                 _DE_PARA_CORRECOES = json.load(f)
         except: pass
 
-    _MAPA_APRENDIZADO = carregar_aprendizado_sqlite()
-    print(f" Memória carregada (SQLite): {len(_MAPA_APRENDIZADO)} correções manuais.")
+    _MAPA_APRENDIZADO = carregar_aprendizado_mapa()
+    print(f"MemÃ³ria carregada (SQLAlchemy): {len(_MAPA_APRENDIZADO)} correÃ§Ãµes manuais.")
+
+
+def recarregar_aprendizado_memoria():
+    """
+    Recarrega somente o mapa de aprendizado manual na memoria do ETL.
+    """
+    global _MAPA_APRENDIZADO
+    _MAPA_APRENDIZADO = carregar_aprendizado_mapa()
+    return len(_MAPA_APRENDIZADO)
+
 
 def extrair_lote_da_string(texto_sujo):
     if not texto_sujo: return None, None
@@ -148,19 +268,24 @@ def extrair_lote_da_string(texto_sujo):
                     if re.fullmatch(r'\d+\.0+', parte_limpa):
                         return parte_limpa.split('.', 1)[0], "Asterisco"
                     return parte_limpa, "Asterisco"
-                for num in reversed(re.findall(r'\d+', parte)):
-                    for candidato in _gerar_candidatos_numericos(num):
-                        if _obter_dados_lote_planilha(candidato) is not None:
-                            return candidato, "Asterisco"
+                cand = _extrair_por_numeros(parte, exigir_mapa=True)
+                if cand:
+                    return cand, "Asterisco"
     if _obter_dados_lote_planilha(texto) is not None:
         if re.fullmatch(r'\d+\.0+', texto):
             return texto.split('.', 1)[0], "Exato"
         return texto, "Exato"
-    todos_numeros = re.findall(r'\d+', texto)
-    for num in reversed(todos_numeros): 
-        for candidato in _gerar_candidatos_numericos(num):
-            if _obter_dados_lote_planilha(candidato) is not None:
-                return candidato, "Regex"
+
+    # 1) Prioriza match no mapa da planilha.
+    cand = _extrair_por_numeros(texto, exigir_mapa=True)
+    if cand:
+        return cand, "Regex"
+
+    # 2) Fallback: limpeza generica segura (sem depender da planilha).
+    cand = _extrair_por_numeros(texto, exigir_mapa=False)
+    if cand:
+        return cand, "Generico"
+
     return None, None
 
 def match_nome_inteligente(texto_bruto):
@@ -174,22 +299,25 @@ def match_nome_inteligente(texto_bruto):
     if matches: return _CATALOGO_NOME[matches[0]]
     return None
 
-# --- LÓGICA PRINCIPAL (ETL V2) ---
+# --- LÃ“GICA PRINCIPAL (ETL V2) ---
 
 def processar_carga_dados(data_corte='2025-07-01'):
     if not _CATALOGO_CODIGO:
         carregar_referencias_estaticas()
+    else:
+        qtd = recarregar_aprendizado_memoria()
+        print(f"Memoria de aprendizado atualizada para ETL: {qtd} correcoes.")
 
-    print(f"--- 🚀 ETL V2: Iniciando carga e cálculo de score... ---")
+    print(f"---  ETL V2: Iniciando carga e cÃ¡lculo de score... ---")
     start_time = datetime.now()
     
     versao_ativa = ScoreVersao.query.filter_by(status='ACTIVE').first()
     engine = None
     if versao_ativa:
-        print(f"   ⚙️ Engine ativada: {versao_ativa.nome}")
+        print(f"   Engine ativada: {versao_ativa.nome}")
         engine = ScoringEngine(versao_ativa)
     else:
-        print("   ⚠️ Nenhuma versão de score ATIVA encontrada. Scores serão 0.")
+        print("   Nenhuma versÃ£o de score ATIVA encontrada. Scores serÃ£o 0.")
 
     conn = None
     resultados_brutos = []
@@ -210,7 +338,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
         colunas = [c[0] for c in cursor.description]
         resultados_brutos = [dict(zip(colunas, row)) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"❌ Erro Crítico no SQL: {e}")
+        print(f"Erro CrÃ­tico no SQL: {e}")
         return None
     finally:
         if conn: conn.close()
@@ -222,21 +350,31 @@ def processar_carga_dados(data_corte='2025-07-01'):
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
         key_lote_orig = str(lote_orig).strip().upper()
+        key_lote_compacto = _compact_lote_key(key_lote_orig)
         
         lote_final = key_lote_orig
         produto = None
         metodo_id = "FANTASMA"
         equip_planilha = None
         
-        match_aprendido = _MAPA_APRENDIZADO.get(key_lote_orig)
+        match_aprendido = _MAPA_APRENDIZADO.get(key_lote_orig) or _MAPA_APRENDIZADO.get(key_lote_compacto)
         if match_aprendido:
             lote_final = match_aprendido.get('lote_real')
             produto = match_nome_inteligente(match_aprendido.get('massa'))
             if produto: metodo_id = "MANUAL"
         
         if metodo_id == "FANTASMA":
-            lote_clean, _ = extrair_lote_da_string(lote_orig)
-            if not lote_clean: lote_clean, _ = extrair_lote_da_string(amostra)
+            lote_cand_orig, origem_orig = extrair_lote_da_string(lote_orig)
+            lote_cand_amostra, origem_amostra = extrair_lote_da_string(amostra)
+
+            lote_clean = None
+            if lote_cand_orig and lote_cand_amostra:
+                score_orig = _score_lote_limpo(lote_cand_orig, origem_orig)
+                score_amostra = _score_lote_limpo(lote_cand_amostra, origem_amostra)
+                lote_clean = lote_cand_orig if score_orig <= score_amostra else lote_cand_amostra
+            else:
+                lote_clean = lote_cand_orig or lote_cand_amostra
+
             if lote_clean:
                 lote_final = lote_clean
                 dados_planilha = _obter_dados_lote_planilha(lote_final)
@@ -335,7 +473,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
         origem_visc = "Real" if valor_visc else "N/A"
         if not valor_visc and dados['lote_visivel'] in medias_visc:
             valor_visc = medias_visc[dados['lote_visivel']]
-            origem_visc = "Média"
+            origem_visc = "MÃ©dia"
 
         ids_merge = sorted({int(i) for i in (dados['ids_ensaio'] or []) if i is not None})
         temps_merge = sorted({float(t) for t in (dados['temps'] or []) if t}, reverse=True)
@@ -384,25 +522,25 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
         lista_consolidada.append(novo_ensaio)
 
-    # 6. Persistência com Chunking (Correção do Erro)
+    # 6. PersistÃªncia com Chunking (CorreÃ§Ã£o do Erro)
     try:
-        print(f"   💾 Salvando {len(lista_consolidada)} registros consolidados...")
+        print(f"   Salvando {len(lista_consolidada)} registros consolidados...")
         
         # A. Upsert do Dataset Mestre
         count = 0
         for e in lista_consolidada:
             db.session.merge(e)
             count += 1
-            # Commit parcial para aliviar memória
+            # Commit parcial para aliviar memÃ³ria
             if count % 1000 == 0:
                 db.session.commit()
         db.session.commit() # Commit final do merge
         
-        # B. Histórico de Score (Com Chunking no Delete)
+        # B. HistÃ³rico de Score (Com Chunking no Delete)
         if engine and ids_ensaios_processados:
-            print(f"   🧹 Limpando histórico anterior...")
+            print(f"   Limpando histÃ³rico anterior...")
             
-            # Limite seguro para SQLite (999 é o padrão antigo, 900 é seguro)
+            # Limite seguro para SQLite (999 Ã© o padrÃ£o antigo, 900 Ã© seguro)
             BATCH_SIZE = 900 
             
             # Deleta em lotes
@@ -412,19 +550,19 @@ def processar_carga_dados(data_corte='2025-07-01'):
                     ScoreResultado.id_ensaio.in_(lote_ids)
                 ).delete(synchronize_session=False)
             
-            db.session.commit() # Confirma deleções
+            db.session.commit() # Confirma deleÃ§Ãµes
             
-            print(f"   📝 Inserindo novos resultados...")
+            print(f"   Inserindo novos resultados...")
             # Insere em lotes
             for lote_res in chunk_list(lista_historico, BATCH_SIZE):
                 db.session.add_all(lote_res)
                 db.session.commit()
 
-        print("✅ Dados persistidos com sucesso!")
+        print("Dados persistidos com sucesso!")
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Erro ao salvar no banco: {e}")
+        print(f"Erro ao salvar no banco: {e}")
         return None
 
     total_time = (datetime.now() - start_time).total_seconds()
@@ -432,3 +570,4 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
 def get_catalogo_codigo():
     return _CATALOGO_CODIGO
+

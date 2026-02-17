@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import re
 from functools import lru_cache
@@ -19,6 +20,11 @@ _FILLER_TABLE_PATH = os.path.abspath(
 
 _DEFAULT_NR_BASE_SHORE = 38.0
 _FALLBACK_ELASTOMER_KEY = "NR"
+_DEFAULT_FILLER_SATURATION_A = 12.0
+_DEFAULT_FILLER_SATURATION_B = 0.01
+_DEFAULT_FILLER_OIL_DAMPING_K = 0.01
+_SATURATION_DEFAULTS_KEY = "_saturation_defaults"
+_SATURATION_PARAMS_KEY = "_saturation_params_by_filler"
 _SUPPORTED_ELASTOMER_KEYS = {
     "NR",
     "SBR_S1500",
@@ -89,6 +95,106 @@ def _iter_formulation_phr(formulation_phr: Mapping[Any, Any]) -> Iterable[Tuple[
     return normalized_rows
 
 
+def _resolve_global_saturation_rule(filler_reinforcement_table: Mapping[str, Any]) -> Mapping[str, Any]:
+    rule_candidates = (
+        "filler_saturation_rule",
+        "filler_saturation",
+        "saturation_rule",
+        "saturation",
+    )
+    for key in rule_candidates:
+        raw_block = filler_reinforcement_table.get(key)
+        if isinstance(raw_block, Mapping):
+            return raw_block
+    return {}
+
+
+def _resolve_filler_saturation_rule(filler_info: Mapping[str, Any]) -> Mapping[str, Any]:
+    rule_candidates = (
+        "saturation_params",
+        "saturation_rule",
+        "saturation",
+        "non_linear_params",
+    )
+    for key in rule_candidates:
+        raw_block = filler_info.get(key)
+        if isinstance(raw_block, Mapping):
+            return raw_block
+    return {}
+
+
+def _load_filler_saturation_params(filler_reinforcement_table: Dict[str, Any]) -> None:
+    global_rule = _resolve_global_saturation_rule(filler_reinforcement_table)
+
+    default_a = _to_float(global_rule.get("a_default"))
+    if default_a is None:
+        default_a = _to_float(global_rule.get("a"))
+    if default_a is None:
+        default_a = _DEFAULT_FILLER_SATURATION_A
+
+    default_b = _to_float(global_rule.get("b_default"))
+    if default_b is None:
+        default_b = _to_float(global_rule.get("b"))
+    if default_b is None or default_b <= 0:
+        default_b = _DEFAULT_FILLER_SATURATION_B
+
+    default_k = _to_float(global_rule.get("oil_damping_k"))
+    if default_k is None:
+        default_k = _to_float(global_rule.get("k"))
+    if default_k is None or default_k < 0:
+        default_k = _DEFAULT_FILLER_OIL_DAMPING_K
+
+    fillers_table = filler_reinforcement_table.get("fillers") or {}
+    saturation_by_filler: Dict[str, Dict[str, Optional[float]]] = {}
+    for raw_key, raw_filler_info in fillers_table.items():
+        filler_key = str(raw_key).strip().upper()
+        filler_info = raw_filler_info if isinstance(raw_filler_info, Mapping) else {}
+        filler_rule = _resolve_filler_saturation_rule(filler_info)
+
+        a_val = _to_float(filler_rule.get("a"))
+        if a_val is None:
+            a_val = _to_float(filler_info.get("saturation_a"))
+
+        b_val = _to_float(filler_rule.get("b"))
+        if b_val is None:
+            b_val = _to_float(filler_info.get("saturation_b"))
+        if b_val is not None and b_val <= 0:
+            LOGGER.warning(
+                "Filler %s com coeficiente b invalido (%s). Usando default %.4f.",
+                filler_key,
+                b_val,
+                default_b,
+            )
+            b_val = None
+
+        k_val = _to_float(filler_rule.get("oil_damping_k"))
+        if k_val is None:
+            k_val = _to_float(filler_rule.get("k"))
+        if k_val is None:
+            k_val = _to_float(filler_info.get("oil_damping_k"))
+        if k_val is not None and k_val < 0:
+            LOGGER.warning(
+                "Filler %s com coeficiente k invalido (%s). Usando default %.4f.",
+                filler_key,
+                k_val,
+                default_k,
+            )
+            k_val = None
+
+        saturation_by_filler[filler_key] = {
+            "a": a_val,
+            "b": float(b_val if b_val is not None else default_b),
+            "k": float(k_val if k_val is not None else default_k),
+        }
+
+    filler_reinforcement_table[_SATURATION_DEFAULTS_KEY] = {
+        "a": float(default_a),
+        "b": float(default_b),
+        "k": float(default_k),
+    }
+    filler_reinforcement_table[_SATURATION_PARAMS_KEY] = saturation_by_filler
+
+
 @lru_cache(maxsize=1)
 def load_json_maps() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     with open(_PRODUCT_MAP_PATH, "r", encoding="utf-8") as fh:
@@ -96,6 +202,8 @@ def load_json_maps() -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     with open(_FILLER_TABLE_PATH, "r", encoding="utf-8") as fh:
         filler_reinforcement_table = json.load(fh)
+
+    _load_filler_saturation_params(filler_reinforcement_table)
 
     return product_catalog_map, filler_reinforcement_table
 
@@ -367,6 +475,71 @@ def _compute_filler_index_for_blend(
     return index_blend
 
 
+def calculate_filler_impact(
+    filler_key: str,
+    phr: float,
+    oil_phr: float,
+    reinforcement_index: Optional[float] = None,
+    filler_reinforcement_table: Optional[Mapping[str, Any]] = None,
+) -> float:
+    if phr <= 0:
+        return 0.0
+
+    if filler_reinforcement_table is None:
+        _, filler_reinforcement_table = load_json_maps()
+
+    defaults = filler_reinforcement_table.get(_SATURATION_DEFAULTS_KEY) or {}
+    params_by_filler = filler_reinforcement_table.get(_SATURATION_PARAMS_KEY) or {}
+    normalized_filler_key = str(filler_key).strip().upper()
+    filler_params = params_by_filler.get(normalized_filler_key) or {}
+
+    default_a = _to_float(defaults.get("a"))
+    if default_a is None:
+        default_a = _DEFAULT_FILLER_SATURATION_A
+
+    b = _to_float(filler_params.get("b"))
+    if b is None:
+        b = _to_float(defaults.get("b"))
+    if b is None or b <= 0:
+        LOGGER.warning(
+            "Filler %s com parametro b invalido (%s). Usando default %.4f.",
+            normalized_filler_key,
+            filler_params.get("b"),
+            _DEFAULT_FILLER_SATURATION_B,
+        )
+        b = _DEFAULT_FILLER_SATURATION_B
+
+    k = _to_float(filler_params.get("k"))
+    if k is None:
+        k = _to_float(defaults.get("k"))
+    if k is None or k < 0:
+        LOGGER.warning(
+            "Filler %s com parametro k invalido (%s). Usando default %.4f.",
+            normalized_filler_key,
+            filler_params.get("k"),
+            _DEFAULT_FILLER_OIL_DAMPING_K,
+        )
+        k = _DEFAULT_FILLER_OIL_DAMPING_K
+
+    a = _to_float(filler_params.get("a"))
+    if a is None and reinforcement_index is not None:
+        a = reinforcement_index / b
+    if a is None:
+        a = default_a
+    if a < 0:
+        LOGGER.warning(
+            "Filler %s com parametro a negativo (%s). Impacto zerado.",
+            normalized_filler_key,
+            a,
+        )
+        return 0.0
+
+    oil_safe = max(0.0, float(oil_phr))
+    factor_oleo = 1.0 / (1.0 + (k * oil_safe))
+    impact = a * (1.0 - math.exp(-b * float(phr))) * factor_oleo
+    return float(impact)
+
+
 def hardness_prior_details(formulation_phr: Mapping[Any, Any]) -> Dict[str, Any]:
     product_catalog_map, filler_reinforcement_table = load_json_maps()
     elastomer_key, dominant_elastomer_code, _ = _detect_dominant_elastomer(
@@ -392,14 +565,16 @@ def hardness_prior_details(formulation_phr: Mapping[Any, Any]) -> Dict[str, Any]
     if oil_index is None:
         oil_index = -0.5
 
+    formulation_rows = list(_iter_formulation_phr(formulation_phr))
     delta_filler = 0.0
     total_filler_phr = 0.0
-    total_oil_phr = 0.0
+    total_oil_phr = sum(
+        phr for code, phr in formulation_rows if _is_oil_code(code, product_catalog_map)
+    )
 
-    for code, phr in _iter_formulation_phr(formulation_phr):
-        if _is_oil_code(code, product_catalog_map):
-            total_oil_phr += phr
+    saturation_by_filler = filler_reinforcement_table.get(_SATURATION_PARAMS_KEY) or {}
 
+    for code, phr in formulation_rows:
         filler_key = map_filler_key(code, product_catalog_map)
         if not filler_key:
             continue
@@ -414,10 +589,18 @@ def hardness_prior_details(formulation_phr: Mapping[Any, Any]) -> Dict[str, Any]
             if index is None:
                 index = _to_float(idx_map.get(_FALLBACK_ELASTOMER_KEY))
 
-        if index is None:
+        filler_sat_params = saturation_by_filler.get(str(filler_key).strip().upper()) or {}
+        has_explicit_a = _to_float(filler_sat_params.get("a")) is not None
+        if index is None and not has_explicit_a:
             continue
 
-        delta_filler += index * phr
+        delta_filler += calculate_filler_impact(
+            filler_key=filler_key,
+            phr=phr,
+            oil_phr=total_oil_phr,
+            reinforcement_index=index,
+            filler_reinforcement_table=filler_reinforcement_table,
+        )
         total_filler_phr += phr
 
     delta_oil = oil_index * total_oil_phr

@@ -10,14 +10,14 @@ import math
 import os
 import statistics 
 import json
-import sqlite3
+import re
 import unicodedata
 from urllib.parse import urlparse, urljoin
-from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexão local
+from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexÃƒÂ£o local
 from sqlalchemy.orm import load_only
 
 
-# Configurações e Modelos
+# ConfiguraÃƒÂ§ÃƒÂµes e Modelos
 from config import Config
 from services.config_manager import (
     carregar_configuracoes,
@@ -25,7 +25,7 @@ from services.config_manager import (
     salvar_regras_acao,
     salvar_configuracao,
 )
-from services.learning_service import ensinar_lote
+from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
 from models.score_versioning import ScoreResultado
 from models.formula import Formula, FormulaItem
@@ -41,22 +41,24 @@ except Exception as e:
     hardness_prior_details = None
     print(f"Aviso: Motor teorico de dureza indisponivel: {e}")
 
-# --- IMPORTAÇÃO: SERVIÇO DE ETL ---
+# --- IMPORTAÃƒâ€¡ÃƒÆ’O: SERVIÃƒâ€¡O DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
     carregar_referencias_estaticas,
+    recarregar_aprendizado_memoria,
+    extrair_lote_da_string,
     get_catalogo_codigo,
     _MAPA_GRUPOS
 )
 
-# --- NOVA IMPORTAÇÃO: SHAREPOINT LOADER ---
+# --- NOVA IMPORTAÃƒâ€¡ÃƒÆ’O: SHAREPOINT LOADER ---
 try:
     from sharepoint_loader import baixar_excel_sharepoint
 except ImportError:
     baixar_excel_sharepoint = None
-    print("⚠️ Aviso: 'sharepoint_loader.py' não encontrado. O download automático será desativado.")
+    print("[WARN] Aviso: 'sharepoint_loader.py' nao encontrado. O download automatico sera desativado.")
 
-# Caminho local padrão para o cache baixado do SharePoint
+# Caminho local padrÃƒÂ£o para o cache baixado do SharePoint
 CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
 
 def _is_safe_redirect_url(target: str) -> bool:
@@ -68,17 +70,19 @@ def _is_safe_redirect_url(target: str) -> bool:
 
 def recarregar_cache_memoria():
     """
-    Função auxiliar: Busca todos os dados do SQLite e atualiza o CacheManager.
-    Essencial para as telas de Relatórios e Auditoria funcionarem.
+    FunÃƒÂ§ÃƒÂ£o auxiliar: Busca todos os dados do SQLite e atualiza o CacheManager.
+    Essencial para as telas de RelatÃƒÂ³rios e Auditoria funcionarem.
     """
     try:
-        print("🔄 Recarregando cache em memória a partir do banco...")
+        print("[INFO] Recarregando cache em memoria a partir do banco...")
         # Busca todos os dados ordenados
         todos_ensaios = EnsaioConsolidado.query.order_by(EnsaioConsolidado.data_hora.desc()).all()
-        todos_ensaios = aplicar_sobreposicao_local(todos_ensaios)
+        overlay_fn = globals().get('aplicar_sobreposicao_local')
+        if callable(overlay_fn):
+            todos_ensaios = overlay_fn(todos_ensaios)
         
         if not todos_ensaios:
-            print("⚠️ Banco de dados vazio. Cache não atualizado.")
+            print("[WARN] Banco de dados vazio. Cache nao atualizado.")
             return 0
 
         # Extrai lista de materiais para filtros (usado na config)
@@ -93,12 +97,48 @@ def recarregar_cache_memoria():
         
         # Salva no Cache Service
         cache_service.set(dados_para_cache)
-        print(f"✅ Cache atualizado com {len(todos_ensaios)} registros.")
+        print(f"[OK] Cache atualizado com {len(todos_ensaios)} registros.")
         return len(todos_ensaios)
         
     except Exception as e:
-        print(f"❌ Erro ao recarregar cache: {e}")
+        print(f"[ERRO] Erro ao recarregar cache: {e}")
         return 0
+
+def _normalizar_lista_materiais(itens):
+    """
+    Converte listas heterogeneas de materiais (str/dict/objeto) para
+    uma lista unica de descricoes.
+    """
+    nomes = []
+    vistos = set()
+
+    for item in (itens or []):
+        nome = None
+
+        if isinstance(item, str):
+            nome = item
+        elif isinstance(item, dict):
+            nome = item.get('descricao') or item.get('massa_descricao') or item.get('nome')
+        else:
+            nome = (
+                getattr(item, 'descricao', None)
+                or getattr(item, 'massa_descricao', None)
+                or getattr(item, 'nome', None)
+            )
+
+        nome = str(nome or '').strip()
+        if not nome:
+            continue
+
+        chave = nome.upper()
+        if chave in vistos:
+            continue
+
+        vistos.add(chave)
+        nomes.append(nome)
+
+    nomes.sort()
+    return nomes
 
 def preparar_planilha_sharepoint(forcar_download=False):
     """
@@ -110,7 +150,7 @@ def preparar_planilha_sharepoint(forcar_download=False):
 
     caminho_cache = os.path.abspath(CACHE_PLANILHA_SHAREPOINT)
 
-    # Se já temos um cache e não foi solicitado força de download, reutiliza.
+    # Se jÃƒÂ¡ temos um cache e nÃƒÂ£o foi solicitado forÃƒÂ§a de download, reutiliza.
     if not forcar_download and os.path.exists(caminho_cache) and os.path.getsize(caminho_cache) > 0:
         os.environ["CAMINHO_REG403"] = caminho_cache
         return caminho_cache
@@ -122,7 +162,7 @@ def preparar_planilha_sharepoint(forcar_download=False):
             os.environ["CAMINHO_REG403"] = caminho_abs
             return caminho_abs
     except Exception as e:
-        print(f"⚠️ Falha ao baixar planilha do SharePoint: {e}")
+        print(f"[WARN] Falha ao baixar planilha do SharePoint: {e}")
 
     return None
 
@@ -132,7 +172,7 @@ app = Flask(__name__)
 app.config.from_object(Config)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 
-# --- CONFIGURAÇÃO DO BANCO DE USUÁRIOS (SQLite Local) ---
+# --- CONFIGURAÃƒâ€¡ÃƒÆ’O DO BANCO DE USUÃƒÂRIOS (SQLite Local) ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_reoscore.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -143,16 +183,16 @@ login_manager.login_view = 'login'
 # Inicializa o cache cedo para ficar disponivel durante o bootstrap.
 cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
 
-# Cria o banco de dados na primeira execução se não existir
+# Cria o banco de dados na primeira execuÃƒÂ§ÃƒÂ£o se nÃƒÂ£o existir
 with app.app_context():
     db.create_all()
 
-    # Migração leve: adiciona colunas novas no consolidado sem precisar de Alembic.
+    # MigraÃƒÂ§ÃƒÂ£o leve: adiciona colunas novas no consolidado sem precisar de Alembic.
     try:
         cols = [r[1] for r in db.session.execute(text("PRAGMA table_info(ensaio_consolidado)")).all()]
         alter_needed = False
 
-        # Mantém compatibilidade com bancos locais legados.
+        # MantÃƒÂ©m compatibilidade com bancos locais legados.
         colunas_esperadas = {
             "updated_at": "DATETIME",
             "dureza": "REAL",
@@ -197,134 +237,204 @@ def load_user(user_id):
 
 
 # ==========================================
-# 0. CONFIGURAÇÃO SIDECAR (ARQUIVO LOCAL DE REGRAS)
+# 0. CONFIGURAÃƒâ€¡ÃƒÆ’O DE APRENDIZADO (SQLALCHEMY)
 # ==========================================
-def get_local_db():
-    """Conecta ao banco SQLite local onde temos permissão de escrita"""
-    # Tenta conectar na pasta instance (padrão Flask) ou raiz
-    db_path = 'users_reoscore.db'
-    if os.path.exists(os.path.join('instance', db_path)):
-        db_path = os.path.join('instance', db_path)
-    
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def iniciar_tabela_aprendizado():
-    """Cria tabela e aplica migrações de colunas novas se necessário"""
-    try:
-        conn = get_local_db()
-        cursor = conn.cursor()
-        
-        # 1. Cria a tabela básica se não existir (Schema antigo + novos campos)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS aprendizado_local (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chave_original TEXT UNIQUE NOT NULL,
-                lote_novo TEXT NOT NULL,
-                massa_nova TEXT NOT NULL,
-                usuario_log TEXT,
-                data_log TEXT
-            )
-        """)
-        
-        # 2. Migração: Tenta adicionar as colunas caso o banco já exista (versão antiga)
-        try:
-            cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN usuario_log TEXT")
-        except sqlite3.OperationalError: pass
-            
-        try:
-            cursor.execute("ALTER TABLE aprendizado_local ADD COLUMN data_log TEXT")
-        except sqlite3.OperationalError: pass
-
-        conn.commit()
-        conn.close()
-        print("✅ Tabela de aprendizado local verificada e atualizada (Schema Logs).")
-    except Exception as e:
-        print(f"❌ Erro ao inicializar tabela local: {e}")
 
 def aplicar_sobreposicao_local(dados_brutos):
     """
-    Lê as regras do SQLite e aplica sobre a lista de objetos Ensaio em memória.
-    Isso 'corrige' os dados vindos do SQL Server sem precisar de UPDATE lá.
+    LÃƒÂª as regras de aprendizado no SQLAlchemy e aplica em memÃƒÂ³ria sobre os ensaios.
     """
     try:
-        # 1. Carrega todas as regras
-        conn = get_local_db()
-        # Verifica se a tabela existe antes de consultar
-        try:
-            regras = conn.execute("SELECT chave_original, lote_novo, massa_nova FROM aprendizado_local").fetchall()
-        except sqlite3.OperationalError:
-            # Tabela ainda não criada
-            conn.close()
-            return dados_brutos
-            
-        conn.close()
-        
-        # Cria mapa para busca rápida: {'TEXTO_FEIO': {'lote': '999', 'massa': 'X'}, ...}
-        mapa_correcoes = {r[0]: {'lote': r[1], 'massa': r[2]} for r in regras}
-        
+        mapa_correcoes = carregar_aprendizado_mapa()
         if not mapa_correcoes:
             return dados_brutos
 
         count = 0
-        # 2. Varre os dados e aplica o patch em memória
         for ensaio in dados_brutos:
-            # Tenta casar pelo Lote Original ou pelo Material Original
             lote_orig = str(getattr(ensaio, 'lote_original', '')).strip().upper()
             mat_orig = str(getattr(ensaio, 'material_original', '')).strip().upper()
-            
-            # Verifica se alguma das chaves originais está no mapa de correção
-            regra = None
-            if lote_orig in mapa_correcoes:
-                regra = mapa_correcoes[lote_orig]
-            elif mat_orig in mapa_correcoes:
-                regra = mapa_correcoes[mat_orig]
-                
-            if regra:
-                # APLICA A CORREÇÃO NO OBJETO EM MEMÓRIA
-                ensaio.lote = regra['lote']
-                
-                ensaio.massa_descricao = regra['massa']
-                
-                # Marca como corrigido manualmente
-                ensaio.metodo_identificacao = "MANUAL"
-                
-                # Opcional: Recalcular score se necessário (normalmente specs estão atrelados ao cod_sankhya)
-                # Se a massa mudou drasticamente, o score antigo pode estar inválido, 
-                # mas recalcular exigiria recarregar specs. Para visualização rápida, isso basta.
-                
-                count += 1
-                
-        print(f"🧠 Sobrescrita Local: {count} registros corrigidos em memória via SQLite.")
+            lote_compacto = _compact_lote_key(lote_orig)
+            mat_compacto = _compact_lote_key(mat_orig)
+
+            regra = (
+                mapa_correcoes.get(lote_orig)
+                or mapa_correcoes.get(lote_compacto)
+                or mapa_correcoes.get(mat_orig)
+                or mapa_correcoes.get(mat_compacto)
+            )
+            if not regra:
+                continue
+
+            ensaio.lote = regra.get('lote_real') or ensaio.lote
+            massa_corrigida = regra.get('massa')
+            if massa_corrigida:
+                ensaio.massa_descricao = massa_corrigida
+
+            ensaio.metodo_identificacao = "MANUAL"
+            count += 1
+
+        print(f"Sobrescrita de aprendizado: {count} registros corrigidos em memÃƒÂ³ria via SQLAlchemy.")
         return dados_brutos
 
     except Exception as e:
-        print(f"⚠️ Erro ao aplicar regras locais: {e}")
+        print(f"[WARN] Erro ao aplicar correcoes de aprendizado: {e}")
         return dados_brutos
 
-# Inicializa tabela auxiliar
-iniciar_tabela_aprendizado()
+
+def _norm_upper(valor):
+    return str(valor or "").strip().upper()
+
+
+def _compact_lote_key(valor):
+    return "".join(ch for ch in _norm_upper(valor) if ch.isalnum())
+
+
+def aplicar_correcoes_persistidas_no_consolidado(chaves_alvo=None):
+    """
+    Aplica correcoes manuais persistidas diretamente no ensaio_consolidado para
+    refletir as mudancas sem necessidade de ETL completo.
+    """
+    mapa_correcoes = carregar_aprendizado_mapa()
+    if not mapa_correcoes:
+        return 0
+
+    if chaves_alvo:
+        chaves = {_norm_upper(c) for c in chaves_alvo if _norm_upper(c)}
+    else:
+        chaves = set(mapa_correcoes.keys())
+
+    if not chaves:
+        return 0
+
+    chaves_compactas = {_compact_lote_key(c) for c in chaves if _compact_lote_key(c)}
+    lote_original_compacto = func.upper(
+        func.replace(
+            func.replace(
+                func.replace(
+                    func.replace(EnsaioConsolidado.lote_original, " ", ""),
+                    "-", "",
+                ),
+                "/",
+                "",
+            ),
+            ".",
+            "",
+        )
+    )
+
+    rows = (
+        EnsaioConsolidado.query
+        .filter(
+            or_(
+                func.upper(EnsaioConsolidado.lote_original).in_(list(chaves)),
+                lote_original_compacto.in_(list(chaves_compactas)),
+            )
+        )
+        .all()
+    )
+
+    alterados = 0
+    for ensaio in rows:
+        chave = _norm_upper(ensaio.lote_original)
+        regra = mapa_correcoes.get(chave) or mapa_correcoes.get(_compact_lote_key(chave))
+        if not regra:
+            continue
+
+        novo_lote = _norm_upper(regra.get('lote_real')) or ensaio.lote
+        nova_massa = _norm_upper(regra.get('massa')) or ensaio.massa_descricao
+
+        mudou = False
+        if novo_lote and ensaio.lote != novo_lote:
+            ensaio.lote = novo_lote
+            mudou = True
+
+        if nova_massa and _norm_upper(ensaio.massa_descricao) != nova_massa:
+            ensaio.massa_descricao = nova_massa
+            mudou = True
+
+        if ensaio.metodo_identificacao != "MANUAL":
+            ensaio.metodo_identificacao = "MANUAL"
+            mudou = True
+
+        if mudou:
+            ensaio.updated_at = datetime.now()
+            alterados += 1
+
+    if alterados:
+        db.session.commit()
+
+    return alterados
+
+
+def _score_lote_extraido(candidato, origem):
+    c = str(candidato or '').strip()
+    if not c:
+        return (99, 99, 99, 99)
+    origem_rank = 0 if origem in {"Asterisco", "Exato", "Regex"} else 1
+    faixa = 0 if 4 <= len(c) <= 7 else (1 if len(c) <= 10 else 2)
+    zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
+    return (origem_rank, faixa, zeros_fim, len(c))
+
+
+def aplicar_limpeza_lotes_no_consolidado():
+    """
+    Reaplica a engine de limpeza de lote diretamente nos dados consolidados
+    para refletir melhorias de parser sem precisar de ETL completo.
+    """
+    rows = (
+        EnsaioConsolidado.query
+        .filter(
+            EnsaioConsolidado.lote_original.isnot(None),
+            EnsaioConsolidado.metodo_identificacao.in_(["TEXTO", "FANTASMA"]),
+        )
+        .all()
+    )
+
+    alterados = 0
+    for ensaio in rows:
+        cand_orig, origem_orig = extrair_lote_da_string(ensaio.lote_original or ensaio.lote)
+        cand_mat, origem_mat = extrair_lote_da_string(ensaio.material_original)
+
+        lote_limpo = None
+        if cand_orig and cand_mat:
+            lote_limpo = cand_orig if _score_lote_extraido(cand_orig, origem_orig) <= _score_lote_extraido(cand_mat, origem_mat) else cand_mat
+        else:
+            lote_limpo = cand_orig or cand_mat
+
+        if not lote_limpo:
+            continue
+
+        lote_limpo = _norm_upper(lote_limpo)
+        if lote_limpo and _norm_upper(ensaio.lote) != lote_limpo:
+            ensaio.lote = lote_limpo
+            ensaio.updated_at = datetime.now()
+            alterados += 1
+
+    if alterados:
+        db.session.commit()
+
+    return alterados
 
 
 # ==========================================
-# 1. INICIALIZAÇÃO E CACHE
+# 1. INICIALIZAÃƒâ€¡ÃƒÆ’O E CACHE
 # ==========================================
 print("\n=== REOSCORE V13 (MODULARIZED & SIDECAR) ===")
 
 # Certifica que o ETL vai usar somente a planilha baixada do SharePoint
 caminho_sharepoint_inicial = preparar_planilha_sharepoint(forcar_download=False)
 if caminho_sharepoint_inicial:
-    print(f"   > Planilha SharePoint configurada em: {caminho_sharepoint_inicial}")
+    print(f"  > Planilha SharePoint configurada em: {caminho_sharepoint_inicial}")
 else:
-    print("⚠️ Aviso: Planilha do SharePoint não configurada. Use 'Atualizar Dados' para sincronizar.")
+    print("[WARN] Aviso: Planilha do SharePoint nao configurada. Use 'Atualizar Dados' para sincronizar.")
 
-carregar_referencias_estaticas()
+with app.app_context():
+    carregar_referencias_estaticas()
 
 
 
 # ==========================================
-# 2. ROTAS DE AUTENTICAÇÃO
+# 2. ROTAS DE AUTENTICAÃƒâ€¡ÃƒÆ’O
 # ==========================================
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -339,7 +449,7 @@ def login():
             login_user(user)
             return redirect(url_for('dashboard_home'))
         else:
-            flash('Login ou senha inválidos.', 'danger')
+            flash('Login ou senha invÃƒÂ¡lidos.', 'danger')
             
     return render_template('login.html')
 
@@ -347,13 +457,13 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash('Você saiu do sistema.', 'info')
+    flash('VocÃƒÂª saiu do sistema.', 'info')
     return redirect(url_for('login'))
 
 @app.route('/criar_admin')
 def criar_admin():
     if Usuario.query.filter_by(username='admin').first():
-        return "Admin já existe."
+        return "Admin jÃƒÂ¡ existe."
     
     novo_admin = Usuario(username='admin', role='admin')
     novo_admin.set_password('senha123')
@@ -364,13 +474,13 @@ def criar_admin():
 @app.route('/criar_operador')
 def criar_operador():
     if Usuario.query.filter_by(username='operador').first():
-        return "Usuário 'operador' já existe."
+        return "UsuÃƒÂ¡rio 'operador' jÃƒÂ¡ existe."
     
     novo_user = Usuario(username='operador', role='operador')
     novo_user.set_password('vulca123')
     db.session.add(novo_user)
     db.session.commit()
-    return "Usuário 'operador' criado com sucesso! (User: operador / Pass: vulca123)"
+    return "UsuÃƒÂ¡rio 'operador' criado com sucesso! (User: operador / Pass: vulca123)"
 
 # ==========================================
 # 3. ROTAS PRINCIPAIS (DASHBOARD)
@@ -384,15 +494,15 @@ def rota_atualizar():
         if baixar_excel_sharepoint:
             caminho_baixado = preparar_planilha_sharepoint(forcar_download=True)
             if caminho_baixado:
-                flash("✅ Planilha baixada do SharePoint com sucesso!", "success")
+                flash("Ã¢Å“â€¦ Planilha baixada do SharePoint com sucesso!", "success")
             else:
-                flash("⚠️ Falha no download do SharePoint. Usando cache.", "warning")
+                flash("Ã¢Å¡Â Ã¯Â¸Â Falha no download do SharePoint. Usando cache.", "warning")
 
-        # --- PASSO 2: EXECUÇÃO DO ETL ---
+        # --- PASSO 2: EXECUÃƒâ€¡ÃƒÆ’O DO ETL ---
         stats = processar_carga_dados()
         
         if stats:
-            # --- PASSO 3 (FIX): RECARREGAR O CACHE DA APLICAÇÃO ---
+            # --- PASSO 3 (FIX): RECARREGAR O CACHE DA APLICAÃƒâ€¡ÃƒÆ’O ---
             qtd_cache = recarregar_cache_memoria() 
             
             total = stats.get('total', 0)
@@ -402,8 +512,8 @@ def rota_atualizar():
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
             
     except Exception as e:
-        print(f"❌ Erro Crítico na Rota Atualizar: {e}")
-        flash(f"Erro crítico: {str(e)}", "danger")
+        print(f"[ERRO] Erro critico na rota Atualizar: {e}")
+        flash(f"Erro crÃƒÂ­tico: {str(e)}", "danger")
 
     next_url = request.args.get('next') or request.referrer
     if next_url and _is_safe_redirect_url(next_url):
@@ -411,14 +521,40 @@ def rota_atualizar():
 
     return redirect(url_for('dashboard_home'))
 
+
+@app.route('/aplicar_correcoes')
+@login_required
+def rota_aplicar_correcoes():
+    try:
+        recarregar_aprendizado_memoria()
+        total_ajustados = aplicar_correcoes_persistidas_no_consolidado()
+        total_lotes_limpos = aplicar_limpeza_lotes_no_consolidado()
+        qtd_cache = recarregar_cache_memoria()
+
+        flash(
+            f"Correcoes aplicadas: {total_ajustados} registros manuais, "
+            f"{total_lotes_limpos} lotes limpos e cache com {qtd_cache} registros.",
+            "success",
+        )
+    except Exception as e:
+        db.session.rollback()
+        print(f"[ERRO] Falha ao aplicar correcoes: {e}")
+        flash(f"Erro ao aplicar correcoes: {e}", "danger")
+
+    next_url = request.args.get('next') or request.referrer
+    if next_url and _is_safe_redirect_url(next_url):
+        return redirect(next_url)
+
+    return redirect(url_for('pagina_config', _anchor='ensinar'))
+
 @app.route('/')
 @login_required
 def dashboard_home():
     """
-    ROTA ESTRATÉGICA: Visão geral de KPIs e Gráficos Gerenciais.
-    Não carrega a lista de 50k registros, focando em agregações rápidas.
+    ROTA ESTRATÃƒâ€°GICA: VisÃƒÂ£o geral de KPIs e GrÃƒÂ¡ficos Gerenciais.
+    NÃƒÂ£o carrega a lista de 50k registros, focando em agregaÃƒÂ§ÃƒÂµes rÃƒÂ¡pidas.
     """
-    # Filtros de Período (Único filtro relevante para o Dashboard Global)
+    # Filtros de PerÃƒÂ­odo (ÃƒÅ¡nico filtro relevante para o Dashboard Global)
     d_start = request.args.get('date_start', '')
     d_end = request.args.get('date_end', '')
     
@@ -431,7 +567,7 @@ def dashboard_home():
         try: query = query.filter(EnsaioConsolidado.data_hora <= datetime.strptime(d_end, '%Y-%m-%d').replace(hour=23, minute=59))
         except: pass
 
-    # --- CÁLCULO DE KPIS (Agregado) ---
+    # --- CÃƒÂLCULO DE KPIS (Agregado) ---
     stats = query.with_entities(
         func.count(EnsaioConsolidado.id_ensaio).label('total'),
         func.avg(EnsaioConsolidado.score_final).label('score_medio'),
@@ -450,13 +586,13 @@ def dashboard_home():
         'reprovados': stats.reprovados or 0
     }
 
-    # --- GRÁFICO DE TENDÊNCIA (Últimos 30 dias com dados) ---
+    # --- GRÃƒÂFICO DE TENDÃƒÅ NCIA (ÃƒÅ¡ltimos 30 dias com dados) ---
     trend_data = query.with_entities(
         func.strftime('%Y-%m-%d', EnsaioConsolidado.data_hora).label('dia'),
         func.avg(EnsaioConsolidado.score_final).label('media')
     ).group_by('dia').order_by(desc('dia')).limit(30).all()
     
-    # Reverte para cronológico
+    # Reverte para cronolÃƒÂ³gico
     trend_data = trend_data[::-1] 
     
     chart_trend = {
@@ -500,7 +636,7 @@ def dashboard_home():
 @login_required
 def controle_qualidade():
     """
-    ROTA OPERACIONAL: Tabela de Lotes, Filtros Avançados, Busca.
+    ROTA OPERACIONAL: Tabela de Lotes, Filtros AvanÃƒÂ§ados, Busca.
     (Antiga dashboard, agora focada na lista)
     """
     is_htmx = bool(request.headers.get('HX-Request'))
@@ -516,9 +652,9 @@ def controle_qualidade():
     sort_by = request.args.get('sort', 'data')
     order = request.args.get('order', 'desc')
     page = max(request.args.get('page', 1, type=int), 1)
-    LIMIT = 50 # Mais itens por página na visão operacional
+    LIMIT = 50 # Mais itens por pÃƒÂ¡gina na visÃƒÂ£o operacional
 
-    # Carrega apenas campos usados na tabela para reduzir custo por página.
+    # Carrega apenas campos usados na tabela para reduzir custo por pÃƒÂ¡gina.
     query = EnsaioConsolidado.query.options(load_only(
         EnsaioConsolidado.id_ensaio,
         EnsaioConsolidado.data_hora,
@@ -551,7 +687,7 @@ def controle_qualidade():
 
     if f_acao:
         if f_acao == "APROVADOS":
-            query = query.filter(EnsaioConsolidado.score_final >= 70) # Simplificação
+            query = query.filter(EnsaioConsolidado.score_final >= 70) # SimplificaÃƒÂ§ÃƒÂ£o
         elif f_acao == "REPROVADO":
             query = query.filter(EnsaioConsolidado.score_final < 70)
 
@@ -574,7 +710,7 @@ def controle_qualidade():
     elif f_tipo_ensaio == 'VISC':
         query = query.filter(EnsaioConsolidado.viscosidade.isnot(None))
 
-    # Ordenação
+    # OrdenaÃƒÂ§ÃƒÂ£o
     col_map = {
         'id': EnsaioConsolidado.id_ensaio, 'data': EnsaioConsolidado.data_hora,
         'material': EnsaioConsolidado.massa_descricao,
@@ -586,10 +722,10 @@ def controle_qualidade():
     col = col_map.get(sort_by, EnsaioConsolidado.data_hora)
     query = query.order_by(col.asc() if order == 'asc' else col.desc())
 
-    # Paginação
+    # PaginaÃƒÂ§ÃƒÂ£o
     paginacao = query.paginate(page=page, per_page=LIMIT, error_out=False)
     
-    # Filtros auxiliares: só no render completo; paginação HTMX não usa o select de materiais.
+    # Filtros auxiliares: sÃƒÂ³ no render completo; paginaÃƒÂ§ÃƒÂ£o HTMX nÃƒÂ£o usa o select de materiais.
     materiais_filtro = []
     if not is_htmx:
         materiais = db.session.query(EnsaioConsolidado.massa_descricao).distinct().order_by(EnsaioConsolidado.massa_descricao).all()
@@ -614,31 +750,31 @@ def controle_qualidade():
 @login_required
 def analise_curva(id_ensaio):
     """
-    ROTA ANALÍTICA: Detalhes profundos de um ensaio específico.
+    ROTA ANALÃƒÂTICA: Detalhes profundos de um ensaio especÃƒÂ­fico.
     """
     ensaio = EnsaioConsolidado.query.get_or_404(id_ensaio)
     
-    # Busca o detalhe do cálculo (logs da engine)
+    # Busca o detalhe do cÃƒÂ¡lculo (logs da engine)
     resultado = ScoreResultado.query.filter_by(id_ensaio=id_ensaio).order_by(ScoreResultado.id.desc()).first()
     detalhes_score = resultado.detalhes_log if resultado else {}
     
-    # Se 'params' estiver aninhado (dependendo da versão da engine)
+    # Se 'params' estiver aninhado (dependendo da versÃƒÂ£o da engine)
     if 'params' in detalhes_score:
         detalhes_score = detalhes_score['params']
 
     return render_template('detalhe_curva.html', ensaio=ensaio, detalhes=detalhes_score)
 
 # ==========================================
-# 4. ROTAS DE CONFIGURAÇÃO (ADMIN)
+# 4. ROTAS DE CONFIGURAÃƒâ€¡ÃƒÆ’O (ADMIN)
 # ==========================================
 
 @app.route('/config')
 @login_required
 def pagina_config():
-    # OBS: Se o usuário NÃO for admin, ele ainda vai carregar os dados de materiais
-    # abaixo, mas o template não vai mostrar. Não é crítico para performance.
+    # OBS: Se o usuÃƒÂ¡rio NÃƒÆ’O for admin, ele ainda vai carregar os dados de materiais
+    # abaixo, mas o template nÃƒÂ£o vai mostrar. NÃƒÂ£o ÃƒÂ© crÃƒÂ­tico para performance.
     
-    # === PARTE 1: CONFIGURAÇÃO DE MATERIAIS ===
+    # === PARTE 1: CONFIGURAÃƒâ€¡ÃƒÆ’O DE MATERIAIS ===
     regras_acao = carregar_regras_acao()
     configs_massas = carregar_configuracoes()
 
@@ -646,7 +782,7 @@ def pagina_config():
     filtro_tipo = request.args.get('tipo', '')
     filtro_status = request.args.get('status', '')
     
-    # Paginação de Materiais
+    # PaginaÃƒÂ§ÃƒÂ£o de Materiais
     page_mat = request.args.get('page_mat', 1, type=int) 
     
     sort_by = request.args.get('sort', 'descricao') 
@@ -692,7 +828,7 @@ def pagina_config():
     
     if dados_cache:
         ensaios_raw = dados_cache['dados']
-        materiais_audit = dados_cache['materiais']
+        materiais_audit = _normalizar_lista_materiais(dados_cache.get('materiais'))
         
         f_data = request.args.get('audit_data', '')
         f_status = request.args.get('audit_status', '')
@@ -701,19 +837,19 @@ def pagina_config():
         page_audit = request.args.get('page_audit', 1, type=int)
         per_page_audit = 50
 
-        # Filtragem em memória
+        # Filtragem em memÃƒÂ³ria
         for e in ensaios_raw:
             if f_data and e.data_hora.strftime('%Y-%m-%d') != f_data: continue
             if f_status and e.metodo_identificacao != f_status: continue
             if f_busca and f_busca not in str(e.lote).upper(): continue
 
-            # Lógica Padrão: Esconde 'LOTE' se sem filtros
+            # LÃƒÂ³gica PadrÃƒÂ£o: Esconde 'LOTE' se sem filtros
             if not f_status and not f_busca and not f_data:
                 if e.metodo_identificacao == 'LOTE': continue
 
             ensaios_audit.append(e)
 
-        # Ordenação Auditoria
+        # OrdenaÃƒÂ§ÃƒÂ£o Auditoria
         peso = {'FANTASMA': 100, 'TEXTO': 90, 'MANUAL': 10, 'LOTE': 0}
         def get_data_segura(x): return x.data_hora if x.data_hora else datetime.min
         
@@ -735,7 +871,7 @@ def pagina_config():
         total_registros_audit = 0
         page_audit = 1
 
-    # === PARTE 3: GESTÃO DE USUÁRIOS (Admin) ===
+    # === PARTE 3: GESTÃƒÆ’O DE USUÃƒÂRIOS (Admin) ===
     usuarios_lista = []
     if current_user.role == 'admin':
         usuarios_lista = Usuario.query.all()
@@ -760,7 +896,7 @@ def pagina_config():
         audit_status=request.args.get('audit_status', ''),
         audit_data=request.args.get('audit_data', ''),
 
-        # Dados Usuários
+        # Dados UsuÃƒÂ¡rios
         usuarios=usuarios_lista
     )
 
@@ -776,17 +912,17 @@ def adicionar_usuario():
     role = request.form.get('role')
 
     if not username or not password or not role:
-        flash("Preencha usuário, senha e perfil.", "warning")
+        flash("Preencha usuÃƒÂ¡rio, senha e perfil.", "warning")
         return redirect(url_for('pagina_config', _anchor='usuarios'))
 
     if Usuario.query.filter_by(username=username).first():
-        flash(f"Usuário '{username}' já existe.", "warning")
+        flash(f"UsuÃƒÂ¡rio '{username}' jÃƒÂ¡ existe.", "warning")
     else:
         novo_user = Usuario(username=username, role=role)
         novo_user.set_password(password)
         db.session.add(novo_user)
         db.session.commit()
-        flash(f"Usuário '{username}' criado com sucesso!", "success")
+        flash(f"UsuÃƒÂ¡rio '{username}' criado com sucesso!", "success")
         
     return redirect(url_for('pagina_config', _anchor='usuarios'))
 
@@ -804,30 +940,30 @@ def editar_usuario():
     
     user = Usuario.query.get(user_id)
     if not user:
-        flash("Usuário não encontrado.", "danger")
+        flash("UsuÃƒÂ¡rio nÃƒÂ£o encontrado.", "danger")
         return redirect(url_for('pagina_config', _anchor='usuarios'))
         
-    # Verifica se o novo username já existe (se for diferente do atual)
+    # Verifica se o novo username jÃƒÂ¡ existe (se for diferente do atual)
     if novo_username != user.username:
         existente = Usuario.query.filter_by(username=novo_username).first()
         if existente:
-            flash(f"O nome de usuário '{novo_username}' já está em uso.", "warning")
+            flash(f"O nome de usuÃƒÂ¡rio '{novo_username}' jÃƒÂ¡ estÃƒÂ¡ em uso.", "warning")
             return redirect(url_for('pagina_config', _anchor='usuarios'))
     
     # Atualiza dados
     user.username = novo_username
     user.role = novo_role
     
-    # Só atualiza a senha se for fornecida
+    # SÃƒÂ³ atualiza a senha se for fornecida
     if nova_senha and nova_senha.strip():
         user.set_password(nova_senha)
         
     try:
         db.session.commit()
-        flash(f"Usuário '{user.username}' atualizado com sucesso!", "success")
+        flash(f"UsuÃƒÂ¡rio '{user.username}' atualizado com sucesso!", "success")
     except Exception as e:
         db.session.rollback()
-        flash(f"Erro ao atualizar usuário: {e}", "danger")
+        flash(f"Erro ao atualizar usuÃƒÂ¡rio: {e}", "danger")
         
     return redirect(url_for('pagina_config', _anchor='usuarios'))
 
@@ -841,11 +977,11 @@ def remover_usuario(user_id):
     user = Usuario.query.get(user_id)
     if user:
         if user.id == current_user.id:
-            flash("Você não pode remover a si mesmo.", "danger")
+            flash("VocÃƒÂª nÃƒÂ£o pode remover a si mesmo.", "danger")
         else:
             db.session.delete(user)
             db.session.commit()
-            flash(f"Usuário '{user.username}' removido.", "success")
+            flash(f"UsuÃƒÂ¡rio '{user.username}' removido.", "success")
     
     return redirect(url_for('pagina_config', _anchor='usuarios'))
 
@@ -854,7 +990,7 @@ def remover_usuario(user_id):
 def salvar_regras():
     if current_user.role != 'admin': return redirect(url_for('dashboard_home'))
 
-    # Coleta dados das listas do formulário
+    # Coleta dados das listas do formulÃƒÂ¡rio
     nomes = request.form.getlist('nome[]')
     scores = request.form.getlist('min_score[]')
     acoes = request.form.getlist('acao[]')
@@ -863,7 +999,7 @@ def salvar_regras():
     
     novas_regras = []
     for i in range(len(nomes)):
-        # Verifica se o índice atual está na lista de checkboxes marcados
+        # Verifica se o ÃƒÂ­ndice atual estÃƒÂ¡ na lista de checkboxes marcados
         eh_marcado = str(i) in marcados
         novas_regras.append({
             "id": i+1,
@@ -875,7 +1011,7 @@ def salvar_regras():
         })
         
     salvar_regras_acao(novas_regras)
-    flash("Regras de ação globais atualizadas!", "success")
+    flash("Regras de aÃƒÂ§ÃƒÂ£o globais atualizadas!", "success")
     return redirect(url_for('pagina_config'))
 
 
@@ -903,7 +1039,7 @@ def salvar_config():
             if chave_custom in cfg_atual_produto:
                 specs[chave_custom] = cfg_atual_produto[chave_custom]
     
-    # --- 1. CAPTURA DE CABEÇALHO (TEMP/TEMPO) ---
+    # --- 1. CAPTURA DE CABEÃƒâ€¡ALHO (TEMP/TEMPO) ---
     # Captura Cinza
     t_cinza = f(request.form.get('alta_cinza_temp_padrao'))
     tempo_cinza = f(request.form.get('alta_cinza_tempo_total'))
@@ -912,12 +1048,12 @@ def salvar_config():
     t_preto = f(request.form.get('alta_preto_temp_padrao'))
     tempo_preto = f(request.form.get('alta_preto_tempo_total'))
     
-    # REGRA DE CÓPIA (Cabeçalho)
-    # Se Cinza tem e Preto não -> Preto recebe Cinza
+    # REGRA DE CÃƒâ€œPIA (CabeÃƒÂ§alho)
+    # Se Cinza tem e Preto nÃƒÂ£o -> Preto recebe Cinza
     if t_cinza and not t_preto: t_preto = t_cinza
     if tempo_cinza and not tempo_preto: tempo_preto = tempo_cinza
     
-    # Se Preto tem e Cinza não -> Cinza recebe Preto (vice-versa)
+    # Se Preto tem e Cinza nÃƒÂ£o -> Cinza recebe Preto (vice-versa)
     if t_preto and not t_cinza: t_cinza = t_preto
     if tempo_preto and not tempo_cinza: tempo_cinza = tempo_preto
 
@@ -943,14 +1079,14 @@ def salvar_config():
             'dureza_max': ab5n_max if ab5n_max is not None else regra_existente.get('dureza_max', 50.0),
         }
 
-    # --- 2. CAPTURA DE PARÂMETROS (LIMITES) ---
+    # --- 2. CAPTURA DE PARÃƒâ€šMETROS (LIMITES) ---
     params = ['Ts2', 'T90', 'Viscosidade']
     
     for p in params:
-        # Peso é compartilhado (vem de um input só)
+        # Peso ÃƒÂ© compartilhado (vem de um input sÃƒÂ³)
         peso_v = i(request.form.get(f"alta_{p}_peso"))
         
-        # --- LÓGICA ALTA (CINZA vs PRETO) ---
+        # --- LÃƒâ€œGICA ALTA (CINZA vs PRETO) ---
         # Leitura Cinza
         min_c = f(request.form.get(f"alta_cinza_{p}_min"))
         alvo_c = f(request.form.get(f"alta_cinza_{p}_alvo"))
@@ -961,7 +1097,7 @@ def salvar_config():
         alvo_p = f(request.form.get(f"alta_preto_{p}_alvo"))
         max_p = f(request.form.get(f"alta_preto_{p}_max"))
         
-        # REGRA DE CÓPIA (Limites)
+        # REGRA DE CÃƒâ€œPIA (Limites)
         # Se configurou Cinza mas esqueceu Preto -> Copia
         if (min_c or alvo_c or max_c) and not (min_p or alvo_p or max_p):
             min_p, alvo_p, max_p = min_c, alvo_c, max_c
@@ -970,7 +1106,7 @@ def salvar_config():
         elif (min_p or alvo_p or max_p) and not (min_c or alvo_c or max_c):
             min_c, alvo_c, max_c = min_p, alvo_p, max_p
 
-        # Gravação Cinza
+        # GravaÃƒÂ§ÃƒÂ£o Cinza
         if min_c is not None or alvo_c is not None or max_c is not None:
             specs[f"alta_cinza_{p}"] = {
                 "min": min_c if min_c is not None else 0, 
@@ -979,7 +1115,7 @@ def salvar_config():
                 "peso": peso_v
             }
             
-        # Gravação Preto
+        # GravaÃƒÂ§ÃƒÂ£o Preto
         if min_p is not None or alvo_p is not None or max_p is not None:
             specs[f"alta_preto_{p}"] = {
                 "min": min_p if min_p is not None else 0, 
@@ -988,7 +1124,7 @@ def salvar_config():
                 "peso": peso_v
             }
 
-        # --- LÓGICA BAIXA (Mantida Simples) ---
+        # --- LÃƒâ€œGICA BAIXA (Mantida Simples) ---
         min_b = f(request.form.get(f"baixa_{p}_min"))
         alvo_b = f(request.form.get(f"baixa_{p}_alvo"))
         max_b = f(request.form.get(f"baixa_{p}_max"))
@@ -1055,7 +1191,7 @@ def salvar_config():
     salvar_configuracao(cod, specs)
     carregar_referencias_estaticas()
     
-    flash(f"Configuração do produto {cod} salva (Sincronizada Cinza/Preto)!", "success")
+    flash(f"ConfiguraÃƒÂ§ÃƒÂ£o do produto {cod} salva (Sincronizada Cinza/Preto)!", "success")
     return redirect(url_for('pagina_config', q=cod))
 
 @app.route('/api/grafico')
@@ -1071,16 +1207,16 @@ def api_grafico():
         # 1. IDs das LINHAS selecionadas
         selected_parent_ids = [int(x) for x in ids_str.split(',') if x.strip().isdigit()]
         
-        # Limite dinâmico
+        # Limite dinÃƒÂ¢mico
         limite = 100 if modo_lote else 10
         
         if len(selected_parent_ids) > limite:
-            return jsonify({'error': f'Muitos dados ({len(selected_parent_ids)}). Limite é {limite}.'}), 400
+            return jsonify({'error': f'Muitos dados ({len(selected_parent_ids)}). Limite ÃƒÂ© {limite}.'}), 400
 
         all_ids_to_fetch = set()
         map_id_to_parent = {} 
 
-        # 2. Metadados locais (SQLite / EnsaioConsolidado) + expansão via ids_agrupados do merge
+        # 2. Metadados locais (SQLite / EnsaioConsolidado) + expansÃƒÂ£o via ids_agrupados do merge
         ensaios_base = (
             EnsaioConsolidado.query
             .filter(EnsaioConsolidado.id_ensaio.in_(selected_parent_ids))
@@ -1110,7 +1246,7 @@ def api_grafico():
                 map_id_to_parent[c_id_int] = parent_meta
 
         if not all_ids_to_fetch:
-            return jsonify({'error': 'IDs não encontrados no cache.'}), 404
+            return jsonify({'error': 'IDs nÃƒÂ£o encontrados no cache.'}), 404
 
         # 3. Busca SQL
         conn = connect_to_database()
@@ -1159,7 +1295,7 @@ def api_grafico():
             
             parent = map_id_to_parent.get(c_id)
             
-            # Classificação
+            # ClassificaÃƒÂ§ÃƒÂ£o
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
             tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
             
@@ -1186,7 +1322,7 @@ def api_grafico():
 
                 label = f"{cod_s} - Batch {batch_s} (ID {c_id})"
                 
-                # --- NOVO: Classificação do Subtipo para o Filtro ---
+                # --- NOVO: ClassificaÃƒÂ§ÃƒÂ£o do Subtipo para o Filtro ---
                 temp_type = 'GERAL'
                 if not is_viscosity:
                     temp_type = 'ALTA' if c_temp >= 175 else 'BAIXA'
@@ -1201,7 +1337,7 @@ def api_grafico():
                     'borderWidth': 2,
                     'tension': 0.4,
                     'fill': False,
-                    # Cores dinâmicas
+                    # Cores dinÃƒÂ¢micas
                     'borderColor': '#dc3545' if temp_type == 'ALTA' else '#0d6efd'
                 }
             
@@ -1227,10 +1363,10 @@ def api_grafico():
 @app.route('/auditoria')
 @login_required
 def pagina_auditoria():
-    # ... (seu código existente de filtro e ordenação) ...
+    # ... (seu cÃƒÂ³digo existente de filtro e ordenaÃƒÂ§ÃƒÂ£o) ...
 
-    # --- CORREÇÃO AQUI ---
-    # Cria um dicionário mutável a partir dos argumentos da URL
+    # --- CORREÃƒâ€¡ÃƒÆ’O AQUI ---
+    # Cria um dicionÃƒÂ¡rio mutÃƒÂ¡vel a partir dos argumentos da URL
     filtros_para_template = dict(request.args)
     # Remove 'page' para evitar conflito no url_for do template
     if 'page' in filtros_para_template:
@@ -1239,9 +1375,9 @@ def pagina_auditoria():
     # Recupera dados se for chamado diretamente (mantendo compatibilidade)
     dados_cache = cache_service.get()
     ensaios = dados_cache['dados'] if dados_cache else []
-    materiais = dados_cache['materiais'] if dados_cache else []
+    materiais = _normalizar_lista_materiais(dados_cache.get('materiais')) if dados_cache else []
     
-    # Paginação simples para manter a rota funcionando
+    # PaginaÃƒÂ§ÃƒÂ£o simples para manter a rota funcionando
     page = request.args.get('page', 1, type=int)
     per_page = 50
     total_registros = len(ensaios)
@@ -1270,27 +1406,38 @@ def salvar_correcao():
         flash("Dados incompletos para salvar.", "warning")
         return redirect(url_for('pagina_config', _anchor='ensinar'))
 
+    massa_raw = str(massa_correta or '').strip()
+    if not massa_raw or massa_raw.upper() in {'NONE', 'NULL', 'NULO', 'SELECIONE...', 'SELECIONE'}:
+        flash("Selecione uma massa valida antes de salvar.", "warning")
+        return redirect(url_for('pagina_config', _anchor='ensinar'))
+
     key_original = str(texto_original).strip().upper()
     lote_clean = str(lote_correto).strip().upper()
-    massa_clean = str(massa_correta).strip().upper()
+    massa_clean = massa_raw.upper()
 
     # --- NOVOS DADOS DE LOG ---
     user_log = current_user.username
-    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    try:
+    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')    try:
         ensinar_lote(key_original, lote_clean, massa_clean, usuario=user_log)
-        flash(f"✅ Regra salva! (Log: {user_log} às {time_log})", "success")
-        
+        recarregar_aprendizado_memoria()
+        total_ajustados = aplicar_correcoes_persistidas_no_consolidado([key_original])
+        recarregar_cache_memoria()
+
+        flash(
+            f"Regra salva e aplicada! Ajustados: {total_ajustados} "
+            f"- {user_log} as {time_log}.",
+            "success",
+        )
     except Exception as e:
-        print(f"❌ Erro ao salvar no SQLite: {e}")
+        db.session.rollback()
+        print(f"[ERRO] Erro ao salvar no SQLite: {e}")
         flash("Erro ao salvar regra localmente.", "danger")
 
     return redirect(url_for('pagina_config', _anchor='ensinar'))
 
 
 # ==========================================
-# ROTAS NOVAS (RELATÓRIOS E GESTÃO)
+# ROTAS NOVAS (RELATÃƒâ€œRIOS E GESTÃƒÆ’O)
 # ==========================================
 
 MAPA_PROPRIEDADES_FISICAS = {
@@ -1310,19 +1457,19 @@ MAPA_PROPRIEDADES_FISICAS = {
         'label': 'Abrasao',
         'sigla': 'Abr',
         'unidade': 'mm3',
-        'spec_keys': ['Abrasao', 'Abrasão', 'abrasao'],
+        'spec_keys': ['Abrasao', 'AbrasÃƒÂ£o', 'abrasao'],
     },
     'resiliencia': {
         'label': 'Resiliencia',
         'sigla': 'Res',
         'unidade': '%',
-        'spec_keys': ['Resiliencia', 'Resiliência', 'resiliencia'],
+        'spec_keys': ['Resiliencia', 'ResiliÃƒÂªncia', 'resiliencia'],
     },
     'tensao_ruptura': {
         'label': 'Tensao Ruptura',
         'sigla': 'TR',
         'unidade': 'MPa',
-        'spec_keys': ['TensaoRuptura', 'Tensao Ruptura', 'Tensão Ruptura', 'tensao_ruptura'],
+        'spec_keys': ['TensaoRuptura', 'Tensao Ruptura', 'TensÃƒÂ£o Ruptura', 'tensao_ruptura'],
     },
     'alongamento': {
         'label': 'Alongamento',
@@ -1552,7 +1699,7 @@ def pagina_relatorios():
     
     return render_template('relatorios.html', **context)
 
-# Rota da Lista de Lotes (Agora com Filtros e Ordenação)
+# Rota da Lista de Lotes (Agora com Filtros e OrdenaÃƒÂ§ÃƒÂ£o)
 @app.route('/relatorios/detalhes/<int:cod_sankhya>')
 @login_required
 def detalhes_lotes_massa(cod_sankhya):
@@ -1562,13 +1709,13 @@ def detalhes_lotes_massa(cod_sankhya):
     # Filtra os dados brutos
     lista_filtrada = [e for e in dados_cache['dados'] if e.massa.cod_sankhya == cod_sankhya]
     
-    # Gera a árvore (com os novos KPIs de lote)
+    # Gera a ÃƒÂ¡rvore (com os novos KPIs de lote)
     relatorio = gerar_estrutura_relatorio(lista_filtrada)
-    if not relatorio: return "Material não encontrado ou sem dados."
+    if not relatorio: return "Material nÃƒÂ£o encontrado ou sem dados."
     
     massa_node = relatorio[0]
     
-    # --- Lógica de Ordenação e Filtro da Lista de Lotes ---
+    # --- LÃƒÂ³gica de OrdenaÃƒÂ§ÃƒÂ£o e Filtro da Lista de Lotes ---
     lotes_lista = list(massa_node['lotes'].values())
     regra_abrasao_5n = _obter_regra_abrasao_5n(cod_sankhya)
     
@@ -1587,7 +1734,7 @@ def detalhes_lotes_massa(cod_sankhya):
         lote['metodologia_abrasao_5n'] = _usa_metodologia_abrasao_5n(props, regra_abrasao_5n)
         lote['regra_abrasao_5n'] = regra_abrasao_5n
     
-    # Ordenação
+    # OrdenaÃƒÂ§ÃƒÂ£o
     reverse = (order == 'desc')
     if sort_by == 'data':
         lotes_lista.sort(key=lambda x: x.get('data_recente') or datetime.min, reverse=reverse)
@@ -1606,7 +1753,7 @@ def detalhes_lotes_massa(cod_sankhya):
         'search_term': search_lote
     }
 
-    # Se for HTMX, retorna só o tbody
+    # Se for HTMX, retorna sÃƒÂ³ o tbody
     if request.headers.get('HX-Request'):
         return render_template('partial_lista_lotes.html', **context)
 
@@ -1625,11 +1772,11 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
         if e.massa.cod_sankhya == cod_sankhya and str(e.lote) == str(numero_lote)
     ]
     
-    if not ensaios_do_lote: return "Lote não encontrado."
+    if not ensaios_do_lote: return "Lote nÃƒÂ£o encontrado."
 
-    # 2. Lógica de Ordenação da Tabela
-    sort_by = request.args.get('sort', 'batch') # Padrão: Batch
-    order = request.args.get('order', 'asc')    # Padrão: Crescente
+    # 2. LÃƒÂ³gica de OrdenaÃƒÂ§ÃƒÂ£o da Tabela
+    sort_by = request.args.get('sort', 'batch') # PadrÃƒÂ£o: Batch
+    order = request.args.get('order', 'asc')    # PadrÃƒÂ£o: Crescente
     reverse = (order == 'desc')
 
     def safe_sort_key(obj, attr, default=0):
@@ -1641,7 +1788,7 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
     elif sort_by == 'hora':
         ensaios_do_lote.sort(key=lambda x: x.data_hora, reverse=reverse)
     elif sort_by == 'batch':
-        # Tenta converter para int para ordenar corretamente (1, 2, 10 e não 1, 10, 2)
+        # Tenta converter para int para ordenar corretamente (1, 2, 10 e nÃƒÂ£o 1, 10, 2)
         def batch_key(x):
             try: return int(x.batch)
             except: return 0
@@ -1651,12 +1798,12 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
     elif sort_by == 'score':
         ensaios_do_lote.sort(key=lambda x: x.score_final, reverse=reverse)
 
-    # 3. Gera Árvore para KPIs (Score Geral, Aprovação)
+    # 3. Gera ÃƒÂrvore para KPIs (Score Geral, AprovaÃƒÂ§ÃƒÂ£o)
     arvore = gerar_estrutura_relatorio(ensaios_do_lote)
     dados_lote = arvore[0]['lotes'][numero_lote]
     dados_massa = arvore[0]
 
-    # 4. Cálculo Robusto de Médias (Corrigindo Viscosidade Zerada)
+    # 4. CÃƒÂ¡lculo Robusto de MÃƒÂ©dias (Corrigindo Viscosidade Zerada)
     coleta = {
         'alta': {'Ts2': [], 'T90': []},
         'baixa': {'Ts2': [], 'T90': []},
@@ -1671,7 +1818,7 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
         if vals.get('Ts2') and vals['Ts2'] > 0: coleta[contexto]['Ts2'].append(vals['Ts2'])
         if vals.get('T90') and vals['T90'] > 0: coleta[contexto]['T90'].append(vals['T90'])
         
-        # Correção aqui: Só adiciona se for maior que 0
+        # CorreÃƒÂ§ÃƒÂ£o aqui: SÃƒÂ³ adiciona se for maior que 0
         if vals.get('Viscosidade') and vals['Viscosidade'] > 0.1: 
             coleta['visc'].append(vals['Viscosidade'])
 
@@ -1701,13 +1848,13 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
         lote=dados_lote, 
         massa=dados_massa,
         ensaios=ensaios_do_lote,
-        # Passamos os params para manter a ordenação nos links
+        # Passamos os params para manter a ordenaÃƒÂ§ÃƒÂ£o nos links
         sort_by=sort_by,
         order=order
     )
 
 
-# --- ROTAS DE FORMULAÇÃO ---
+# --- ROTAS DE FORMULAÃƒâ€¡ÃƒÆ’O ---
 def _normalizar_chave_mp(chave):
     raw = str(chave or '').strip().lower()
     if not raw:
@@ -2043,7 +2190,7 @@ def pagina_contratos_api():
 @login_required
 def lista_formulas():
     formulas = Formula.query.order_by(Formula.cd_produto).all()
-    # Passamos o catálogo também, caso precise corrigir nomes na listagem
+    # Passamos o catÃƒÂ¡logo tambÃƒÂ©m, caso precise corrigir nomes na listagem
     return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
 
 @app.route('/formulas/<int:cd_produto>')
@@ -2051,8 +2198,8 @@ def lista_formulas():
 def detalhe_formula(cd_produto):
     formula = Formula.query.get_or_404(cd_produto)
     
-    # INJEÇÃO DE DEPENDÊNCIA:
-    # Passamos o catálogo completo para o template fazer o "De/Para" em tempo real
+    # INJEÃƒâ€¡ÃƒÆ’O DE DEPENDÃƒÅ NCIA:
+    # Passamos o catÃƒÂ¡logo completo para o template fazer o "De/Para" em tempo real
     catalogo = get_catalogo_codigo()
     
     return render_template(
@@ -2064,3 +2211,4 @@ def detalhe_formula(cd_produto):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
