@@ -1,13 +1,19 @@
-﻿import pandas as pd
-import numpy as np
-import xgboost as xgb
-import shap
-import pickle
+﻿import logging
 import os
-from sqlalchemy import text
+import pickle
+from typing import Any, Dict, Tuple
+
+import numpy as np
+import pandas as pd
+import shap
+import xgboost as xgb
+
 from models.usuario import db
-from models.formula import Formula, FormulaItem
-from models.consolidado import EnsaioConsolidado
+from services.theoretical_dataset_loader import load_theoretical_formulations
+from services.theory_engine import hardness_prior_details
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SimuladorIAService:
@@ -17,6 +23,7 @@ class SimuladorIAService:
 
     MODEL_PATH = "instance/modelo_dureza_v1.pkl"
     COLUMNS_PATH = "instance/modelo_colunas_v1.pkl"
+    MIN_FILLER_PHR_FOR_MODEL = 1.0
 
     @staticmethod
     def extrair_dados_treinamento():
@@ -61,28 +68,21 @@ class SimuladorIAService:
         df_final = df_final.drop(columns=["cd_produto"])
 
         # 4. Synthetic Data Injection (conhecimento teorico)
-        raiz_projeto = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        caminho_teorico = os.path.join(raiz_projeto, "conhecimento_teorico.csv")
+        try:
+            cenarios_teoricos = load_theoretical_formulations()
+            linhas_teoricas = []
+            for cenario in cenarios_teoricos:
+                target_hardness = cenario.get("target_hardness")
+                if target_hardness is None:
+                    continue
 
-        if os.path.exists(caminho_teorico):
-            try:
-                try:
-                    df_teorico = pd.read_csv(caminho_teorico, sep=";", encoding="utf-8")
-                except UnicodeDecodeError:
-                    df_teorico = pd.read_csv(caminho_teorico, sep=";", encoding="latin1")
+                row = {"dureza": float(target_hardness)}
+                for code, phr in (cenario.get("formulation_phr") or {}).items():
+                    row[f"mp_{int(code)}"] = float(phr)
+                linhas_teoricas.append(row)
 
-                df_teorico.columns = [str(col).strip() for col in df_teorico.columns]
-
-                # Normalizar colunas de MP: 105 -> mp_105
-                rename_cols = {}
-                for col in df_teorico.columns:
-                    if col.isdigit():
-                        rename_cols[col] = f"mp_{col}"
-                if rename_cols:
-                    df_teorico = df_teorico.rename(columns=rename_cols)
-
-                # Garantir dados numericos
-                df_teorico = df_teorico.apply(pd.to_numeric, errors="coerce")
+            if linhas_teoricas:
+                df_teorico = pd.DataFrame(linhas_teoricas).fillna(0.0)
 
                 # Alinhar colunas entre base real e teorica (preencher faltantes com 0.0)
                 colunas_unificadas = list(df_final.columns)
@@ -98,10 +98,11 @@ class SimuladorIAService:
 
                 # Fusao final: dados reais + dados sinteticos ponderados
                 df_final = pd.concat([df_final, df_teorico_pesado], ignore_index=True)
-            except Exception as exc:
-                print(
-                    f"[SimuladorIAService] Aviso: falha ao injetar conhecimento teorico ({exc})."
-                )
+        except Exception as exc:
+            LOGGER.warning(
+                "[SimuladorIAService] Aviso: falha ao injetar conhecimento teorico (%s).",
+                exc,
+            )
 
         # Limpeza final
         df_final = df_final.fillna(0.0)
@@ -143,13 +144,58 @@ class SimuladorIAService:
     def simular_nova_receita(cls, dict_ingredientes):
         """
         dict_ingredientes: Ex: {'mp_105': 50.0, 'mp_204': 2.5}
-        Retorna: {
-            'previsao': float,
-            'contribuicoes': { 'nome_mp': valor_shap }
-        }
+        Retorna dureza por regras + (quando disponivel) dureza do modelo e SHAP.
         """
-        if not os.path.exists(cls.MODEL_PATH):
-            return {"erro": "Modelo nao treinado. Execute treinar_modelo() primeiro."}
+        prior = hardness_prior_details(dict_ingredientes or {})
+        hardness_rule = float(prior.get("hardness_rule_final") or prior.get("hardness_rule") or 0.0)
+
+        resposta = {
+            "hardness_rule": round(hardness_rule, 2),
+            "hardness_rule_final": round(hardness_rule, 2),
+            "hardness_model": None,
+            "hardness_final": round(hardness_rule, 2),
+            # Compatibilidade com payload legado do simulador.
+            "dureza_prevista": round(hardness_rule, 2),
+            "unidade": "Shore A",
+            "impacto_ingredientes": {},
+            "base_value": None,
+            "base_blend_shore": prior.get("base_blend_shore"),
+            "elastomer_blend_breakdown": prior.get("elastomer_blend_breakdown") or [],
+            "prior_diagnostics": {
+                "dominant_elastomer_key": prior.get("dominant_elastomer_key"),
+                "dominant_elastomer_code": prior.get("dominant_elastomer_code"),
+                "base_shore": prior.get("base_shore"),
+                "base_blend_shore": prior.get("base_blend_shore"),
+                "elastomer_blend_breakdown": prior.get("elastomer_blend_breakdown") or [],
+                "total_filler_phr": prior.get("total_filler_phr"),
+                "total_oil_phr": prior.get("total_oil_phr"),
+                "delta_filler": prior.get("delta_filler"),
+                "delta_oil": prior.get("delta_oil"),
+                "hardness_rule_final": prior.get("hardness_rule_final"),
+            },
+        }
+
+        # Guardrail: sem carga relevante, nao aplica qualquer ajuste por modelo.
+        if float(prior.get("total_filler_phr") or 0.0) < cls.MIN_FILLER_PHR_FOR_MODEL:
+            resposta["guardrail"] = "total_filler_phr_below_1"
+            return resposta
+
+        hardness_model, contribuicoes, base_value = cls._predict_with_model(dict_ingredientes)
+        if hardness_model is None:
+            return resposta
+
+        # Mantemos hardness_final como prior fisico (modelo ainda nao e residual).
+        resposta["hardness_model"] = round(hardness_model, 2)
+        resposta["impacto_ingredientes"] = contribuicoes
+        resposta["base_value"] = base_value
+        return resposta
+
+    @classmethod
+    def _predict_with_model(
+        cls, dict_ingredientes: Dict[str, Any]
+    ) -> Tuple[Any, Dict[str, float], Any]:
+        if not os.path.exists(cls.MODEL_PATH) or not os.path.exists(cls.COLUMNS_PATH):
+            return None, {}, None
 
         # Carregar modelo e estrutura de colunas
         with open(cls.MODEL_PATH, "rb") as f:
@@ -158,10 +204,12 @@ class SimuladorIAService:
             colunas_treino = pickle.load(f)
 
         # Preparar o input da simulacao (garantir colunas do treino)
-        input_data = pd.DataFrame([0.0] * len(colunas_treino)).T
-        input_data.columns = colunas_treino
+        input_data = pd.DataFrame(
+            np.zeros((1, len(colunas_treino)), dtype=float),
+            columns=colunas_treino,
+        )
 
-        for mp, phr in dict_ingredientes.items():
+        for mp, phr in (dict_ingredientes or {}).items():
             if mp in input_data.columns:
                 input_data[mp] = float(phr)
 
@@ -169,26 +217,29 @@ class SimuladorIAService:
         previsao = float(modelo.predict(input_data)[0])
 
         # 2. Explicabilidade com SHAP
-        explainer = shap.TreeExplainer(modelo)
-        shap_values = explainer.shap_values(input_data)
+        contribs = {}
+        base_value = None
+        try:
+            explainer = shap.TreeExplainer(modelo)
+            shap_values = explainer.shap_values(input_data)
 
-        # Mapear valores SHAP para nomes das materias-primas com impacto relevante
-        contribuicoes = {}
-        for i, col in enumerate(colunas_treino):
-            val = float(shap_values[0][i])
-            if abs(val) > 0.01:
-                contribuicoes[col] = round(val, 3)
+            # Mapear valores SHAP para nomes das materias-primas com impacto relevante
+            for i, col in enumerate(colunas_treino):
+                val = float(shap_values[0][i])
+                if abs(val) > 0.01:
+                    contribs[col] = round(val, 3)
 
-        return {
-            "dureza_prevista": round(previsao, 2),
-            "unidade": "Shore A",
-            "impacto_ingredientes": contribuicoes,
-            "base_value": float(explainer.expected_value),  # Dureza media da base
-        }
+            expected = getattr(explainer, "expected_value", None)
+            if expected is not None:
+                base_value = float(np.ravel(expected)[0])
+        except Exception as exc:
+            LOGGER.warning("Falha ao calcular SHAP na simulacao: %s", exc)
+
+        return previsao, contribs, base_value
 
 
 # Exemplo de uso (pode ser chamado via Flask/Route)
 if __name__ == "__main__":
     SimuladorIAService.treinar_modelo()
     res = SimuladorIAService.simular_nova_receita({"mp_10": 100, "mp_20": 5.5})
-    print(f"Previsao: {res['dureza_prevista']} | Detalhes: {res['impacto_ingredientes']}")
+    print(f"Previsao final: {res['hardness_final']} | Detalhes: {res['impacto_ingredientes']}")

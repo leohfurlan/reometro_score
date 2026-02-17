@@ -35,6 +35,12 @@ except Exception as e:
     SimuladorIAService = None
     print(f"Aviso: Servico de simulacao IA indisponivel: {e}")
 
+try:
+    from services.theory_engine import hardness_prior_details
+except Exception as e:
+    hardness_prior_details = None
+    print(f"Aviso: Motor teorico de dureza indisponivel: {e}")
+
 # --- IMPORTAÇÃO: SERVIÇO DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
@@ -1783,13 +1789,14 @@ def simulador():
         return render_template(
             'simulador.html',
             materias_primas=_listar_materias_primas_catalogo(),
-            simulador_ia_disponivel=(SimuladorIAService is not None)
+            simulador_ia_disponivel=(SimuladorIAService is not None),
+            simulador_rules_disponivel=(hardness_prior_details is not None)
         )
 
-    if SimuladorIAService is None:
+    if SimuladorIAService is None and hardness_prior_details is None:
         return jsonify({
             'success': False,
-            'erro': 'Servico de IA indisponivel. Verifique as dependencias xgboost/shap.'
+            'erro': 'Servicos de simulacao indisponiveis (IA e motor teorico).'
         }), 503
 
     payload = request.get_json(silent=True) or {}
@@ -1801,7 +1808,27 @@ def simulador():
         }), 400
 
     try:
-        resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+        if SimuladorIAService is not None:
+            resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+        else:
+            prior = hardness_prior_details(ingredientes) if hardness_prior_details else {}
+            hardness_rule = _to_float_or_none(
+                (prior or {}).get('hardness_rule_final') or (prior or {}).get('hardness_rule')
+            )
+            resultado = {
+                'hardness_rule': hardness_rule,
+                'hardness_rule_final': hardness_rule,
+                'hardness_model': None,
+                'hardness_final': hardness_rule,
+                'dureza_prevista': hardness_rule,
+                'unidade': 'Shore A',
+                'impacto_ingredientes': {},
+                'base_value': None,
+                'base_blend_shore': (prior or {}).get('base_blend_shore'),
+                'elastomer_blend_breakdown': (prior or {}).get('elastomer_blend_breakdown') or [],
+                'prior_diagnostics': prior,
+                'guardrail': 'rule_engine_only'
+            }
     except Exception as e:
         return jsonify({
             'success': False,
@@ -1827,19 +1854,39 @@ def simulador():
             continue
         shap_values[chave] = val_float
 
-    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita.
-    for chave in chaves_receita:
-        if chave not in shap_values:
-            shap_values[chave] = 0.0
+    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita
+    # apenas quando o modelo estiver ativo (ja houve algum retorno SHAP).
+    if impacto_ingredientes:
+        for chave in chaves_receita:
+            if chave not in shap_values:
+                shap_values[chave] = 0.0
 
     shap_values = dict(sorted(shap_values.items(), key=lambda item: abs(item[1]), reverse=True))
+    hardness_rule = _to_float_or_none((resultado or {}).get('hardness_rule'))
+    hardness_rule_final = _to_float_or_none(
+        (resultado or {}).get('hardness_rule_final') or (resultado or {}).get('hardness_rule')
+    )
+    hardness_model = _to_float_or_none((resultado or {}).get('hardness_model'))
+    hardness_final = _to_float_or_none((resultado or {}).get('hardness_final'))
+    if hardness_final is None:
+        hardness_final = hardness_rule_final
+    if hardness_final is None:
+        hardness_final = _to_float_or_none((resultado or {}).get('dureza_prevista'))
 
     return jsonify({
         'success': True,
-        'previsao': _to_float_or_none((resultado or {}).get('dureza_prevista')),
+        'previsao': hardness_final,
+        'hardness_rule': hardness_rule,
+        'hardness_rule_final': hardness_rule_final,
+        'hardness_model': hardness_model,
+        'hardness_final': hardness_final,
+        'base_blend_shore': _to_float_or_none((resultado or {}).get('base_blend_shore')),
+        'elastomer_blend_breakdown': (resultado or {}).get('elastomer_blend_breakdown') or [],
         'unidade': (resultado or {}).get('unidade', 'Shore A'),
         'shap_values': shap_values,
-        'base_value': _to_float_or_none((resultado or {}).get('base_value'))
+        'base_value': _to_float_or_none((resultado or {}).get('base_value')),
+        'prior_diagnostics': (resultado or {}).get('prior_diagnostics') or {},
+        'guardrail': (resultado or {}).get('guardrail')
     }), 200
 
 
@@ -1897,7 +1944,27 @@ def api_xai_simular_formula(cd_produto):
         }), 400
 
     try:
-        resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+        if SimuladorIAService is not None:
+            resultado = SimuladorIAService.simular_nova_receita(ingredientes)
+        else:
+            prior = hardness_prior_details(ingredientes) if hardness_prior_details else {}
+            hardness_rule = _to_float_or_none(
+                (prior or {}).get('hardness_rule_final') or (prior or {}).get('hardness_rule')
+            )
+            resultado = {
+                'hardness_rule': hardness_rule,
+                'hardness_rule_final': hardness_rule,
+                'hardness_model': None,
+                'hardness_final': hardness_rule,
+                'dureza_prevista': hardness_rule,
+                'unidade': 'Shore A',
+                'impacto_ingredientes': {},
+                'base_value': None,
+                'base_blend_shore': (prior or {}).get('base_blend_shore'),
+                'elastomer_blend_breakdown': (prior or {}).get('elastomer_blend_breakdown') or [],
+                'prior_diagnostics': prior,
+                'guardrail': 'rule_engine_only'
+            }
     except Exception as e:
         return jsonify({'status': 'erro', 'mensagem': f'Falha na simulacao: {e}'}), 500
 
@@ -1917,20 +1984,41 @@ def api_xai_simular_formula(cd_produto):
             continue
         impactos_filtrados[chave] = val_float
 
-    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita.
-    for chave in chaves_receita:
-        if chave not in impactos_filtrados:
-            impactos_filtrados[chave] = 0.0
+    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita
+    # apenas quando houver retorno SHAP do modelo.
+    if impactos:
+        for chave in chaves_receita:
+            if chave not in impactos_filtrados:
+                impactos_filtrados[chave] = 0.0
 
     impactos_ordenados = sorted(impactos_filtrados.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    hardness_rule = _to_float_or_none((resultado or {}).get('hardness_rule'))
+    hardness_rule_final = _to_float_or_none(
+        (resultado or {}).get('hardness_rule_final') or (resultado or {}).get('hardness_rule')
+    )
+    hardness_model = _to_float_or_none((resultado or {}).get('hardness_model'))
+    hardness_final = _to_float_or_none((resultado or {}).get('hardness_final'))
+    if hardness_final is None:
+        hardness_final = hardness_rule_final
+    if hardness_final is None:
+        hardness_final = _to_float_or_none((resultado or {}).get('dureza_prevista'))
 
     return jsonify({
         'status': 'sucesso',
         'cd_produto': cd_produto,
         'ingredientes_utilizados': ingredientes,
+        'hardness_rule': hardness_rule,
+        'hardness_rule_final': hardness_rule_final,
+        'hardness_model': hardness_model,
+        'hardness_final': hardness_final,
+        'base_blend_shore': _to_float_or_none((resultado or {}).get('base_blend_shore')),
+        'elastomer_blend_breakdown': (resultado or {}).get('elastomer_blend_breakdown') or [],
+        'guardrail': (resultado or {}).get('guardrail'),
+        'prior_diagnostics': (resultado or {}).get('prior_diagnostics') or {},
         'propriedades_estimadas': {
             'dureza': {
-                'valor': (resultado or {}).get('dureza_prevista'),
+                'valor': hardness_final,
                 'unidade': (resultado or {}).get('unidade', 'Shore A')
             }
         },

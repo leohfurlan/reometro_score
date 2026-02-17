@@ -73,6 +73,24 @@
         z-index: 40;
         border: 1px solid #d8dee8;
         border-radius: 10px;
+        background: #ffffff;
+        box-shadow: 0 8px 20px rgba(20, 27, 45, 0.12);
+    }
+
+    .mp-suggestions .list-group-item {
+        background: #ffffff;
+        border: 0;
+        border-bottom: 1px solid #edf1f5;
+        color: #212529;
+    }
+
+    .mp-suggestions .list-group-item:last-child {
+        border-bottom: 0;
+    }
+
+    .mp-suggestions .list-group-item-action:hover,
+    .mp-suggestions .list-group-item-action:focus {
+        background: #f5f8fc;
     }
 
     .sim-btn-main {
@@ -177,7 +195,9 @@
 <script>
 (() => {
     const materiasPrimas = {{ materias_primas | tojson }};
-    const simuladorDisponivel = {{ simulador_ia_disponivel | tojson }};
+    const simuladorIADisponivel = {{ simulador_ia_disponivel | tojson }};
+    const simuladorRulesDisponivel = {{ simulador_rules_disponivel | default(true) | tojson }};
+    const simuladorDisponivel = Boolean(simuladorIADisponivel || simuladorRulesDisponivel);
 
     const formEl = document.getElementById('formSimulador');
     const containerEl = document.getElementById('ingredientesContainer');
@@ -450,10 +470,49 @@
         return ingredientes;
     }
 
-    function renderResultado(previsao, unidade, baseValue) {
-        previsaoValorEl.textContent = formatNumber(previsao, 2);
-        previsaoUnidadeEl.textContent = unidade || 'Shore A';
-        baseValueTextEl.textContent = `Base do modelo: ${formatNumber(baseValue, 2)} ${unidade || 'Shore A'}`;
+    function renderResultado(data) {
+        function toFiniteOrNull(value) {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function formatBlendBreakdown(items) {
+            if (!Array.isArray(items) || !items.length) {
+                return '--';
+            }
+            return items
+                .map((item) => {
+                    const frac = toFiniteOrNull(item?.frac);
+                    const key = String(item?.elastomer_key || item?.poly_type || item?.code || '').trim();
+                    if (!key || frac === null) {
+                        return null;
+                    }
+                    return `${key}: ${(frac * 100).toFixed(1)}%`;
+                })
+                .filter(Boolean)
+                .join(' | ') || '--';
+        }
+
+        const unidade = data?.unidade || 'Shore A';
+        const hardnessFinal = toFiniteOrNull(data?.hardness_final) ?? toFiniteOrNull(data?.hardness_rule_final) ?? toFiniteOrNull(data?.previsao);
+        const hardnessRule = toFiniteOrNull(data?.hardness_rule_final) ?? toFiniteOrNull(data?.hardness_rule);
+        const hardnessModel = toFiniteOrNull(data?.hardness_model);
+        const baseValue = toFiniteOrNull(data?.base_value);
+        const baseBlend = toFiniteOrNull(data?.base_blend_shore);
+        const blendTxt = formatBlendBreakdown(data?.elastomer_blend_breakdown);
+
+        previsaoValorEl.textContent = formatNumber(hardnessFinal, 2);
+        previsaoUnidadeEl.textContent = unidade;
+
+        if (hardnessModel === null) {
+            baseValueTextEl.textContent = `Regra final: ${formatNumber(hardnessRule, 2)} ${unidade} | Base blend: ${formatNumber(baseBlend, 2)} ${unidade} | Blend: ${blendTxt} | Modelo: indisponivel`;
+        } else {
+            baseValueTextEl.textContent =
+                `Regra final: ${formatNumber(hardnessRule, 2)} ${unidade} | Base blend: ${formatNumber(baseBlend, 2)} ${unidade} | Blend: ${blendTxt} | Modelo: ${formatNumber(hardnessModel, 2)} ${unidade} | Base modelo: ${formatNumber(baseValue, 2)} ${unidade}`;
+        }
     }
 
     function renderEmptyChart() {
@@ -551,8 +610,13 @@
                 throw new Error(data.erro || 'Falha ao executar simulacao.');
             }
 
-            renderResultado(data.previsao, data.unidade, data.base_value);
-            renderShapChart(data.shap_values || {});
+            renderResultado(data);
+
+            if (Number.isFinite(Number(data.hardness_model))) {
+                renderShapChart(data.shap_values || {});
+            } else {
+                renderEmptyChart();
+            }
         } catch (error) {
             showAlert('danger', error.message || 'Erro inesperado durante a simulacao.');
             renderEmptyChart();
@@ -655,13 +719,17 @@
     bootstrapForm();
 
     if (!simuladorDisponivel) {
-        showAlert('warning', 'Servico de IA indisponivel no momento. Verifique o modelo e dependencias.');
+        showAlert('warning', 'Servicos de simulacao indisponiveis no momento (IA e regras).');
         btnSubmitEl.disabled = true;
         btnAddEl.disabled = true;
         containerEl.querySelectorAll('select, input, button').forEach((el) => {
             el.disabled = true;
         });
         return;
+    }
+
+    if (!simuladorIADisponivel && simuladorRulesDisponivel) {
+        showAlert('warning', 'IA indisponivel: simulacao ativa em modo de regras fisicas.');
     }
 
     if (!materiasPrimas.length) {
