@@ -41,6 +41,18 @@ except Exception as e:
     hardness_prior_details = None
     print(f"Aviso: Motor teorico de dureza indisponivel: {e}")
 
+# --- R&D Services ---
+try:
+    from services.multi_target_simulator import MultiTargetSimulator
+    from services.knowledge_service import KnowledgeService
+    from services.search_service import SearchService
+    from models.knowledge import KnowledgeRule
+except Exception as e:
+    print(f"Aviso: Servicos R&D indisponiveis: {e}")
+    MultiTargetSimulator = None
+    KnowledgeService = None
+    SearchService = None
+
 # --- IMPORTAÃƒâ€¡ÃƒÆ’O: SERVIÃƒâ€¡O DE ETL ---
 from services.etl_service import (
     processar_carga_dados, 
@@ -1417,7 +1429,8 @@ def salvar_correcao():
 
     # --- NOVOS DADOS DE LOG ---
     user_log = current_user.username
-    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')    try:
+    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
         ensinar_lote(key_original, lote_clean, massa_clean, usuario=user_log)
         recarregar_aprendizado_memoria()
         total_ajustados = aplicar_correcoes_persistidas_no_consolidado([key_original])
@@ -1929,6 +1942,7 @@ def _listar_materias_primas_catalogo():
     return materias_primas
 
 
+
 @app.route('/simulador', methods=['GET', 'POST'])
 @login_required
 def simulador():
@@ -1936,107 +1950,73 @@ def simulador():
         return render_template(
             'simulador.html',
             materias_primas=_listar_materias_primas_catalogo(),
-            simulador_ia_disponivel=(SimuladorIAService is not None),
-            simulador_rules_disponivel=(hardness_prior_details is not None)
+            simulador_ia_disponivel=(MultiTargetSimulator is not None)
         )
-
-    if SimuladorIAService is None and hardness_prior_details is None:
-        return jsonify({
-            'success': False,
-            'erro': 'Servicos de simulacao indisponiveis (IA e motor teorico).'
-        }), 503
 
     payload = request.get_json(silent=True) or {}
     ingredientes = _parse_ingredientes_payload(payload.get('ingredientes', {}))
+    
     if not ingredientes:
-        return jsonify({
-            'success': False,
-            'erro': 'Nenhum ingrediente valido foi informado para simulacao.'
-        }), 400
+        return jsonify({'success': False, 'erro': 'Ingredientes invalidos.'}), 400
 
     try:
-        if SimuladorIAService is not None:
-            resultado = SimuladorIAService.simular_nova_receita(ingredientes)
-        else:
-            prior = hardness_prior_details(ingredientes) if hardness_prior_details else {}
-            hardness_rule = _to_float_or_none(
-                (prior or {}).get('hardness_rule_final') or (prior or {}).get('hardness_rule')
-            )
-            resultado = {
-                'hardness_rule': hardness_rule,
-                'hardness_rule_final': hardness_rule,
-                'hardness_model': None,
-                'hardness_final': hardness_rule,
-                'dureza_prevista': hardness_rule,
-                'unidade': 'Shore A',
-                'impacto_ingredientes': {},
-                'base_value': None,
-                'base_blend_shore': (prior or {}).get('base_blend_shore'),
-                'elastomer_blend_breakdown': (prior or {}).get('elastomer_blend_breakdown') or [],
-                'prior_diagnostics': prior,
-                'guardrail': 'rule_engine_only'
-            }
+        # 1. Simulate
+        raw_results = MultiTargetSimulator.predict(ingredientes)
+        
+        # 2. Apply Knowledge Rules
+        final_results = KnowledgeService.apply_rules(raw_results, ingredientes)
+        
+        return jsonify({
+            'success': True,
+            'results': final_results
+        })
+        
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'erro': f'Falha na simulacao: {e}'
-        }), 500
+        print(f"Erro na simulacao: {e}")
+        return jsonify({'success': False, 'erro': str(e)}), 500
 
-    if isinstance(resultado, dict) and resultado.get('erro'):
-        return jsonify({
-            'success': False,
-            'erro': resultado.get('erro')
-        }), 400
+@app.route('/simulador/search', methods=['POST'])
+@login_required
+def simulador_search():
+    payload = request.get_json(silent=True) or {}
+    ingredientes = _parse_ingredientes_payload(payload.get('ingredientes', {}))
+    
+    if not ingredientes:
+        return jsonify({'success': False, 'erro': 'Ingredientes invalidos.'}), 400
+        
+    try:
+        results = SearchService.find_similar(ingredientes)
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'erro': str(e)}), 500
 
-    impacto_ingredientes = (resultado or {}).get('impacto_ingredientes') or {}
-    chaves_receita = set(ingredientes.keys())
-    shap_values = {}
-
-    # Mantem no retorno apenas MPs efetivamente informadas na receita.
-    for chave, valor in impacto_ingredientes.items():
-        if chave not in chaves_receita:
-            continue
-        val_float = _to_float_or_none(valor)
-        if val_float is None:
-            continue
-        shap_values[chave] = val_float
-
-    # Se o servico truncar impactos pequenos, completa com zero para as MPs da receita
-    # apenas quando o modelo estiver ativo (ja houve algum retorno SHAP).
-    if impacto_ingredientes:
-        for chave in chaves_receita:
-            if chave not in shap_values:
-                shap_values[chave] = 0.0
-
-    shap_values = dict(sorted(shap_values.items(), key=lambda item: abs(item[1]), reverse=True))
-    hardness_rule = _to_float_or_none((resultado or {}).get('hardness_rule'))
-    hardness_rule_final = _to_float_or_none(
-        (resultado or {}).get('hardness_rule_final') or (resultado or {}).get('hardness_rule')
-    )
-    hardness_model = _to_float_or_none((resultado or {}).get('hardness_model'))
-    hardness_final = _to_float_or_none((resultado or {}).get('hardness_final'))
-    if hardness_final is None:
-        hardness_final = hardness_rule_final
-    if hardness_final is None:
-        hardness_final = _to_float_or_none((resultado or {}).get('dureza_prevista'))
-
-    return jsonify({
-        'success': True,
-        'previsao': hardness_final,
-        'hardness_rule': hardness_rule,
-        'hardness_rule_final': hardness_rule_final,
-        'hardness_model': hardness_model,
-        'hardness_final': hardness_final,
-        'base_blend_shore': _to_float_or_none((resultado or {}).get('base_blend_shore')),
-        'elastomer_blend_breakdown': (resultado or {}).get('elastomer_blend_breakdown') or [],
-        'unidade': (resultado or {}).get('unidade', 'Shore A'),
-        'shap_values': shap_values,
-        'base_value': _to_float_or_none((resultado or {}).get('base_value')),
-        'prior_diagnostics': (resultado or {}).get('prior_diagnostics') or {},
-        'guardrail': (resultado or {}).get('guardrail')
-    }), 200
-
-
+@app.route('/knowledge', methods=['GET', 'POST'])
+@login_required
+def knowledge_base():
+    if request.method == 'GET':
+        rules = KnowledgeService.get_rules()
+        return jsonify([{
+            'id': r.id, 
+            'property': r.target_property,
+            'effect': f"{r.effect_type} {r.effect_value}",
+            'desc': r.description
+        } for r in rules])
+        
+    # POST - Add Rule
+    data = request.get_json()
+    try:
+        KnowledgeService.add_rule(
+            target_property=data['target_property'],
+            effect_value=data['effect_value'],
+            effect_type=data.get('effect_type', 'linear'),
+            ingredient_code=data.get('ingredient_code'),
+            min_phr=data.get('min_phr'),
+            max_phr=data.get('max_phr'),
+            description=data.get('description')
+        )
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'erro': str(e)}), 500
 @app.route('/api/xai/treinar', methods=['POST'])
 @login_required
 def api_xai_treinar():
