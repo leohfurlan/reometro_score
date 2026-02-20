@@ -18,7 +18,7 @@
         background: #ffffff;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    
+
     .sim-card:hover {
         transform: translateY(-2px);
         box-shadow: 0 8px 24px rgba(20, 27, 45, 0.08);
@@ -41,7 +41,7 @@
     .nav-pills .nav-link.active {
         background-color: var(--sim-accent);
     }
-    
+
     .nav-pills .nav-link {
         color: #555;
     }
@@ -53,22 +53,23 @@
         border-radius: 12px;
         margin-bottom: 15px;
     }
-    
+
     .prop-val {
         font-size: 2rem;
         font-weight: bold;
         color: var(--sim-accent-dark);
     }
-    
+
     .prop-name {
         font-size: 0.9rem;
         text-transform: uppercase;
         color: #777;
         margin-bottom: 5px;
     }
-    
+
     .shap-mini-chart {
-        height: 60px; /* Sparkline-like */
+        height: 60px;
+        /* Sparkline-like */
     }
 </style>
 
@@ -79,12 +80,12 @@
             <p class="text-muted">Simulação multi-propriedade, busca de similares e gestão de conhecimento.</p>
         </div>
         <div>
-           <button class="btn btn-outline-dark me-2" data-bs-toggle="modal" data-bs-target="#knowledgeModal">
+            <button class="btn btn-outline-dark me-2" data-bs-toggle="modal" data-bs-target="#knowledgeModal">
                 <i class="fas fa-book me-1"></i> Base de Conhecimento
-           </button>
-           <button class="btn btn-outline-primary" onclick="buscarSimilares()">
+            </button>
+            <button class="btn btn-outline-primary" onclick="buscarSimilares()">
                 <i class="fas fa-search me-1"></i> Buscar Similares
-           </button>
+            </button>
         </div>
     </div>
 
@@ -98,7 +99,7 @@
                 <div class="card-body p-3">
                     <form id="formSimulador" novalidate>
                         <div id="ingredientesContainer" class="vstack gap-2"></div>
-                        
+
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <button type="button" id="btnAdicionarIngrediente" class="btn btn-sm btn-outline-secondary">
                                 <i class="fas fa-plus"></i> Add
@@ -124,7 +125,8 @@
             <div id="resultsArea" class="d-none">
                 <ul class="nav nav-tabs mb-3" id="resultTabs" role="tablist">
                     <li class="nav-item">
-                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-simulation">Simulação</button>
+                        <button class="nav-link active" data-bs-toggle="tab"
+                            data-bs-target="#tab-simulation">Simulação</button>
                     </li>
                     <li class="nav-item">
                         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-similar">Similares</button>
@@ -144,7 +146,12 @@
                         <div class="table-responsive">
                             <table class="table table-hover" id="similarTable">
                                 <thead>
-                                    <tr><th>Produto</th><th>Distância</th><th>Ação</th></tr>
+                                    <tr>
+                                        <th>Produto</th>
+                                        <th>Descrição</th>
+                                        <th>Distância</th>
+                                        <th>Ação</th>
+                                    </tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -152,7 +159,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div id="welcomeState" class="text-center py-5 text-muted border rounded bg-light mt-2">
                 <i class="fas fa-chart-line fa-3x mb-3 text-secondary"></i>
                 <h5>Pronto para simular</h5>
@@ -172,17 +179,24 @@
             </div>
             <div class="modal-body">
                 <ul class="nav nav-pills mb-3">
-                    <li class="nav-item"><a href="#" class="nav-link active" onclick="showRulesList()">Listar Regras</a></li>
+                    <li class="nav-item"><a href="#" class="nav-link active" onclick="showRulesList()">Listar Regras</a>
+                    </li>
                     <li class="nav-item"><a href="#" class="nav-link" onclick="showAddRule()">Nova Regra</a></li>
                 </ul>
-                
+
                 <div id="rulesList">
                     <table class="table table-sm">
-                        <thead><tr><th>Propriedade</th><th>Efeito</th><th>Descrição</th></tr></thead>
+                        <thead>
+                            <tr>
+                                <th>Propriedade</th>
+                                <th>Efeito</th>
+                                <th>Descrição</th>
+                            </tr>
+                        </thead>
                         <tbody id="rulesTableBody"></tbody>
                     </table>
                 </div>
-                
+
                 <div id="addRuleForm" class="d-none">
                     <form onsubmit="saveRule(event)">
                         <div class="row g-2">
@@ -210,10 +224,11 @@
                             </div>
                             <div class="col-12 mt-2">
                                 <label>Descrição</label>
-                                <input type="text" class="form-control" name="description" placeholder="Ex: Ajuste fino para cargas altas">
+                                <input type="text" class="form-control" name="description"
+                                    placeholder="Ex: Ajuste fino para cargas altas">
                             </div>
-                         </div>
-                         <button type="submit" class="btn btn-primary mt-3">Salvar Regra</button>
+                        </div>
+                        <button type="submit" class="btn btn-primary mt-3">Salvar Regra</button>
                     </form>
                 </div>
             </div>
@@ -226,14 +241,14 @@
     const materiasPrimas = {{ materias_primas | tojson }};
     const formEl = document.getElementById('formSimulador');
     const containerEl = document.getElementById('ingredientesContainer');
-    
+
     // --- Logic Identical to legacy for Ingredients Input (omitted for brevity, handled by shared logic usually) ---
     // (Re-implementing minimal version for functionality)
-    
+
     const mpMap = new Map();
     materiasPrimas.forEach(m => mpMap.set(String(m.codigo), m.nome));
 
-    function addRow(code='', phr='') {
+    function addRow(code = '', phr = '') {
         const div = document.createElement('div');
         div.className = 'ingrediente-row d-flex gap-2 align-items-center';
         div.innerHTML = `
@@ -242,32 +257,32 @@
             <input type="number" class="form-control form-control-sm mp-phr" placeholder="PHR" style="width: 100px;" value="${phr}" min="0" step="0.01">
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.remove(); updateTotal()">X</button>
         `;
-        
+
         const inputCode = div.querySelector('.mp-code');
         inputCode.addEventListener('blur', () => {
             const val = inputCode.value.trim();
             const nome = mpMap.get(val);
             div.querySelector('.mp-name').value = nome || 'Não encontrado';
         });
-        
+
         div.querySelector('.mp-phr').addEventListener('input', updateTotal);
         containerEl.appendChild(div);
     }
-    
+
     document.getElementById('btnAdicionarIngrediente').addEventListener('click', () => addRow());
-    
+
     function updateTotal() {
         let total = 0;
         document.querySelectorAll('.mp-phr').forEach(el => total += Number(el.value || 0));
         document.getElementById('phrTotal').innerText = total.toFixed(2);
     }
-    
+
     function getIngredients() {
         const payload = {};
         document.querySelectorAll('.ingrediente-row').forEach(row => {
             const code = row.querySelector('.mp-code').value.trim();
             const phr = Number(row.querySelector('.mp-phr').value || 0);
-            if(code && phr > 0) payload[`mp_${code}`] = phr;
+            if (code && phr > 0) payload[`mp_${code}`] = phr;
         });
         return payload;
     }
@@ -275,27 +290,27 @@
     formEl.addEventListener('submit', async (e) => {
         e.preventDefault();
         const ingredientes = getIngredients();
-        if(Object.keys(ingredientes).length === 0) return alert("Adicione ingredientes.");
-        
+        if (Object.keys(ingredientes).length === 0) return alert("Adicione ingredientes.");
+
         document.getElementById('loadingOverlay').classList.remove('d-none');
         document.getElementById('resultsArea').classList.add('d-none');
         document.getElementById('welcomeState').classList.add('d-none');
-        
+
         try {
             const res = await fetch('/simulador', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ingredientes})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ingredientes })
             });
             const data = await res.json();
-            
-            if(data.success) {
+
+            if (data.success) {
                 renderProperties(data.results);
                 document.getElementById('resultsArea').classList.remove('d-none');
             } else {
                 alert('Erro: ' + data.erro);
             }
-        } catch(err) {
+        } catch (err) {
             console.error(err);
             alert('Erro na requisição.');
         } finally {
@@ -306,10 +321,10 @@
     function renderProperties(results) {
         const grid = document.getElementById('propertiesGrid');
         grid.innerHTML = '';
-        
-        for(const [prop, data] of Object.entries(results)) {
-            if(prop === 'prior_diagnostics') continue;
-            
+
+        for (const [prop, data] of Object.entries(results)) {
+            if (prop === 'prior_diagnostics') continue;
+
             const val = data.value !== null ? data.value : '--';
             const col = document.createElement('div');
             col.className = 'col-6 col-md-4 col-lg-3';
@@ -324,23 +339,24 @@
             grid.appendChild(col);
         }
     }
-    
+
     async function buscarSimilares() {
         const ingredientes = getIngredients();
-        if(Object.keys(ingredientes).length === 0) return alert("Preencha a receita primeiro.");
-        
+        if (Object.keys(ingredientes).length === 0) return alert("Preencha a receita primeiro.");
+
         try {
             const res = await fetch('/simulador/search', {
-                 method: 'POST',
-                 headers: {'Content-Type': 'application/json'},
-                 body: JSON.stringify({ingredientes})
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ingredientes })
             });
             const data = await res.json();
-            if(data.success) {
+            if (data.success) {
                 const tbody = document.querySelector('#similarTable tbody');
                 tbody.innerHTML = data.results.map(r => `
                     <tr>
                         <td><a href="/detalhe_formula/${r.id}" target="_blank">${r.id}</a></td>
+                        <td>${r.description || '-'}</td>
                         <td>${r.distance}</td>
                         <td><button class="btn btn-sm btn-link">Carregar</button></td>
                     </tr>
@@ -349,9 +365,9 @@
                 const bsTab = new bootstrap.Tab(document.querySelector('#resultTabs button[data-bs-target="#tab-similar"]'));
                 bsTab.show();
             }
-        } catch(e) { console.error(e); }
+        } catch (e) { console.error(e); }
     }
-    
+
     // Initial rows
     addRow(); addRow();
 
@@ -368,34 +384,34 @@
             </tr>
         `).join('');
     }
-    
+
     function showRulesList() {
         document.getElementById('rulesList').classList.remove('d-none');
         document.getElementById('addRuleForm').classList.add('d-none');
         loadRules();
     }
-    
+
     function showAddRule() {
         document.getElementById('rulesList').classList.add('d-none');
         document.getElementById('addRuleForm').classList.remove('d-none');
     }
-    
+
     async function saveRule(e) {
         e.preventDefault();
         const fd = new FormData(e.target);
         const data = Object.fromEntries(fd.entries());
-        
+
         await fetch('/knowledge', {
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        
+
         alert('Regra salva!');
         e.target.reset();
         showRulesList();
     }
-    
+
     document.getElementById('knowledgeModal').addEventListener('show.bs.modal', loadRules);
 
 </script>

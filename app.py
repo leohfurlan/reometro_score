@@ -29,6 +29,12 @@ from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
 from models.score_versioning import ScoreResultado
 from models.formula import Formula, FormulaItem
+from models.formulation_v2 import (
+    Formulation as FormulationV2,
+    FormulationIngredient as FormulationIngredientV2,
+    ProcessParameters as ProcessParametersV2,
+    MeasuredProperties as MeasuredPropertiesV2,
+)
 try:
     from services.simulador_ia_service import SimuladorIAService
 except Exception as e:
@@ -52,6 +58,12 @@ except Exception as e:
     MultiTargetSimulator = None
     KnowledgeService = None
     SearchService = None
+
+try:
+    from services.formulation_engine_service import FormulationEngineService
+except Exception as e:
+    print(f"Aviso: Motor de formulacao indisponivel: {e}")
+    FormulationEngineService = None
 
 # --- IMPORTAÃƒâ€¡ÃƒÆ’O: SERVIÃƒâ€¡O DE ETL ---
 from services.etl_service import (
@@ -194,6 +206,7 @@ login_manager.login_view = 'login'
 
 # Inicializa o cache cedo para ficar disponivel durante o bootstrap.
 cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
+formulation_engine_service = FormulationEngineService() if FormulationEngineService else None
 
 # Cria o banco de dados na primeira execuÃƒÂ§ÃƒÂ£o se nÃƒÂ£o existir
 with app.app_context():
@@ -2017,6 +2030,17 @@ def knowledge_base():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'erro': str(e)}), 500
+@app.route('/detalhe_formula/<int:cd_produto>')
+@login_required
+def detalhe_formula(cd_produto):
+    # Retrieve the formula by its code, return 404 if not found
+    formula = Formula.query.get_or_404(cd_produto)
+    return render_template(
+        'detalhe_formula.html',
+        formula=formula,
+        catalogo=get_catalogo_codigo() or {},
+    )
+
 @app.route('/api/xai/treinar', methods=['POST'])
 @login_required
 def api_xai_treinar():
@@ -2156,6 +2180,160 @@ def api_xai_simular_formula(cd_produto):
     }), 200
 
 
+def _to_bool(value, default=True):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    raw = str(value).strip().lower()
+    if raw in ("1", "true", "yes", "on", "sim"):
+        return True
+    if raw in ("0", "false", "no", "off", "nao", "não"):
+        return False
+    return bool(default)
+
+
+@app.route('/api/formulation/train', methods=['POST'])
+@login_required
+def api_formulation_train():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if formulation_engine_service is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de formulacao indisponivel.'
+        }), 503
+
+    payload = request.get_json(silent=True) or {}
+    min_samples = payload.get('min_samples', 20)
+    include_legacy = _to_bool(payload.get('include_legacy', True), True)
+
+    try:
+        resultado = formulation_engine_service.train(
+            min_samples=int(min_samples),
+            auto_include_legacy=include_legacy,
+        )
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as exc:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha no treinamento: {exc}'}), 500
+
+
+@app.route('/predict-formulation', methods=['POST'])
+@login_required
+def predict_formulation():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if formulation_engine_service is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de formulacao indisponivel.'
+        }), 503
+
+    payload = request.get_json(silent=True) or {}
+    formulation = payload.get('formulation') or {'ingredients': payload.get('ingredients') or {}}
+    process = payload.get('process_parameters') or payload.get('process') or {}
+    auto_train = _to_bool(payload.get('auto_train_if_missing', True), True)
+
+    try:
+        resultado = formulation_engine_service.predict(
+            formulation_payload=formulation,
+            process_payload=process,
+            auto_train_if_missing=auto_train,
+        )
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as exc:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha na previsao: {exc}'}), 500
+
+
+@app.route('/optimize-formulation', methods=['POST'])
+@login_required
+def optimize_formulation():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if formulation_engine_service is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de formulacao indisponivel.'
+        }), 503
+
+    payload = request.get_json(silent=True) or {}
+    auto_train = _to_bool(payload.get('auto_train_if_missing', True), True)
+
+    try:
+        resultado = formulation_engine_service.optimize(
+            payload=payload,
+            auto_train_if_missing=auto_train,
+        )
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as exc:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha na otimizacao: {exc}'}), 500
+
+
+@app.route('/explain-formulation', methods=['POST'])
+@login_required
+def explain_formulation():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if formulation_engine_service is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de formulacao indisponivel.'
+        }), 503
+
+    payload = request.get_json(silent=True) or {}
+    formulation = payload.get('formulation') or {'ingredients': payload.get('ingredients') or {}}
+    process = payload.get('process_parameters') or payload.get('process') or {}
+    top_n = payload.get('top_n', 12)
+    auto_train = _to_bool(payload.get('auto_train_if_missing', True), True)
+
+    try:
+        resultado = formulation_engine_service.explain(
+            formulation_payload=formulation,
+            process_payload=process,
+            top_n=int(top_n),
+            auto_train_if_missing=auto_train,
+        )
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as exc:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha na explicacao: {exc}'}), 500
+
+
+@app.route('/suggest-next-experiments', methods=['GET'])
+@login_required
+def suggest_next_experiments():
+    if current_user.role != 'admin':
+        return jsonify({'status': 'erro', 'mensagem': 'Acesso negado.'}), 403
+
+    if formulation_engine_service is None:
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Servico de formulacao indisponivel.'
+        }), 503
+
+    top_n = request.args.get('top_n', default=10, type=int)
+    candidate_pool_size = request.args.get('candidate_pool_size', default=260, type=int)
+    auto_train = _to_bool(request.args.get('auto_train_if_missing', 'true'), True)
+
+    try:
+        resultado = formulation_engine_service.suggest_next_experiments(
+            top_n=top_n,
+            candidate_pool_size=candidate_pool_size,
+            auto_train_if_missing=auto_train,
+        )
+        status_http = 200 if resultado.get('status') == 'sucesso' else 400
+        return jsonify(resultado), status_http
+    except Exception as exc:
+        return jsonify({'status': 'erro', 'mensagem': f'Falha no active learning: {exc}'}), 500
+
+
 @app.route('/contratos-api')
 @login_required
 def pagina_contratos_api():
@@ -2173,21 +2351,7 @@ def lista_formulas():
     # Passamos o catÃƒÂ¡logo tambÃƒÂ©m, caso precise corrigir nomes na listagem
     return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
 
-@app.route('/formulas/<int:cd_produto>')
-@login_required
-def detalhe_formula(cd_produto):
-    formula = Formula.query.get_or_404(cd_produto)
-    
-    # INJEÃƒâ€¡ÃƒÆ’O DE DEPENDÃƒÅ NCIA:
-    # Passamos o catÃƒÂ¡logo completo para o template fazer o "De/Para" em tempo real
-    catalogo = get_catalogo_codigo()
-    
-    return render_template(
-        'detalhe_formula.html', 
-        formula=formula,
-        catalogo=catalogo,
-        simulador_ia_disponivel=(SimuladorIAService is not None)
-    )
+
 
 if __name__ == '__main__':
     app.run(debug=True)

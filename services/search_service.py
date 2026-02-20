@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from models.usuario import db
 from sqlalchemy import text
-from app import app
+
 
 class SearchService:
     _model = None
@@ -15,6 +15,7 @@ class SearchService:
         """
         Fits the NearestNeighbors model on current data.
         """
+        from app import app
         with app.app_context():
             # 1. Fetch Formula Items
             query_items = text("SELECT cd_produto, cd_materia_prima, qt_phr FROM tb_formula_item")
@@ -61,9 +62,17 @@ class SearchService:
         
         results = []
         for dist, idx in zip(distances[0], indices[0]):
-            prod_id = cls._ids[idx]
+            prod_id = int(cls._ids[idx])
+            
+            # Fetch description
+            from models.formula import Formula
+            # Using query.get is deprecated in some versions but works for primary key lookups
+            formula = Formula.query.filter_by(cd_produto=prod_id).first()
+            desc = formula.ds_composto if formula else "Desconhecido"
+            
             results.append({
                 "id": prod_id,
+                "description": desc,
                 "distance": round(dist, 4)
             })
             
