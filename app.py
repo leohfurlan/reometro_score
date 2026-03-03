@@ -9,18 +9,13 @@ from datetime import datetime
 import math
 import os
 import statistics 
-<<<<<<< ours
+import sqlite3 # Adicionado para conexão local
 import json
 import re
 import unicodedata
 from urllib.parse import urlparse, urljoin
 from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexÃƒÂ£o local
 from sqlalchemy.orm import load_only
-
-=======
-import sqlite3 # Adicionado para conexão local
-import json
->>>>>>> theirs
 
 # ConfiguraÃƒÂ§ÃƒÂµes e Modelos
 from config import Config
@@ -32,7 +27,6 @@ from services.config_manager import (
 )
 from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
-<<<<<<< ours
 from models.score_versioning import ScoreResultado
 from models.formula import Formula, FormulaItem
 from models.formulation_v2 import (
@@ -65,10 +59,8 @@ except Exception as e:
     MultiTargetSimulator = None
     KnowledgeService = None
     SearchService = None
-=======
 from services.kinetics_service import list_ensaios_for_fit, run_fit, load_fit_payload, get_preview_curve
 from services.vulcanization_service import run_simulation, load_simulation
->>>>>>> theirs
 
 try:
     from services.formulation_engine_service import FormulationEngineService
@@ -1891,7 +1883,6 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
     )
 
 
-<<<<<<< ours
 # --- ROTAS DE FORMULAÃƒâ€¡ÃƒÆ’O ---
 def _normalizar_chave_mp(chave):
     raw = str(chave or '').strip().lower()
@@ -2363,7 +2354,6 @@ def lista_formulas():
     # Passamos o catÃƒÂ¡logo tambÃƒÂ©m, caso precise corrigir nomes na listagem
     return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
 
-=======
 @app.route('/reometria/fit')
 @login_required
 def reometria_fit():
@@ -2463,7 +2453,6 @@ def reometria_simulate_view(sim_id):
         'alpha_snaps': sim['alpha_snaps'].tolist(),
     }
     return render_template('reometria/sim_view.html', sim=sim, sim_json=json.dumps(serializable))
->>>>>>> theirs
 
 
 if __name__ == '__main__':

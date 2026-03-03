@@ -149,12 +149,10 @@ static/: CSS e JavaScript.
 tools/: Scripts auxiliares de manutenção e ETL.
 
 Desenvolvido para uso interno no Laboratório de Qualidade.
-<<<<<<< ours
 
 ## Documentacao adicional
 
 - Motor XAI (treinamento, simulacao e explicabilidade): `docs/motor_xai.md`
-=======
 ## 🔥 Nova feature: Reometria & Vulcanização
 
 Fluxo completo disponível no menu lateral **Reometria & Vulcanização**:
@@ -180,4 +178,3 @@ A nova feature usa a mesma conexão SQL Server já existente em `connection.py`:
 ### Dependências novas
 - `scipy` (ajuste não linear com `least_squares`)
 - `plotly` (gráficos web interativos)
->>>>>>> theirs

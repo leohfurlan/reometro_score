@@ -16,15 +16,16 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 def list_ensaios_for_fit(date_start=None, date_end=None, text_query=None, limit=300):
     conn = connect_to_database()
     cur = conn.cursor()
+    lote_batch_expr = "COALESCE(CAST(e.NUMERO_LOTE AS varchar(100)), CAST(e.BATCH AS varchar(100)), '')"
 
-    sql = """
+    sql = f"""
     SELECT TOP (?)
         e.COD_ENSAIO,
         e.DATA,
         e.TEMP_PLATO_INF,
         e.AMOSTRA,
         e.CODIGO,
-        COALESCE(e.LOTE, e.BATCH, '') AS LOTE_BATCH,
+        {lote_batch_expr} AS LOTE_BATCH,
         e.TMINTEMPO,
         e.TMINTORQUE,
         e.TMAXTORQUE
@@ -40,7 +41,7 @@ def list_ensaios_for_fit(date_start=None, date_end=None, text_query=None, limit=
         sql += " AND CAST(e.DATA AS date) <= ?"
         params.append(date_end)
     if text_query:
-        sql += " AND (CAST(e.COD_ENSAIO AS varchar(30)) LIKE ? OR e.AMOSTRA LIKE ? OR e.CODIGO LIKE ? OR COALESCE(e.LOTE, e.BATCH, '') LIKE ?)"
+        sql += f" AND (CAST(e.COD_ENSAIO AS varchar(30)) LIKE ? OR e.AMOSTRA LIKE ? OR e.CODIGO LIKE ? OR {lote_batch_expr} LIKE ?)"
         like = f"%{text_query}%"
         params.extend([like, like, like, like])
 
