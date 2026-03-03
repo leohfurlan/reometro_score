@@ -1,13 +1,31 @@
 {% extends 'base.html' %}
-{% block title %}Visualização da Simulação{% endblock %}
+{% block title %}Visualizacao da Simulacao{% endblock %}
 {% block content %}
-<h2>Visualização da Simulação {{ sim.sim_id }}</h2>
+<h2>Visualizacao da Simulacao {{ sim.sim_id }}</h2>
 <p><b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
+
+{% if sim.dim == 1 %}
+<div class="alert alert-secondary">
+  Cada linha representa um instante salvo da simulacao.
+</div>
+<div id="temp_1d_plot" style="height:460px;"></div>
+<div id="alpha_1d_plot" style="height:460px;"></div>
+{% else %}
 <div id="main_plot" style="height:520px;"></div>
+{% endif %}
+
 {% if sim.dim == 3 %}
 <div class="row g-2 mb-3">
-  <div class="col-md-2"><select id="axis" class="form-select"><option value="0">x</option><option value="1">y</option><option value="2">z</option></select></div>
-  <div class="col-md-3"><input id="slice_idx" type="range" class="form-range" min="0" max="{{ sim.shape[2]-1 }}" value="{{ (sim.shape[2]-1)//2 }}"></div>
+  <div class="col-md-2">
+    <select id="axis" class="form-select">
+      <option value="0">x</option>
+      <option value="1">y</option>
+      <option value="2">z</option>
+    </select>
+  </div>
+  <div class="col-md-3">
+    <input id="slice_idx" type="range" class="form-range" min="0" max="{{ sim.shape[2]-1 }}" value="{{ (sim.shape[2]-1)//2 }}">
+  </div>
 </div>
 <div id="slice_plot" style="height:440px;"></div>
 {% endif %}
@@ -18,31 +36,94 @@ const sim = {{ sim_json|safe }};
 const tLast = sim.t_snaps[sim.t_snaps.length - 1];
 const aLast = sim.alpha_snaps[sim.alpha_snaps.length - 1];
 
-if (sim.dim === 1){
-  const x = [...Array(aLast.length).keys()];
-  Plotly.newPlot('main_plot', [
-    {x, y:aLast, mode:'lines', name:'alpha'},
-    {x, y:tLast.map(v=>v-273.15), mode:'lines', name:'T (°C)', yaxis:'y2'}
-  ], {title:'Perfil final 1D', yaxis:{title:'α'}, yaxis2:{title:'T (°C)',overlaying:'y',side:'right'}});
-} else if (sim.dim === 2){
-  Plotly.newPlot('main_plot', [{z:aLast, type:'heatmap', colorbar:{title:'α'}}], {title:'Mapa alpha final 2D'});
-} else {
-  const nx = aLast.length, ny = aLast[0].length, nz = aLast[0][0].length;
-  const x=[], y=[], z=[], val=[];
-  for(let i=0;i<nx;i++){for(let j=0;j<ny;j++){for(let k=0;k<nz;k++){x.push(i);y.push(j);z.push(k);val.push(aLast[i][j][k]);}}}
-  Plotly.newPlot('main_plot', [{
-    type:'volume', x, y, z, value:val, opacity:0.08, surface:{count:12}, caps:{x:{show:false},y:{show:false},z:{show:false}}
-  }], {title:'Volume 3D alpha final'});
+if (sim.dim === 1) {
+  const n = Array.isArray(tLast) ? tLast.length : 0;
+  const dxMm = Number(sim.dx || 0) * 1000;
+  const x = Array.from({ length: n }, (_, i) => Number((i * dxMm).toFixed(6)));
+  const snapCount = Math.min(sim.times.length, sim.t_snaps.length, sim.alpha_snaps.length);
 
-  function drawSlice(){
-    const axis = parseInt(document.getElementById('axis').value);
-    const idx = parseInt(document.getElementById('slice_idx').value);
-    let slice;
-    if(axis===0) slice = aLast[idx];
-    if(axis===1) slice = aLast.map(r=>r[idx]);
-    if(axis===2) slice = aLast.map(r=>r.map(c=>c[idx]));
-    Plotly.newPlot('slice_plot', [{z:slice, type:'heatmap'}], {title:`Slice α eixo ${axis} idx ${idx}`});
+  const tempTraces = [];
+  const alphaTraces = [];
+
+  for (let i = 0; i < snapCount; i += 1) {
+    const tSec = Number(sim.times[i] || 0);
+    const label = `${tSec.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`;
+    const tLineC = (sim.t_snaps[i] || []).map((v) => Number(v) - 273.15);
+    const aLinePct = (sim.alpha_snaps[i] || []).map((v) => Number(v) * 100);
+
+    tempTraces.push({
+      x,
+      y: tLineC,
+      mode: 'lines+markers',
+      name: label,
+      marker: { size: 5 },
+      line: { width: 2 }
+    });
+
+    alphaTraces.push({
+      x,
+      y: aLinePct,
+      mode: 'lines+markers',
+      name: label,
+      marker: { size: 5 },
+      line: { width: 2 }
+    });
   }
+
+  Plotly.newPlot('temp_1d_plot', tempTraces, {
+    title: 'Temperatura vs posicao ao longo do tempo',
+    xaxis: { title: 'Posicao da borracha em relacao ao molde (mm)' },
+    yaxis: { title: 'Temperatura (C)' }
+  });
+
+  Plotly.newPlot('alpha_1d_plot', alphaTraces, {
+    title: 'Cura vs posicao ao longo do tempo',
+    xaxis: { title: 'Posicao da borracha em relacao ao molde (mm)' },
+    yaxis: { title: 'Cura (%)', range: [0, 100], ticksuffix: '%' }
+  });
+} else if (sim.dim === 2) {
+  Plotly.newPlot('main_plot', [{ z: aLast, type: 'heatmap', colorbar: { title: 'alpha' } }], { title: 'Mapa alpha final 2D' });
+} else {
+  const nx = aLast.length;
+  const ny = aLast[0].length;
+  const nz = aLast[0][0].length;
+  const x = [];
+  const y = [];
+  const z = [];
+  const val = [];
+
+  for (let i = 0; i < nx; i += 1) {
+    for (let j = 0; j < ny; j += 1) {
+      for (let k = 0; k < nz; k += 1) {
+        x.push(i);
+        y.push(j);
+        z.push(k);
+        val.push(aLast[i][j][k]);
+      }
+    }
+  }
+
+  Plotly.newPlot('main_plot', [{
+    type: 'volume',
+    x,
+    y,
+    z,
+    value: val,
+    opacity: 0.08,
+    surface: { count: 12 },
+    caps: { x: { show: false }, y: { show: false }, z: { show: false } }
+  }], { title: 'Volume 3D alpha final' });
+
+  function drawSlice() {
+    const axis = parseInt(document.getElementById('axis').value, 10);
+    const idx = parseInt(document.getElementById('slice_idx').value, 10);
+    let slice;
+    if (axis === 0) slice = aLast[idx];
+    if (axis === 1) slice = aLast.map((r) => r[idx]);
+    if (axis === 2) slice = aLast.map((r) => r.map((c) => c[idx]));
+    Plotly.newPlot('slice_plot', [{ z: slice, type: 'heatmap' }], { title: `Slice alpha eixo ${axis} idx ${idx}` });
+  }
+
   drawSlice();
   document.getElementById('axis').addEventListener('change', drawSlice);
   document.getElementById('slice_idx').addEventListener('input', drawSlice);

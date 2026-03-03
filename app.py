@@ -59,7 +59,13 @@ except Exception as e:
     MultiTargetSimulator = None
     KnowledgeService = None
     SearchService = None
-from services.kinetics_service import list_ensaios_for_fit, run_fit, load_fit_payload, get_preview_curve
+from services.kinetics_service import (
+    list_ensaios_for_fit,
+    run_fit,
+    load_fit_payload,
+    get_preview_curve,
+    build_alpha_time_comparison,
+)
 from services.vulcanization_service import run_simulation, load_simulation
 
 try:
@@ -94,6 +100,52 @@ def _is_safe_redirect_url(target: str) -> bool:
     ref_url = urlparse(request.host_url)
     test_url = urlparse(urljoin(request.host_url, target))
     return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
+
+
+def _parse_float_locale(value, default=None):
+    if value is None:
+        return default
+
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    s = str(value).strip()
+    if not s:
+        return default
+
+    # Aceita formato BR e internacional:
+    # 0,5 | 0.5 | 1.234,56 | 1,234.56
+    s = s.replace(" ", "")
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+
+    try:
+        return float(s)
+    except Exception:
+        return default
+
+
+def _parse_int_locale(value, default=None, min_value=None):
+    parsed = _parse_float_locale(value, default=None)
+    if parsed is None:
+        return default
+
+    try:
+        parsed_int = int(parsed)
+    except Exception:
+        return default
+
+    if min_value is not None and parsed_int < min_value:
+        return min_value
+    return parsed_int
 
 def recarregar_cache_memoria():
     """
@@ -2399,7 +2451,8 @@ def reometria_fit_result(fit_id):
     if not payload:
         flash('Resultado de fit não encontrado.', 'danger')
         return redirect(url_for('reometria_fit'))
-    return render_template('reometria/fit_result.html', payload=payload)
+    alpha_time_comparison = build_alpha_time_comparison(payload)
+    return render_template('reometria/fit_result.html', payload=payload, alpha_time_comparison=alpha_time_comparison)
 
 
 @app.route('/reometria/simulate/<fit_id>')
@@ -2424,17 +2477,42 @@ def reometria_simulate_run(fit_id):
         return redirect(url_for('reometria_fit'))
 
     mode = request.form.get('mode', 'prensa')
-    dim = int(request.form.get('dim', 1))
-    shape = request.form.get('shape', '200')
-    dx = float(request.form.get('dx', 0.001))
-    dt = float(request.form.get('dt', 0.5))
-    t_end = float(request.form.get('t_end', 600))
-    mold_temp_c = float(request.form.get('mold_temp_c', 170))
-    init_temp_c = float(request.form.get('init_temp_c', 25))
-    ramp_rate = float(request.form.get('ramp_rate', 0))
-    snapshot_every = int(request.form.get('snapshot_every', 20))
+    if mode not in ('prensa', 'autoclave'):
+        mode = 'prensa'
 
-    sim_id, _ = run_simulation(payload, mode, dim, shape, dx, dt, t_end, mold_temp_c, init_temp_c, ramp_rate, snapshot_every)
+    dim = _parse_int_locale(request.form.get('dim', 1), default=1, min_value=1)
+    if dim not in (1, 2, 3):
+        dim = 1
+
+    shape = str(request.form.get('shape', '200') or '200').strip()
+    shape = shape.replace(';', ',').replace('x', ',').replace('X', ',')
+
+    dx = _parse_float_locale(request.form.get('dx', 0.001), default=0.001)
+    dt = _parse_float_locale(request.form.get('dt', 0.5), default=0.5)
+    t_end = _parse_float_locale(request.form.get('t_end', 600), default=600.0)
+    mold_temp_c = _parse_float_locale(request.form.get('mold_temp_c', 170), default=170.0)
+    init_temp_c = _parse_float_locale(request.form.get('init_temp_c', 25), default=25.0)
+    ramp_rate = _parse_float_locale(request.form.get('ramp_rate', 0), default=0.0)
+    snapshot_every = _parse_int_locale(request.form.get('snapshot_every', 20), default=20, min_value=1)
+
+    if dx is None or dx <= 0:
+        dx = 0.001
+    if dt is None or dt <= 0:
+        dt = 0.5
+    if t_end is None or t_end <= 0:
+        t_end = 600.0
+    if mold_temp_c is None:
+        mold_temp_c = 170.0
+    if init_temp_c is None:
+        init_temp_c = 25.0
+    if ramp_rate is None:
+        ramp_rate = 0.0
+
+    try:
+        sim_id, _ = run_simulation(payload, mode, dim, shape, dx, dt, t_end, mold_temp_c, init_temp_c, ramp_rate, snapshot_every)
+    except Exception as exc:
+        flash(f'Falha ao executar simulacao: {exc}', 'danger')
+        return redirect(url_for('reometria_simulate_form', fit_id=fit_id, mode=mode))
     return redirect(url_for('reometria_simulate_view', sim_id=sim_id))
 
 

@@ -1,24 +1,66 @@
 {% extends 'base.html' %}
 {% block title %}Resultado do Fit{% endblock %}
 {% block content %}
-<h2>Resultado do Ajuste Cinético</h2>
+<h2>Resultado do Ajuste Cinetico</h2>
 <div class="row g-3 mb-3">
   <div class="col-md-3"><div class="card"><div class="card-body"><b>k0</b><div>{{ '%.6e'|format(payload.k0 or 0) }}</div></div></div></div>
   <div class="col-md-3"><div class="card"><div class="card-body"><b>Ea (J/mol)</b><div>{{ '%.2f'|format(payload.Ea or 0) }}</div></div></div></div>
   <div class="col-md-2"><div class="card"><div class="card-body"><b>n</b><div>{{ '%.4f'|format(payload.n or 0) }}</div></div></div></div>
-  <div class="col-md-2"><div class="card"><div class="card-body"><b>RMSE α</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
+  <div class="col-md-2"><div class="card"><div class="card-body"><b>RMSE alpha</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
   <div class="col-md-2"><div class="card"><div class="card-body"><b>Status</b><div>{{ 'OK' if payload.success else 'Falhou' }}</div></div></div></div>
 </div>
 
-<div class="mb-2">
+<div class="mb-3">
   <a class="btn btn-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='prensa') }}">Simular em prensa</a>
   <a class="btn btn-outline-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='autoclave') }}">Simular em autoclave</a>
 </div>
 
 <h5>Ensaios usados</h5>
 <ul>
-{% for e in payload.ensaios %}<li>{{ e.COD_ENSAIO }} - {{ e.T_C }} °C</li>{% endfor %}
+{% for e in payload.ensaios %}<li>{{ e.COD_ENSAIO }} - {{ ('%.1f'|format(e.T_C)).replace('.', ',') }} C</li>{% endfor %}
 </ul>
+
+<h5 class="mt-4">Comparacao de tempos por alpha</h5>
+<p class="text-muted">
+  t real = tempo de cruzamento da curva medida; t simulacao = tempo de cruzamento da curva ajustada.
+  Delta = simulacao - real.
+</p>
+{% if alpha_time_comparison %}
+  {% for curve in alpha_time_comparison %}
+  <div class="card mb-3">
+    <div class="card-header">
+      <b>Ensaio {{ curve.COD_ENSAIO }}</b>
+      {% if curve.T_C is not none %}- {{ ('%.1f'|format(curve.T_C)).replace('.', ',') }} C{% endif %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped table-sm mb-0">
+        <thead>
+          <tr>
+            <th>alpha</th>
+            <th>t real (s)</th>
+            <th>t simulacao (s)</th>
+            <th>delta (s)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in curve.comparisons %}
+          <tr>
+            <td>{{ ('%.1f'|format(row.alpha)).replace('.', ',') }}</td>
+            <td>{% if row.real_s is not none %}{{ ('%.2f'|format(row.real_s)).replace('.', ',') }}{% else %}--{% endif %}</td>
+            <td>{% if row.sim_s is not none %}{{ ('%.2f'|format(row.sim_s)).replace('.', ',') }}{% else %}--{% endif %}</td>
+            <td class="{% if row.diff_s is not none and row.diff_s > 0 %}text-danger{% elif row.diff_s is not none and row.diff_s < 0 %}text-success{% endif %}">
+              {% if row.diff_s is not none %}{{ ('%.2f'|format(row.diff_s)).replace('.', ',') }}{% else %}--{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="alert alert-warning">Nao ha dados de curva para comparar tempos de alpha.</div>
+{% endif %}
 
 <div id="alpha_chart" style="height:420px;"></div>
 <div id="torque_chart" style="height:420px;"></div>
@@ -28,12 +70,14 @@
   const curves = {{ payload.curves|tojson }};
   const alphaData = [];
   const torqueData = [];
-  curves.forEach(c => {
-    alphaData.push({x:c.t_rel,y:c.alpha,mode:'lines',name:`α real ${c.COD_ENSAIO}`});
-    if (c.alpha_model){ alphaData.push({x:c.t_rel,y:c.alpha_model,mode:'lines',line:{dash:'dot'},name:`α modelo ${c.COD_ENSAIO}`}); }
-    torqueData.push({x:c.tempo,y:c.torque,mode:'lines',name:`Torque ${c.COD_ENSAIO}`});
+  curves.forEach((c) => {
+    alphaData.push({ x: c.t_rel, y: c.alpha, mode: 'lines', name: `alpha real ${c.COD_ENSAIO}` });
+    if (c.alpha_model) {
+      alphaData.push({ x: c.t_rel, y: c.alpha_model, mode: 'lines', line: { dash: 'dot' }, name: `alpha modelo ${c.COD_ENSAIO}` });
+    }
+    torqueData.push({ x: c.tempo, y: c.torque, mode: 'lines', name: `Torque ${c.COD_ENSAIO}` });
   });
-  Plotly.newPlot('alpha_chart', alphaData, {title:'Alpha real vs modelo',xaxis:{title:'t relativo'},yaxis:{title:'α'}});
-  Plotly.newPlot('torque_chart', torqueData, {title:'Torque vs Tempo',xaxis:{title:'Tempo'},yaxis:{title:'Torque'}});
+  Plotly.newPlot('alpha_chart', alphaData, { title: 'Alpha real vs modelo', xaxis: { title: 't relativo (s)' }, yaxis: { title: 'alpha' } });
+  Plotly.newPlot('torque_chart', torqueData, { title: 'Torque vs tempo', xaxis: { title: 'Tempo (s)' }, yaxis: { title: 'Torque' } });
 </script>
 {% endblock %}

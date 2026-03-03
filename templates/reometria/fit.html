@@ -1,27 +1,36 @@
 {% extends 'base.html' %}
-{% block title %}Ajuste Cinético{% endblock %}
+{% block title %}Ajuste Cinetico{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>Ajuste Cinético (SOLVER)</h2>
+  <h2>Ajuste Cinetico (SOLVER)</h2>
 </div>
 
 <form method="GET" class="row g-2 mb-3">
   <div class="col-md-3"><input type="date" class="form-control" name="date_start" value="{{ filters.date_start }}"></div>
   <div class="col-md-3"><input type="date" class="form-control" name="date_end" value="{{ filters.date_end }}"></div>
-  <div class="col-md-4"><input type="text" class="form-control" name="q" placeholder="Lote, código, amostra..." value="{{ filters.q }}"></div>
-  <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
+  <div class="col-md-4"><input type="text" class="form-control" name="q" placeholder="Lote, codigo, amostra..." value="{{ filters.q }}"></div>
+  <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Filtrar</button></div>
 </form>
 
-<form method="POST" action="{{ url_for('reometria_fit_run') }}">
+<form method="POST" action="{{ url_for('reometria_fit_run') }}" id="fitSolverForm">
   <div class="table-responsive" style="max-height: 60vh;">
     <table class="table table-striped table-sm align-middle">
       <thead class="table-dark" style="position: sticky; top:0;">
-        <tr><th></th><th>COD_ENSAIO</th><th>DATA</th><th>TEMP</th><th>AMOSTRA</th><th>CÓDIGO</th><th>LOTE/BATCH</th><th>Preview</th></tr>
+        <tr>
+          <th><input type="checkbox" id="selectAllFit" aria-label="Selecionar todas"></th>
+          <th>COD_ENSAIO</th>
+          <th>DATA</th>
+          <th>TEMP</th>
+          <th>AMOSTRA</th>
+          <th>CODIGO</th>
+          <th>LOTE/BATCH</th>
+          <th>Preview</th>
+        </tr>
       </thead>
       <tbody>
         {% for e in ensaios %}
         <tr>
-          <td><input type="checkbox" name="cod_ensaios" value="{{ e.COD_ENSAIO }}"></td>
+          <td><input type="checkbox" name="cod_ensaios" value="{{ e.COD_ENSAIO }}" class="fit-cb"></td>
           <td>{{ e.COD_ENSAIO }}</td>
           <td>{{ e.DATA }}</td>
           <td>{{ e.TEMP_PLATO_INF }}</td>
@@ -34,8 +43,60 @@
       </tbody>
     </table>
   </div>
-  <div class="mt-3">
-    <button class="btn btn-success">Rodar SOLVER</button>
+  <div class="mt-3 d-flex align-items-center gap-3">
+    <button class="btn btn-success" type="submit" id="fitSolverSubmit">Rodar SOLVER</button>
+    <small class="text-muted" id="fitSelectedCounter">0 curvas selecionadas</small>
   </div>
 </form>
+
+<script>
+  (() => {
+    const form = document.getElementById('fitSolverForm');
+    if (!form) return;
+
+    const checkboxes = Array.from(form.querySelectorAll('input.fit-cb[type="checkbox"]'));
+    const selectAll = document.getElementById('selectAllFit');
+    const counter = document.getElementById('fitSelectedCounter');
+    const submitBtn = document.getElementById('fitSolverSubmit');
+
+    const selectedCount = () => checkboxes.filter((cb) => cb.checked).length;
+
+    const refreshCounter = () => {
+      const count = selectedCount();
+      if (counter) {
+        counter.textContent = `${count} curva${count === 1 ? '' : 's'} selecionada${count === 1 ? '' : 's'}`;
+      }
+      if (selectAll) {
+        const allChecked = checkboxes.length > 0 && checkboxes.every((cb) => cb.checked);
+        selectAll.checked = allChecked;
+      }
+    };
+
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        checkboxes.forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        refreshCounter();
+      });
+    }
+
+    checkboxes.forEach((cb) => cb.addEventListener('change', refreshCounter));
+
+    form.addEventListener('submit', (event) => {
+      const count = selectedCount();
+      if (count < 2) {
+        event.preventDefault();
+        alert('Selecione pelo menos 2 curvas para o ajuste.');
+        return;
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Processando...';
+      }
+    });
+
+    refreshCounter();
+  })();
+</script>
 {% endblock %}

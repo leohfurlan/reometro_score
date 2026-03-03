@@ -7,10 +7,11 @@ from pathlib import Path
 import numpy as np
 
 from connection import connect_to_database
-from services.kinetics_solver import fit_kinetics, parametrize_curve, alpha_model
+from services.kinetics_solver import fit_kinetics, parametrize_curve, alpha_model, first_crossing_time
 
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+ALPHA_COMPARE_TARGETS_DEFAULT = [0.10, 0.20, 0.50, 0.90]
 
 
 def list_ensaios_for_fit(date_start=None, date_end=None, text_query=None, limit=300):
@@ -177,3 +178,40 @@ def get_preview_curve(cod_ensaio):
         "t_rel": c["t_rel"].tolist(),
         "alpha": c["alpha"].tolist(),
     }
+
+
+def build_alpha_time_comparison(payload, alpha_targets=None):
+    alpha_targets = [float(a) for a in (alpha_targets or ALPHA_COMPARE_TARGETS_DEFAULT)]
+    rows = []
+    curves = payload.get("curves") or []
+
+    for c in curves:
+        t_rel = np.array(c.get("t_rel") or [], dtype=float)
+        alpha_real = np.array(c.get("alpha") or [], dtype=float)
+        alpha_sim = np.array(c.get("alpha_model") or [], dtype=float) if c.get("alpha_model") is not None else None
+
+        can_eval_real = len(t_rel) >= 2 and len(t_rel) == len(alpha_real)
+        can_eval_sim = alpha_sim is not None and len(t_rel) >= 2 and len(t_rel) == len(alpha_sim)
+
+        comparisons = []
+        for alpha_target in alpha_targets:
+            t_real = first_crossing_time(t_rel, alpha_real, alpha_target) if can_eval_real else None
+            t_sim = first_crossing_time(t_rel, alpha_sim, alpha_target) if can_eval_sim else None
+            comparisons.append(
+                {
+                    "alpha": alpha_target,
+                    "real_s": float(t_real) if t_real is not None else None,
+                    "sim_s": float(t_sim) if t_sim is not None else None,
+                    "diff_s": float(t_sim - t_real) if (t_real is not None and t_sim is not None) else None,
+                }
+            )
+
+        rows.append(
+            {
+                "COD_ENSAIO": c.get("COD_ENSAIO"),
+                "T_C": c.get("T_C"),
+                "comparisons": comparisons,
+            }
+        )
+
+    return rows
