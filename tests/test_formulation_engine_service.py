@@ -152,6 +152,9 @@ def test_engine_train_predict_and_explain(tmp_path):
         auto_train_if_missing=False,
     )
     assert pred_out["status"] == "sucesso"
+    assert 0.0 <= pred_out["confidence_index"] <= 1.0
+    assert "predicted" in pred_out
+    assert "risk_score" in pred_out["predicted"]
     for key in ("hardness", "tensile", "elongation", "abrasion", "ts2", "t90"):
         assert key in pred_out["predicted_properties"]
         assert len(pred_out["predicted_properties"][key]["confidence_interval"]) == 2
@@ -195,6 +198,12 @@ def test_engine_optimize_and_active_learning(tmp_path):
     assert opt_out["status"] == "sucesso"
     assert len(opt_out["top_candidates"]) <= 10
     assert opt_out["pareto_frontier"]
+    assert opt_out["pareto_front"]
+    assert "seed" in opt_out
+    first = opt_out["pareto_front"][0]
+    assert "predicted" in first
+    assert "cost" in first
+    assert "risk" in first
 
     al_out = service.suggest_next_experiments(
         top_n=6,

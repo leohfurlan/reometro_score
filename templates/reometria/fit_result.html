@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Resultado do Fit{% endblock %}
+{% block content %}
+<h2>Resultado do Ajuste Cinético</h2>
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card"><div class="card-body"><b>k0</b><div>{{ '%.6e'|format(payload.k0 or 0) }}</div></div></div></div>
+  <div class="col-md-3"><div class="card"><div class="card-body"><b>Ea (J/mol)</b><div>{{ '%.2f'|format(payload.Ea or 0) }}</div></div></div></div>
+  <div class="col-md-2"><div class="card"><div class="card-body"><b>n</b><div>{{ '%.4f'|format(payload.n or 0) }}</div></div></div></div>
+  <div class="col-md-2"><div class="card"><div class="card-body"><b>RMSE α</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
+  <div class="col-md-2"><div class="card"><div class="card-body"><b>Status</b><div>{{ 'OK' if payload.success else 'Falhou' }}</div></div></div></div>
+</div>
+
+<div class="mb-2">
+  <a class="btn btn-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='prensa') }}">Simular em prensa</a>
+  <a class="btn btn-outline-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='autoclave') }}">Simular em autoclave</a>
+</div>
+
+<h5>Ensaios usados</h5>
+<ul>
+{% for e in payload.ensaios %}<li>{{ e.COD_ENSAIO }} - {{ e.T_C }} °C</li>{% endfor %}
+</ul>
+
+<div id="alpha_chart" style="height:420px;"></div>
+<div id="torque_chart" style="height:420px;"></div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+  const curves = {{ payload.curves|tojson }};
+  const alphaData = [];
+  const torqueData = [];
+  curves.forEach(c => {
+    alphaData.push({x:c.t_rel,y:c.alpha,mode:'lines',name:`α real ${c.COD_ENSAIO}`});
+    if (c.alpha_model){ alphaData.push({x:c.t_rel,y:c.alpha_model,mode:'lines',line:{dash:'dot'},name:`α modelo ${c.COD_ENSAIO}`}); }
+    torqueData.push({x:c.tempo,y:c.torque,mode:'lines',name:`Torque ${c.COD_ENSAIO}`});
+  });
+  Plotly.newPlot('alpha_chart', alphaData, {title:'Alpha real vs modelo',xaxis:{title:'t relativo'},yaxis:{title:'α'}});
+  Plotly.newPlot('torque_chart', torqueData, {title:'Torque vs Tempo',xaxis:{title:'Tempo'},yaxis:{title:'Torque'}});
+</script>
+{% endblock %}

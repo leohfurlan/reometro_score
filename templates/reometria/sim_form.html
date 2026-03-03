@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Simulação de Vulcanização{% endblock %}
+{% block content %}
+<h2>Simular {{ mode|capitalize }} (fit {{ fit_id }})</h2>
+<form method="POST" action="{{ url_for('reometria_simulate_run', fit_id=fit_id) }}" class="row g-3">
+  <input type="hidden" name="mode" value="{{ mode }}">
+  <div class="col-md-2"><label class="form-label">Dimensão</label><select class="form-select" name="dim"><option value="1">1D</option><option value="2">2D</option><option value="3">3D</option></select></div>
+  <div class="col-md-3"><label class="form-label">Shape</label><input class="form-control" name="shape" value="200"></div>
+  <div class="col-md-2"><label class="form-label">dx</label><input class="form-control" name="dx" value="0.001"></div>
+  <div class="col-md-2"><label class="form-label">dt</label><input class="form-control" name="dt" value="0.5"></div>
+  <div class="col-md-3"><label class="form-label">t_end (s)</label><input class="form-control" name="t_end" value="600"></div>
+  <div class="col-md-3"><label class="form-label">Temp molde/ar (°C)</label><input class="form-control" name="mold_temp_c" value="170"></div>
+  <div class="col-md-3"><label class="form-label">Temp inicial (°C)</label><input class="form-control" name="init_temp_c" value="25"></div>
+  <div class="col-md-3"><label class="form-label">Rampa autoclave (°C/s)</label><input class="form-control" name="ramp_rate" value="0.05"></div>
+  <div class="col-md-3"><label class="form-label">Snapshot a cada N steps</label><input class="form-control" name="snapshot_every" value="20"></div>
+  <div class="col-12"><button class="btn btn-success">Rodar simulação</button></div>
+</form>
+<p class="text-muted mt-3">Shape esperado: 1D=200, 2D=80,80, 3D=30,40,40.</p>
+{% endblock %}

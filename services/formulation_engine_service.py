@@ -15,6 +15,13 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
+from reoscore.optimization.optimization_engine import (
+    IngredientVariable,
+    NSGA2OptimizationEngine,
+    OptimizationConfig,
+    OptimizationProblem,
+)
+from reoscore.optimization.risk_engine import RiskEngine
 from services.formulation_data_service import FormulationDatasetService
 from services.formulation_feature_pipeline import FormulationFeaturePipeline, normalize_code
 
@@ -36,6 +43,7 @@ DEFAULT_TECHNICAL_CONSTRAINTS = {
 }
 
 DEFAULT_WEIGHTS = {"cost": 0.4, "risk": 0.3, "resistance": 0.3}
+DEFAULT_ENSEMBLE_SIZE = 5
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -131,11 +139,15 @@ class FormulationEngineService:
             shuffle=True,
         )
 
-        model = self._build_model()
-        model.fit(X_train, y_train)
+        ensemble_models = self._build_ensemble_models(
+            X_train=X_train,
+            y_train=y_train,
+            ensemble_size=DEFAULT_ENSEMBLE_SIZE,
+        )
+        representative_model = ensemble_models[0]
 
-        pred_train = model.predict(X_train)
-        pred_test = model.predict(X_test)
+        pred_train = self._predict_ensemble_matrix(ensemble_models, X_train)
+        pred_test = self._predict_ensemble_matrix(ensemble_models, X_test)
 
         metrics = self._compute_metrics(
             y_train=y_train.to_numpy(dtype=float),
@@ -148,7 +160,7 @@ class FormulationEngineService:
             pred=np.asarray(pred_test, dtype=float),
         )
         feature_importance = self._build_feature_importance(
-            model=model,
+            model=representative_model,
             feature_columns=list(X.columns),
         )
 
@@ -156,13 +168,16 @@ class FormulationEngineService:
             X_train=X_train,
             y_train=y_train,
         )
+        training_summary["ensemble_size"] = int(len(ensemble_models))
         model_version = self._new_version()
 
         bundle = {
             "version": model_version,
             "created_at": _utc_now_iso(),
             "targets": list(TARGETS),
-            "model": model,
+            "model": representative_model,
+            "ensemble_models": ensemble_models,
+            "ensemble_size": int(len(ensemble_models)),
             "pipeline_state": pipeline.to_state(),
             "feature_columns": list(X.columns),
             "residual_profile": residual_profile,
@@ -194,6 +209,7 @@ class FormulationEngineService:
                 "n_samples": int(len(X)),
                 "n_features": int(X.shape[1]),
                 "random_seed": self.random_seed,
+                "ensemble_size": int(len(ensemble_models)),
             },
         )
         self._register_version(
@@ -213,6 +229,7 @@ class FormulationEngineService:
             "model_version": model_version,
             "samples": int(len(X)),
             "features": int(X.shape[1]),
+            "ensemble_size": int(len(ensemble_models)),
             "metrics": metrics,
             "paths": {
                 "model": model_path,
@@ -243,40 +260,45 @@ class FormulationEngineService:
         )
         pipeline = FormulationFeaturePipeline.from_state(bundle.get("pipeline_state") or {})
         X = pipeline.transform_one(formulation, process)
-        pred_vector = np.asarray(bundle["model"].predict(X), dtype=float).ravel()
+        ensemble_models = list(bundle.get("ensemble_models") or [])
+        if not ensemble_models and bundle.get("model") is not None:
+            ensemble_models = [bundle["model"]]
+        pred_ens = RiskEngine.predict_ensemble(
+            models=ensemble_models,
+            X=X,
+            target_names=TARGETS,
+            target_scales=self._target_scales_from_bundle(bundle),
+        )
         residual_profile = bundle.get("residual_profile") or {}
 
         predicted_properties: Dict[str, Dict[str, Any]] = {}
-        ci_width_ratios = []
         point_predictions: Dict[str, float] = {}
 
-        for idx, target in enumerate(TARGETS):
-            pred_value = float(pred_vector[idx])
+        for target in TARGETS:
+            pred_value = float(pred_ens.mean_by_target.get(target) or 0.0)
+            pred_std = float(pred_ens.std_by_target.get(target) or 0.0)
             point_predictions[target] = pred_value
             profile = residual_profile.get(target) or {}
-            q05 = _to_float(profile.get("q05"))
-            q95 = _to_float(profile.get("q95"))
             std = _to_float(profile.get("std")) or 0.0
-            if q05 is None:
-                q05 = -1.64 * std
-            if q95 is None:
-                q95 = 1.64 * std
-            ci_low = float(pred_value + q05)
-            ci_high = float(pred_value + q95)
+            ci_low, ci_high = RiskEngine.confidence_interval(
+                mean_value=pred_value,
+                ensemble_std=pred_std,
+                residual_std=std,
+                confidence_level=0.90,
+            )
             if ci_low > ci_high:
                 ci_low, ci_high = ci_high, ci_low
 
-            ci_width = ci_high - ci_low
-            ci_width_ratios.append(ci_width / max(abs(pred_value), 1.0))
             predicted_properties[target] = {
                 "value": round(pred_value, 4),
+                "std_ensemble": round(pred_std, 6),
                 "confidence_interval": [round(ci_low, 4), round(ci_high, 4)],
             }
 
         feature_row = X.iloc[0].to_dict()
         novelty_score = self._compute_novelty_score(feature_row, bundle)
-        uncertainty_score = float(np.mean(ci_width_ratios)) if ci_width_ratios else 0.0
-        uncertainty_score = max(0.0, min(1.0, uncertainty_score))
+        uncertainty_score = float(pred_ens.uncertainty_score)
+        confidence_index = float(pred_ens.confidence_index)
         risk_score = self._compute_risk_score(
             uncertainty_score=uncertainty_score,
             novelty_score=novelty_score,
@@ -288,6 +310,7 @@ class FormulationEngineService:
             "status": "sucesso",
             "model_version": bundle.get("version"),
             "confidence_level": 0.90,
+            "confidence_index": round(confidence_index, 6),
             "predicted_properties": predicted_properties,
             "derived_features": {
                 "polymer_fraction_total": round(
@@ -302,7 +325,17 @@ class FormulationEngineService:
                 "crosslink_density_proxy": round(
                     float(feature_row.get("crosslink_density_proxy", 0.0)), 6
                 ),
+                "curing_severity_index": round(
+                    float(feature_row.get("curing_severity_index", 0.0)), 6
+                ),
                 "total_cost_per_kg": round(float(feature_row.get("total_cost_per_kg", 0.0)), 6),
+                # Virtual Lab aliases (modo engenharia)
+                "crosslink_proxy": round(float(feature_row.get("crosslink_density_proxy", 0.0)), 6),
+                "reinforcement_weighted": round(
+                    float(feature_row.get("weighted_filler_reinforcement_index", 0.0)), 6
+                ),
+                "oil_to_rubber": round(float(feature_row.get("oil_to_polymer_ratio", 0.0)), 6),
+                "curing_severity_proxy": round(float(feature_row.get("curing_severity_index", 0.0)), 6),
             },
             "objective_signals": {
                 "cost": round(float(feature_row.get("total_cost_per_kg", 0.0)), 6),
@@ -310,6 +343,26 @@ class FormulationEngineService:
                 "resistance": round(float(resistance_score), 6),
                 "uncertainty_score": round(float(uncertainty_score), 6),
                 "novelty_score": round(float(novelty_score), 6),
+                "confidence_index": round(float(confidence_index), 6),
+            },
+            "ensemble": {
+                "size": int(len(ensemble_models)),
+                "std_by_target": {
+                    key: round(float(val), 6) for key, val in pred_ens.std_by_target.items()
+                },
+            },
+            # Flat fields for optimization and frontend ergonomics.
+            "predicted": {
+                "hardness_pred": round(float(point_predictions.get("hardness", 0.0)), 6),
+                "tensile_pred": round(float(point_predictions.get("tensile", 0.0)), 6),
+                "elongation_pred": round(float(point_predictions.get("elongation", 0.0)), 6),
+                "abrasion_pred": round(float(point_predictions.get("abrasion", 0.0)), 6),
+                "abrasion_resistance_pred": round(
+                    max(0.0, 1000.0 - float(point_predictions.get("abrasion", 0.0))), 6
+                ),
+                "estimated_cost_per_kg": round(float(feature_row.get("total_cost_per_kg", 0.0)), 6),
+                "risk_score": round(float(risk_score), 6),
+                "confidence_index": round(float(confidence_index), 6),
             },
         }
         return response
@@ -397,6 +450,9 @@ class FormulationEngineService:
         if not bundle:
             return {"status": "erro", "mensagem": "Sem modelo ativo para otimizar formulacao."}
 
+        if not isinstance(payload, Mapping):
+            payload = {}
+
         base_formulation, base_process = self._extract_base_payload(payload)
         if not base_formulation.get("ingredients"):
             return {
@@ -404,110 +460,192 @@ class FormulationEngineService:
                 "mensagem": "Payload sem ingredientes validos para otimizar.",
             }
 
-        search_cfg = payload.get("search_config") if isinstance(payload, Mapping) else {}
-        if not isinstance(search_cfg, Mapping):
-            search_cfg = {}
-        population_size = max(120, int(search_cfg.get("population_size") or 900))
-        mutation_scale = max(0.02, float(search_cfg.get("mutation_scale") or 0.18))
-        random_seed = int(search_cfg.get("random_seed") or self.random_seed)
-        rng = np.random.default_rng(random_seed)
+        search_cfg = payload.get("search_config") if isinstance(payload.get("search_config"), Mapping) else {}
+        optimization_cfg = OptimizationConfig.from_mapping(search_cfg, default_seed=self.random_seed)
 
-        ingredient_bounds = payload.get("ingredient_bounds") if isinstance(payload, Mapping) else {}
-        process_bounds = payload.get("process_bounds") if isinstance(payload, Mapping) else {}
-        fixed_ingredients = payload.get("fixed_ingredients") if isinstance(payload, Mapping) else []
-        if not isinstance(ingredient_bounds, Mapping):
-            ingredient_bounds = {}
-        if not isinstance(process_bounds, Mapping):
-            process_bounds = {}
-        if not isinstance(fixed_ingredients, Sequence) or isinstance(fixed_ingredients, (str, bytes)):
+        target_block = payload.get("target") if isinstance(payload.get("target"), Mapping) else {}
+        constraints_block = (
+            payload.get("constraints") if isinstance(payload.get("constraints"), Mapping) else {}
+        )
+        ingredient_bounds = (
+            payload.get("ingredient_bounds")
+            if isinstance(payload.get("ingredient_bounds"), Mapping)
+            else {}
+        )
+        fixed_ingredients = payload.get("fixed_ingredients")
+        if not isinstance(fixed_ingredients, Sequence) or isinstance(
+            fixed_ingredients, (str, bytes)
+        ):
             fixed_ingredients = []
-        fixed_ingredients_norm = {normalize_code(code) for code in fixed_ingredients}
+        fixed_ingredients_norm = {normalize_code(code) for code in fixed_ingredients if normalize_code(code)}
 
         technical_constraints = self._merge_constraints(payload.get("technical_constraints"))
-        weights = self._resolve_weights(payload.get("weights"))
+        variables = self._build_optimization_variables(
+            base_items=list(base_formulation.get("ingredients") or []),
+            ingredient_bounds=ingredient_bounds,
+            fixed_ingredients=fixed_ingredients_norm,
+            bundle=bundle,
+            mutation_scale=optimization_cfg.mutation_scale,
+        )
+        if not variables:
+            return {
+                "status": "erro",
+                "mensagem": "Nao foi possivel mapear variaveis de decisao para a otimizacao.",
+            }
 
-        base_items = list(base_formulation.get("ingredients") or [])
-        candidate_rows: List[Dict[str, Any]] = []
+        hardness_target = _to_float(target_block.get("hardness"))
+        if hardness_target is None:
+            hard_rule = technical_constraints.get("hardness") if isinstance(technical_constraints, Mapping) else {}
+            hmin = _to_float((hard_rule or {}).get("min"))
+            hmax = _to_float((hard_rule or {}).get("max"))
+            if hmin is not None and hmax is not None:
+                hardness_target = (hmin + hmax) / 2.0
 
-        for idx in range(population_size):
-            cand_ingredients = self._mutate_ingredients(
-                base_items=base_items,
-                ingredient_bounds=ingredient_bounds,
-                fixed_ingredients=fixed_ingredients_norm,
-                mutation_scale=mutation_scale,
-                rng=rng,
-            )
-            cand_process = self._mutate_process(
-                base_process=base_process,
-                process_bounds=process_bounds,
-                mutation_scale=mutation_scale,
-                rng=rng,
-            )
+        hardness_tolerance = (
+            _to_float(target_block.get("hardness_tolerance"))
+            or _to_float(constraints_block.get("hardness_tolerance"))
+            or 3.0
+        )
+        min_tensile = _to_float(target_block.get("min_tensile"))
+        if min_tensile is None:
+            min_tensile = _to_float((technical_constraints.get("tensile") or {}).get("min"))
+        max_abrasion = _to_float(target_block.get("max_abrasion"))
+        if max_abrasion is None:
+            max_abrasion = _to_float((technical_constraints.get("abrasion") or {}).get("max"))
+        max_cost = _to_float(target_block.get("max_cost"))
+        if max_cost is None:
+            max_cost = _to_float((technical_constraints.get("cost") or {}).get("max"))
+
+        min_cb = _to_float(constraints_block.get("min_cb"))
+        max_cb = _to_float(constraints_block.get("max_cb"))
+        max_filler_total = _to_float(constraints_block.get("max_filler_total")) or 120.0
+        elastomer_target_sum = _to_float(constraints_block.get("elastomer_target_sum")) or 100.0
+        elastomer_tolerance = _to_float(constraints_block.get("elastomer_tolerance")) or 0.2
+
+        def evaluate_candidate(items: List[Dict[str, Any]], process: Dict[str, Any]) -> Mapping[str, Any]:
             pred = self.predict(
-                formulation_payload={"ingredients": cand_ingredients},
-                process_payload=cand_process,
+                formulation_payload={"ingredients": items},
+                process_payload=process,
                 auto_train_if_missing=False,
             )
             if pred.get("status") != "sucesso":
-                continue
+                raise RuntimeError(pred.get("mensagem") or "Falha na previsao para candidato.")
 
-            objectives = {
-                "cost": float(pred["objective_signals"]["cost"]),
-                "risk": float(pred["objective_signals"]["risk"]),
-                "resistance": float(pred["objective_signals"]["resistance"]),
-            }
-            feasible, violation_details, violation_score = self._check_constraints(
-                prediction=pred,
-                technical_constraints=technical_constraints,
-            )
-            candidate_rows.append(
-                {
-                    "candidate_id": idx + 1,
-                    "formulation": {"ingredients": cand_ingredients},
-                    "process_parameters": cand_process,
-                    "predicted_properties": pred["predicted_properties"],
-                    "derived_features": pred["derived_features"],
-                    "objective_signals": objectives,
-                    "feasible": feasible,
-                    "constraint_violation_score": round(float(violation_score), 8),
-                    "constraint_violations": violation_details,
-                }
-            )
+            flat = dict(pred.get("predicted") or {})
+            if "hardness_pred" not in flat:
+                flat["hardness_pred"] = _to_float((pred.get("predicted_properties", {}).get("hardness") or {}).get("value"))
+            if "tensile_pred" not in flat:
+                flat["tensile_pred"] = _to_float((pred.get("predicted_properties", {}).get("tensile") or {}).get("value"))
+            if "abrasion_resistance_pred" not in flat:
+                abrasion_val = _to_float(
+                    (pred.get("predicted_properties", {}).get("abrasion") or {}).get("value")
+                )
+                if abrasion_val is not None:
+                    flat["abrasion_pred"] = abrasion_val
+                    flat["abrasion_resistance_pred"] = max(0.0, 1000.0 - float(abrasion_val))
+            if "estimated_cost_per_kg" not in flat:
+                flat["estimated_cost_per_kg"] = _to_float((pred.get("derived_features") or {}).get("total_cost_per_kg"))
+            if "risk_score" not in flat:
+                flat["risk_score"] = _to_float((pred.get("objective_signals") or {}).get("risk"))
+            if "confidence_index" not in flat:
+                flat["confidence_index"] = _to_float(pred.get("confidence_index"))
 
-        if not candidate_rows:
-            return {"status": "erro", "mensagem": "Falha ao gerar candidatos validos."}
+            flat["predicted_properties"] = pred.get("predicted_properties") or {}
+            flat["derived_features"] = pred.get("derived_features") or {}
+            flat["objective_signals"] = pred.get("objective_signals") or {}
+            flat["model_version"] = pred.get("model_version")
 
-        feasible_rows = [row for row in candidate_rows if row["feasible"]]
-        evaluation_pool = feasible_rows if feasible_rows else candidate_rows
-        pareto_idx = self._pareto_frontier_indices(evaluation_pool)
-        frontier_rows = [evaluation_pool[i] for i in pareto_idx]
+            metric_values = self._flatten_prediction_metrics(pred)
+            return {"predicted": flat, "metric_values": metric_values}
 
-        ranked_frontier = self._rank_candidates(frontier_rows, weights)
-        top_candidates = ranked_frontier[:10]
+        problem = OptimizationProblem(
+            application=str(payload.get("application") or "").strip() or None,
+            base_process=dict(base_process or {}),
+            variables=variables,
+            evaluate_candidate=evaluate_candidate,
+            target_hardness=hardness_target,
+            hardness_tolerance=max(0.0, float(hardness_tolerance)),
+            min_tensile=min_tensile,
+            max_abrasion=max_abrasion,
+            max_cost=max_cost,
+            min_cb=min_cb,
+            max_cb=max_cb,
+            elastomer_target_sum=float(elastomer_target_sum),
+            elastomer_tolerance=max(0.0, float(elastomer_tolerance)),
+            max_filler_total=max(0.0, float(max_filler_total)),
+            extra_metric_constraints=technical_constraints,
+        )
+
+        engine = NSGA2OptimizationEngine(config=optimization_cfg)
+        optimization_result = engine.run(problem)
+        pareto_candidates = list(optimization_result.get("pareto_candidates") or [])
+        top_candidates = list(optimization_result.get("top_candidates") or [])[:10]
 
         frontier_payload = [
             {
-                "candidate_id": row["candidate_id"],
-                "cost": row["objective_signals"]["cost"],
-                "risk": row["objective_signals"]["risk"],
-                "resistance": row["objective_signals"]["resistance"],
-                "feasible": row["feasible"],
-                "constraint_violation_score": row["constraint_violation_score"],
+                "candidate_id": row.get("candidate_id"),
+                "cost": _to_float(row.get("cost")),
+                "risk": _to_float(row.get("risk")),
+                "resistance": _to_float(
+                    ((row.get("predicted") or {}).get("objective_signals") or {}).get("resistance")
+                ),
+                "feasible": bool(row.get("feasible")),
+                "constraint_violation_score": _to_float(row.get("constraint_violation_score")) or 0.0,
+                "confidence_index": _to_float(row.get("confidence_index")) or 0.0,
             }
-            for row in ranked_frontier
+            for row in pareto_candidates
         ]
 
+        pareto_front = [
+            {
+                "formulation": row.get("formulation"),
+                "predicted": row.get("predicted"),
+                "cost": row.get("cost"),
+                "risk": row.get("risk"),
+                "confidence_index": row.get("confidence_index"),
+                "constraint_violation_score": row.get("constraint_violation_score"),
+                "candidate_id": row.get("candidate_id"),
+                "feasible": row.get("feasible"),
+            }
+            for row in pareto_candidates
+        ]
+
+        summary_raw = optimization_result.get("summary") or {}
         result = {
             "status": "sucesso",
             "model_version": bundle.get("version"),
+            "seed": optimization_cfg.random_seed,
+            "application": problem.application,
             "summary": {
-                "num_candidates_evaluated": len(candidate_rows),
-                "num_feasible": len(feasible_rows),
-                "num_pareto": len(frontier_rows),
+                "num_candidates_evaluated": int(summary_raw.get("evaluations") or 0),
+                "num_feasible": int(sum(1 for row in pareto_candidates if row.get("feasible"))),
+                "num_pareto": len(pareto_candidates),
+                "population_size": int(summary_raw.get("population_size") or optimization_cfg.population_size),
+                "generations": int(summary_raw.get("generations") or optimization_cfg.generations),
+            },
+            "target": {
+                "hardness": hardness_target,
+                "hardness_tolerance": hardness_tolerance,
+                "min_tensile": min_tensile,
+                "max_abrasion": max_abrasion,
+                "max_cost": max_cost,
             },
             "top_candidates": top_candidates,
             "pareto_frontier": frontier_payload,
+            "pareto_front": pareto_front,
         }
+
+        history_id = self._persist_optimization_history(
+            model_version=str(bundle.get("version") or ""),
+            seed=int(optimization_cfg.random_seed),
+            request_payload=_deep_copy_jsonable(payload),
+            response_payload=_deep_copy_jsonable(result),
+            status="sucesso",
+            application=problem.application,
+        )
+        if history_id is not None:
+            result["optimization_history_id"] = int(history_id)
+
         self._append_event("optimize", result)
         return result
 
@@ -626,7 +764,7 @@ class FormulationEngineService:
                 rows.append(row)
         return pd.DataFrame(rows, columns=list(TARGETS))
 
-    def _build_model(self) -> MultiOutputRegressor:
+    def _build_model(self, random_state: Optional[int] = None) -> MultiOutputRegressor:
         base = xgb.XGBRegressor(
             n_estimators=320,
             learning_rate=0.04,
@@ -636,10 +774,222 @@ class FormulationEngineService:
             reg_lambda=1.0,
             min_child_weight=1.2,
             objective="reg:squarederror",
-            random_state=self.random_seed,
+            random_state=int(random_state if random_state is not None else self.random_seed),
             n_jobs=4,
         )
         return MultiOutputRegressor(base)
+
+    def _build_ensemble_models(
+        self,
+        X_train: pd.DataFrame,
+        y_train: pd.DataFrame,
+        ensemble_size: int = DEFAULT_ENSEMBLE_SIZE,
+    ) -> List[MultiOutputRegressor]:
+        models: List[MultiOutputRegressor] = []
+        size = max(DEFAULT_ENSEMBLE_SIZE, int(ensemble_size))
+        n_rows = len(X_train)
+        if n_rows <= 0:
+            raise ValueError("Treino vazio para construir ensemble.")
+
+        for idx in range(size):
+            model = self._build_model(random_state=self.random_seed + (17 * idx))
+
+            if n_rows <= 12:
+                X_boot = X_train
+                y_boot = y_train
+            else:
+                rng = np.random.default_rng(self.random_seed + (31 * idx))
+                boot_idx = rng.choice(n_rows, size=n_rows, replace=True)
+                X_boot = X_train.iloc[boot_idx]
+                y_boot = y_train.iloc[boot_idx]
+
+            model.fit(X_boot, y_boot)
+            models.append(model)
+        return models
+
+    def _predict_ensemble_matrix(
+        self, models: Sequence[MultiOutputRegressor], X: pd.DataFrame
+    ) -> np.ndarray:
+        preds = [np.asarray(model.predict(X), dtype=float) for model in (models or [])]
+        if not preds:
+            raise ValueError("Ensemble vazio para predicao.")
+        return np.mean(np.stack(preds, axis=0), axis=0)
+
+    def _target_scales_from_bundle(self, bundle: Mapping[str, Any]) -> Dict[str, float]:
+        target_stats = (bundle.get("training_summary") or {}).get("target_stats") or {}
+        out = {}
+        for target in TARGETS:
+            std = _to_float((target_stats.get(target) or {}).get("std"))
+            out[target] = float(std if std is not None and std > 0 else 1.0)
+        return out
+
+    def _flatten_prediction_metrics(self, prediction: Mapping[str, Any]) -> Dict[str, float]:
+        metrics: Dict[str, float] = {}
+        predicted = prediction.get("predicted_properties") or {}
+        for key, value in predicted.items():
+            if isinstance(value, Mapping):
+                val = _to_float(value.get("value"))
+            else:
+                val = _to_float(value)
+            if val is not None:
+                metrics[key] = float(val)
+
+        for key, val in (prediction.get("derived_features") or {}).items():
+            parsed = _to_float(val)
+            if parsed is not None:
+                metrics[key] = float(parsed)
+
+        for key, val in (prediction.get("objective_signals") or {}).items():
+            parsed = _to_float(val)
+            if parsed is not None:
+                metrics[key] = float(parsed)
+
+        pred_flat = prediction.get("predicted") or {}
+        for key, val in pred_flat.items():
+            parsed = _to_float(val)
+            if parsed is not None:
+                metrics[key] = float(parsed)
+
+        confidence = _to_float(prediction.get("confidence_index"))
+        if confidence is not None:
+            metrics["confidence_index"] = confidence
+        return metrics
+
+    def _build_optimization_variables(
+        self,
+        base_items: Sequence[Mapping[str, Any]],
+        ingredient_bounds: Mapping[str, Any],
+        fixed_ingredients: Sequence[str],
+        bundle: Mapping[str, Any],
+        mutation_scale: float,
+    ) -> List[IngredientVariable]:
+        fixed = {normalize_code(c) for c in (fixed_ingredients or []) if normalize_code(c)}
+        pipeline = FormulationFeaturePipeline.from_state(bundle.get("pipeline_state") or {})
+        variables: List[IngredientVariable] = []
+
+        for item in base_items or []:
+            code = normalize_code(item.get("material_code") or item.get("code"))
+            base_phr = _to_float(item.get("phr") or item.get("qt_phr"))
+            if not code or base_phr is None:
+                continue
+
+            base_phr = float(max(0.0, base_phr))
+            bounds = {}
+            if isinstance(ingredient_bounds, Mapping):
+                for key in (code, f"mp_{code}", str(code).upper(), str(code).lower()):
+                    raw_rule = ingredient_bounds.get(key)
+                    if isinstance(raw_rule, Mapping):
+                        bounds = raw_rule
+                        break
+
+            min_bound = _to_float(bounds.get("min"))
+            max_bound = _to_float(bounds.get("max"))
+            if min_bound is None:
+                min_bound = max(0.0, base_phr * (1.0 - max(0.05, mutation_scale * 1.35)))
+            if max_bound is None:
+                max_bound = max(min_bound, base_phr * (1.0 + max(0.05, mutation_scale * 1.55)))
+
+            if code in fixed:
+                min_bound = base_phr
+                max_bound = base_phr
+
+            ingredient_type = self._infer_ingredient_type(pipeline, code, item)
+            variable = IngredientVariable(
+                code=code,
+                min_phr=float(max(0.0, min_bound)),
+                max_phr=float(max(min_bound, max_bound)),
+                base_phr=float(base_phr),
+                material_name=item.get("material_name") or item.get("name") or item.get("nome"),
+                ingredient_type=ingredient_type,
+                is_elastomer=ingredient_type in ("polymer", "elastomer"),
+                is_filler=ingredient_type == "filler",
+                is_carbon_black=self._is_carbon_black(code, item),
+                template_item=dict(item),
+            )
+            variables.append(variable)
+
+        return variables
+
+    @staticmethod
+    def _infer_ingredient_type(
+        pipeline: FormulationFeaturePipeline,
+        code: str,
+        item: Mapping[str, Any],
+    ) -> str:
+        explicit = str(item.get("ingredient_type") or item.get("type") or "").strip().lower()
+        if explicit:
+            if explicit in ("polymer", "elastomer", "borracha"):
+                return "polymer"
+            if explicit in ("filler", "carga"):
+                return "filler"
+            if explicit in ("oil", "oleo"):
+                return "oil"
+            if explicit in ("curative", "acelerador", "vulcanization"):
+                return "curative"
+            if explicit in ("additive", "aditivo"):
+                return "additive"
+        try:
+            return str(
+                pipeline._classify_ingredient_type(  # pylint: disable=protected-access
+                    code=code,
+                    name=item.get("material_name") or item.get("name") or item.get("nome"),
+                    explicit_type=explicit,
+                )
+            )
+        except Exception:
+            return "additive"
+
+    @staticmethod
+    def _is_carbon_black(code: str, item: Mapping[str, Any]) -> bool:
+        code_norm = str(code or "").strip().upper()
+        name_upper = str(
+            item.get("material_name") or item.get("name") or item.get("nome") or ""
+        ).upper()
+        if "NEGRO FUMO" in name_upper:
+            return True
+        if "CARBON BLACK" in name_upper:
+            return True
+        if "CB" in name_upper and "NBR" not in name_upper:
+            return True
+        return code_norm in {"528", "N330", "N550", "N660"}
+
+    def _persist_optimization_history(
+        self,
+        model_version: str,
+        seed: int,
+        request_payload: Mapping[str, Any],
+        response_payload: Mapping[str, Any],
+        status: str,
+        application: Optional[str] = None,
+    ) -> Optional[int]:
+        try:
+            from models.formulation_v2 import OptimizationHistory
+            from models.usuario import db
+
+            row = OptimizationHistory(
+                model_version=str(model_version or ""),
+                optimization_seed=int(seed),
+                application=(str(application).strip() if application else None),
+                status=str(status or "sucesso"),
+                request_payload_json=_deep_copy_jsonable(request_payload),
+                response_payload_json=_deep_copy_jsonable(response_payload),
+                metadata_json={
+                    "source": "virtual_lab_nsga2",
+                    "created_at": _utc_now_iso(),
+                },
+            )
+            db.session.add(row)
+            db.session.commit()
+            return int(row.id)
+        except Exception as exc:
+            try:
+                from models.usuario import db
+
+                db.session.rollback()
+            except Exception:
+                pass
+            LOGGER.warning("Falha ao persistir historico de otimizacao: %s", exc)
+            return None
 
     def _compute_metrics(
         self,
@@ -824,17 +1174,11 @@ class FormulationEngineService:
         novelty_score: float,
         feature_row: Mapping[str, Any],
     ) -> float:
-        ratio = _to_float(feature_row.get("oil_to_polymer_ratio")) or 0.0
-        crosslink = _to_float(feature_row.get("crosslink_density_proxy")) or 0.0
-
-        process_penalty = 0.0
-        if ratio > 1.0:
-            process_penalty += min(0.25, (ratio - 1.0) * 0.3)
-        if crosslink > 4.0:
-            process_penalty += min(0.25, (crosslink - 4.0) * 0.08)
-
-        risk = (0.55 * float(uncertainty_score)) + (0.35 * float(novelty_score)) + process_penalty
-        return max(0.0, min(1.0, float(risk)))
+        return RiskEngine.compute_risk_score(
+            uncertainty_score=float(uncertainty_score),
+            novelty_score=float(novelty_score),
+            feature_row=feature_row,
+        )
 
     # ===================================
     # Optimization helpers

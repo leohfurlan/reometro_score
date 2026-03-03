@@ -47,6 +47,7 @@
                     <i class="fas fa-microscope me-2"></i> Simulador IA
                 </a>
 
+<<<<<<< ours
                 <a href="{{ url_for('pagina_auditoria') }}"
                 class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_auditoria' else '' }}">
                     <i class="fas fa-clipboard-check me-2"></i> Auditoria
@@ -57,6 +58,14 @@
                     <i class="fas fa-file-code me-2"></i> Contratos API
                 </a>
 
+=======
+                <a href="{{ url_for('reometria_fit') }}" 
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint in ['reometria_fit', 'reometria_fit_result', 'reometria_simulate_form', 'reometria_simulate_view'] else '' }}">
+                    <i class="fas fa-fire me-2"></i> Reometria & Vulcanização
+                </a>
+                
+                <!-- CORREÇÃO: Link visível para TODOS os usuários logados -->
+>>>>>>> theirs
                 {% if current_user.is_authenticated %}
                     <a href="{{ url_for('pagina_config') }}"
                     class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_config' else '' }}">

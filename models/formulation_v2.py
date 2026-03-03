@@ -130,3 +130,23 @@ class MeasuredProperties(db.Model):
 
     def __repr__(self):
         return f"<MeasuredProperties formulation_id={self.formulation_id}>"
+
+
+class OptimizationHistory(db.Model):
+    __tablename__ = "optimization_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_version = db.Column(db.String(64), nullable=False, index=True)
+    optimization_seed = db.Column(db.Integer, nullable=False)
+    application = db.Column(db.String(64), nullable=True, index=True)
+    status = db.Column(db.String(32), nullable=False, default="sucesso", index=True)
+    request_payload_json = db.Column(db.JSON, nullable=False)
+    response_payload_json = db.Column(db.JSON, nullable=False)
+    metadata_json = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return (
+            f"<OptimizationHistory id={self.id} model_version={self.model_version} "
+            f"seed={self.optimization_seed}>"
+        )

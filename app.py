@@ -9,6 +9,7 @@ from datetime import datetime
 import math
 import os
 import statistics 
+<<<<<<< ours
 import json
 import re
 import unicodedata
@@ -16,6 +17,10 @@ from urllib.parse import urlparse, urljoin
 from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexÃƒÂ£o local
 from sqlalchemy.orm import load_only
 
+=======
+import sqlite3 # Adicionado para conexão local
+import json
+>>>>>>> theirs
 
 # ConfiguraÃƒÂ§ÃƒÂµes e Modelos
 from config import Config
@@ -27,6 +32,7 @@ from services.config_manager import (
 )
 from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
+<<<<<<< ours
 from models.score_versioning import ScoreResultado
 from models.formula import Formula, FormulaItem
 from models.formulation_v2 import (
@@ -34,6 +40,7 @@ from models.formulation_v2 import (
     FormulationIngredient as FormulationIngredientV2,
     ProcessParameters as ProcessParametersV2,
     MeasuredProperties as MeasuredPropertiesV2,
+    OptimizationHistory as OptimizationHistoryV2,
 )
 try:
     from services.simulador_ia_service import SimuladorIAService
@@ -58,6 +65,10 @@ except Exception as e:
     MultiTargetSimulator = None
     KnowledgeService = None
     SearchService = None
+=======
+from services.kinetics_service import list_ensaios_for_fit, run_fit, load_fit_payload, get_preview_curve
+from services.vulcanization_service import run_simulation, load_simulation
+>>>>>>> theirs
 
 try:
     from services.formulation_engine_service import FormulationEngineService
@@ -1880,6 +1891,7 @@ def detalhe_lote_view(cod_sankhya, numero_lote):
     )
 
 
+<<<<<<< ours
 # --- ROTAS DE FORMULAÃƒâ€¡ÃƒÆ’O ---
 def _normalizar_chave_mp(chave):
     raw = str(chave or '').strip().lower()
@@ -2351,6 +2363,107 @@ def lista_formulas():
     # Passamos o catÃƒÂ¡logo tambÃƒÂ©m, caso precise corrigir nomes na listagem
     return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
 
+=======
+@app.route('/reometria/fit')
+@login_required
+def reometria_fit():
+    filters = {
+        'date_start': request.args.get('date_start', ''),
+        'date_end': request.args.get('date_end', ''),
+        'q': request.args.get('q', ''),
+    }
+    ensaios = list_ensaios_for_fit(filters['date_start'] or None, filters['date_end'] or None, filters['q'] or None)
+    return render_template('reometria/fit.html', ensaios=ensaios, filters=filters)
+
+
+@app.route('/reometria/fit/preview/<int:cod_ensaio>')
+@login_required
+def reometria_fit_preview(cod_ensaio):
+    curve = get_preview_curve(cod_ensaio)
+    if not curve:
+        flash('Curva não encontrada.', 'warning')
+        return redirect(url_for('reometria_fit'))
+    return render_template('reometria/preview.html', curve=curve)
+
+
+@app.route('/reometria/fit/run', methods=['POST'])
+@login_required
+def reometria_fit_run():
+    cod_ensaios = [int(x) for x in request.form.getlist('cod_ensaios') if str(x).strip()]
+    if len(cod_ensaios) < 2:
+        flash('Selecione pelo menos 2 curvas para o ajuste.', 'warning')
+        return redirect(url_for('reometria_fit'))
+
+    payload = run_fit(cod_ensaios)
+    if not payload.get('success'):
+        flash(payload.get('message', 'Ajuste falhou.'), 'danger')
+    else:
+        flash('Ajuste executado com sucesso.', 'success')
+    return redirect(url_for('reometria_fit_result', fit_id=payload['fit_id']))
+
+
+@app.route('/reometria/fit/result/<fit_id>')
+@login_required
+def reometria_fit_result(fit_id):
+    payload = load_fit_payload(fit_id)
+    if not payload:
+        flash('Resultado de fit não encontrado.', 'danger')
+        return redirect(url_for('reometria_fit'))
+    return render_template('reometria/fit_result.html', payload=payload)
+
+
+@app.route('/reometria/simulate/<fit_id>')
+@login_required
+def reometria_simulate_form(fit_id):
+    mode = request.args.get('mode', 'prensa')
+    if mode not in ('prensa', 'autoclave'):
+        mode = 'prensa'
+    payload = load_fit_payload(fit_id)
+    if not payload:
+        flash('Fit não encontrado.', 'danger')
+        return redirect(url_for('reometria_fit'))
+    return render_template('reometria/sim_form.html', fit_id=fit_id, mode=mode)
+
+
+@app.route('/reometria/simulate/run/<fit_id>', methods=['POST'])
+@login_required
+def reometria_simulate_run(fit_id):
+    payload = load_fit_payload(fit_id)
+    if not payload:
+        flash('Fit não encontrado.', 'danger')
+        return redirect(url_for('reometria_fit'))
+
+    mode = request.form.get('mode', 'prensa')
+    dim = int(request.form.get('dim', 1))
+    shape = request.form.get('shape', '200')
+    dx = float(request.form.get('dx', 0.001))
+    dt = float(request.form.get('dt', 0.5))
+    t_end = float(request.form.get('t_end', 600))
+    mold_temp_c = float(request.form.get('mold_temp_c', 170))
+    init_temp_c = float(request.form.get('init_temp_c', 25))
+    ramp_rate = float(request.form.get('ramp_rate', 0))
+    snapshot_every = int(request.form.get('snapshot_every', 20))
+
+    sim_id, _ = run_simulation(payload, mode, dim, shape, dx, dt, t_end, mold_temp_c, init_temp_c, ramp_rate, snapshot_every)
+    return redirect(url_for('reometria_simulate_view', sim_id=sim_id))
+
+
+@app.route('/reometria/simulate/view/<sim_id>')
+@login_required
+def reometria_simulate_view(sim_id):
+    sim = load_simulation(sim_id)
+    if not sim:
+        flash('Simulação não encontrada.', 'danger')
+        return redirect(url_for('reometria_fit'))
+
+    serializable = {
+        **sim,
+        'times': sim['times'].tolist(),
+        't_snaps': sim['t_snaps'].tolist(),
+        'alpha_snaps': sim['alpha_snaps'].tolist(),
+    }
+    return render_template('reometria/sim_view.html', sim=sim, sim_json=json.dumps(serializable))
+>>>>>>> theirs
 
 
 if __name__ == '__main__':

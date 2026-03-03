@@ -1,418 +1,138 @@
 ﻿{% extends "base.html" %}
-
-{% block title %}Simulador IA R&D | ReoScore Vulcaflex{% endblock %}
-
+{% block title %}Virtual Lab | ReoScore Vulcaflex{% endblock %}
 {% block content %}
 <style>
-    .simulador-wrapper {
-        --sim-accent: #d32f2f;
-        --sim-accent-dark: #b71c1c;
-        --sim-soft: #fff4f4;
-        --sim-border: #eceff3;
-    }
-
-    .sim-card {
-        border: 1px solid var(--sim-border);
-        border-radius: 16px;
-        box-shadow: 0 4px 12px rgba(20, 27, 45, 0.04);
-        background: #ffffff;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .sim-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(20, 27, 45, 0.08);
-    }
-
-    .card-header {
-        background: #fff;
-        border-bottom: 1px solid var(--sim-border);
-        border-radius: 16px 16px 0 0;
-        font-weight: 600;
-    }
-
-    .ingrediente-row {
-        background: #f8f9fa;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 5px;
-    }
-
-    .nav-pills .nav-link.active {
-        background-color: var(--sim-accent);
-    }
-
-    .nav-pills .nav-link {
-        color: #555;
-    }
-
-    .property-card {
-        text-align: center;
-        padding: 15px;
-        border: 1px solid #eee;
-        border-radius: 12px;
-        margin-bottom: 15px;
-    }
-
-    .prop-val {
-        font-size: 2rem;
-        font-weight: bold;
-        color: var(--sim-accent-dark);
-    }
-
-    .prop-name {
-        font-size: 0.9rem;
-        text-transform: uppercase;
-        color: #777;
-        margin-bottom: 5px;
-    }
-
-    .shap-mini-chart {
-        height: 60px;
-        /* Sparkline-like */
-    }
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+.virtual-lab{--bg:linear-gradient(130deg,#f6f8fb 0%,#edf3ff 48%,#fff8ef 100%);--card:#fff;--border:#dfe6f2;--text:#122033;--muted:#5f6f84;--accent:#be1e2d;--ok:#1b8f4d;--warn:#cc8a00;--bad:#be1e2d;font-family:'Manrope',sans-serif;color:var(--text)}
+.virtual-lab .surface{background:var(--bg);border:1px solid #d8e2f0;border-radius:20px;padding:16px;box-shadow:0 16px 32px rgba(18,32,51,.08)}
+.virtual-lab .head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.virtual-lab .head h2{margin:0;font-weight:800}
+.virtual-lab .head p{margin:0;color:var(--muted)}
+.virtual-lab .tools{display:flex;gap:8px;flex-wrap:wrap}
+.virtual-lab .btn-main{background:linear-gradient(135deg,var(--accent) 0%,#dd3c31 100%);color:#fff;border:none;border-radius:10px;font-weight:700;padding:9px 14px}
+.virtual-lab .btn-main:hover{color:#fff;filter:brightness(.95)}
+.virtual-lab .btn-ghost{border:1px solid #c7d4e7;background:#fff;color:#173055;border-radius:10px;font-weight:700;padding:9px 14px}
+.virtual-lab .cardx{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(18,32,51,.06);height:100%}
+.virtual-lab .cardx .hx{padding:11px 14px;border-bottom:1px solid #e7edf7;font-weight:800;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.virtual-lab .cardx .bx{padding:14px}
+.virtual-lab .grid3{display:grid;grid-template-columns:minmax(260px,1.15fr) minmax(320px,1fr) minmax(280px,.9fr);gap:12px}
+.virtual-lab .badge-meta{font-size:.72rem;padding:4px 8px;border-radius:999px;border:1px solid #d7e3f2;color:#3c5372;background:#f8fbff}
+.virtual-lab .ing th{font-size:.74rem;text-transform:uppercase;color:#58708f}
+.virtual-lab .ing .form-control,.virtual-lab .ing .form-select{font-size:.8rem;padding:.3rem .42rem}
+.virtual-lab .kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.virtual-lab .kpi{border:1px solid #e6eef8;border-radius:12px;padding:9px;background:#fff}
+.virtual-lab .kpi .l{font-size:.74rem;color:#6782a5;text-transform:uppercase}
+.virtual-lab .kpi .v{font-size:1.25rem;font-weight:800}
+.virtual-lab .goals{margin-top:10px;border:1px solid #e6eef8;border-radius:12px;padding:10px;background:#fff}
+.virtual-lab .goal{margin-bottom:9px}
+.virtual-lab .goal:last-child{margin-bottom:0}
+.virtual-lab .goal .gh{display:flex;justify-content:space-between;font-size:.78rem;color:#4d6686;margin-bottom:3px}
+.virtual-lab .risk{display:flex;align-items:center;gap:7px;font-weight:700}
+.virtual-lab .dot{width:11px;height:11px;border-radius:999px;display:inline-block}
+.virtual-lab .dot.safe{background:var(--ok)} .virtual-lab .dot.warn{background:var(--warn)} .virtual-lab .dot.bad{background:var(--bad)}
+.virtual-lab .props{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.virtual-lab .pc{border:1px solid #dde8f5;border-radius:12px;background:linear-gradient(165deg,#fff 0%,#f6faff 100%);padding:9px}
+.virtual-lab .pc h6{margin:0 0 4px 0;font-size:.76rem;color:#6a7f9a;text-transform:uppercase}
+.virtual-lab .pc .pv{font-size:1.16rem;font-weight:800}
+.virtual-lab .pc .ci{font-family:'IBM Plex Mono',monospace;font-size:.71rem;color:#5b7597}
+.virtual-lab .xlist{max-height:520px;overflow:auto}
+.virtual-lab .xitem{border:1px solid #e5edf9;border-radius:10px;padding:8px;margin-bottom:8px;background:#fff}
+.virtual-lab .xitem .n{font-size:.79rem;color:#3a5578;margin-bottom:4px;word-break:break-word}
+.virtual-lab .xitem .bar{height:8px;border-radius:999px;background:linear-gradient(90deg,#cc2f3f 0%,#f57c31 100%)}
+.virtual-lab .eng{margin-top:10px;border:1px dashed #bfd0e6;border-radius:10px;padding:10px;background:#f7fbff;display:none}
+.virtual-lab .engg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.virtual-lab .engi{border:1px solid #d8e5f7;border-radius:8px;background:#fff;padding:8px}
+.virtual-lab .engi .t{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:#6987aa}
+.virtual-lab .engi .v{font-size:1rem;font-weight:700}
+.virtual-lab #paretoChart{height:420px;border:1px solid #dce7f5;border-radius:14px;background:#fff}
+.virtual-lab .picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.virtual-lab .pick{border:1px solid #d8e5f5;border-radius:10px;background:#fff;padding:8px;min-height:80px}
+.virtual-lab .loading{position:fixed;inset:0;background:rgba(11,22,39,.55);z-index:1500;display:none;align-items:center;justify-content:center;padding:16px}
+.virtual-lab .loading .box{width:min(460px,96vw);background:#fff;border-radius:14px;padding:16px;border:1px solid #d9e4f4}
+@media(max-width:1400px){.virtual-lab .grid3{grid-template-columns:1fr 1fr}.virtual-lab .full{grid-column:span 2}}
+@media(max-width:980px){.virtual-lab .grid3{grid-template-columns:1fr}.virtual-lab .full{grid-column:span 1}.virtual-lab .kpis,.virtual-lab .props,.virtual-lab .engg,.virtual-lab .picker{grid-template-columns:1fr}}
 </style>
-
-<div class="simulador-wrapper container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2 class="mb-1">Simulador R&D Avançado</h2>
-            <p class="text-muted">Simulação multi-propriedade, busca de similares e gestão de conhecimento.</p>
-        </div>
-        <div>
-            <button class="btn btn-outline-dark me-2" data-bs-toggle="modal" data-bs-target="#knowledgeModal">
-                <i class="fas fa-book me-1"></i> Base de Conhecimento
-            </button>
-            <button class="btn btn-outline-primary" onclick="buscarSimilares()">
-                <i class="fas fa-search me-1"></i> Buscar Similares
-            </button>
-        </div>
-    </div>
-
-    <div class="row g-4">
-        <!-- Esquerda: Bancada -->
-        <div class="col-12 col-xl-4">
-            <div class="card sim-card h-100">
-                <div class="card-header p-3">
-                    <h5 class="mb-0"><i class="fas fa-flask me-2"></i> Bancada de Formulação</h5>
-                </div>
-                <div class="card-body p-3">
-                    <form id="formSimulador" novalidate>
-                        <div id="ingredientesContainer" class="vstack gap-2"></div>
-
-                        <div class="d-flex justify-content-between align-items-center mt-3">
-                            <button type="button" id="btnAdicionarIngrediente" class="btn btn-sm btn-outline-secondary">
-                                <i class="fas fa-plus"></i> Add
-                            </button>
-                            <span class="text-muted small">Total PHR: <strong id="phrTotal">0.00</strong></span>
-                        </div>
-
-                        <button type="submit" id="btnSimular" class="btn btn-danger w-100 mt-4 py-2 fw-bold">
-                            <i class="fas fa-play me-2"></i> SIMULAR
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- Direita: Resultados (Grid) -->
-        <div class="col-12 col-xl-8">
-            <div id="loadingOverlay" class="d-none text-center py-5">
-                <div class="spinner-border text-danger" role="status"></div>
-                <p class="mt-2 text-muted">Processando modelos IA e regras...</p>
-            </div>
-
-            <div id="resultsArea" class="d-none">
-                <ul class="nav nav-tabs mb-3" id="resultTabs" role="tablist">
-                    <li class="nav-item">
-                        <button class="nav-link active" data-bs-toggle="tab"
-                            data-bs-target="#tab-simulation">Simulação</button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-similar">Similares</button>
-                    </li>
-                </ul>
-
-                <div class="tab-content">
-                    <!-- Tabulação: Resultados -->
-                    <div class="tab-pane fade show active" id="tab-simulation">
-                        <div class="row g-3" id="propertiesGrid">
-                            <!-- Cards injetados via JS -->
-                        </div>
-                    </div>
-
-                    <!-- Tabulação: Similares -->
-                    <div class="tab-pane fade" id="tab-similar">
-                        <div class="table-responsive">
-                            <table class="table table-hover" id="similarTable">
-                                <thead>
-                                    <tr>
-                                        <th>Produto</th>
-                                        <th>Descrição</th>
-                                        <th>Distância</th>
-                                        <th>Ação</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="welcomeState" class="text-center py-5 text-muted border rounded bg-light mt-2">
-                <i class="fas fa-chart-line fa-3x mb-3 text-secondary"></i>
-                <h5>Pronto para simular</h5>
-                <p>Adicione ingredientes e clique em Simular para ver as previsões.</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal Conhecimento -->
-<div class="modal fade" id="knowledgeModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Base de Conhecimento (Regras Explícitas)</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <ul class="nav nav-pills mb-3">
-                    <li class="nav-item"><a href="#" class="nav-link active" onclick="showRulesList()">Listar Regras</a>
-                    </li>
-                    <li class="nav-item"><a href="#" class="nav-link" onclick="showAddRule()">Nova Regra</a></li>
-                </ul>
-
-                <div id="rulesList">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Propriedade</th>
-                                <th>Efeito</th>
-                                <th>Descrição</th>
-                            </tr>
-                        </thead>
-                        <tbody id="rulesTableBody"></tbody>
-                    </table>
-                </div>
-
-                <div id="addRuleForm" class="d-none">
-                    <form onsubmit="saveRule(event)">
-                        <div class="row g-2">
-                            <div class="col-6">
-                                <label>Propriedade Alvo</label>
-                                <select class="form-select" name="target_property" required>
-                                    <option value="dureza">Dureza</option>
-                                    <option value="densidade">Densidade</option>
-                                    <option value="abrasao">Abrasão</option>
-                                    <option value="resiliencia">Resiliência</option>
-                                    <option value="ts2">TS2</option>
-                                    <option value="t90">T90</option>
-                                </select>
-                            </div>
-                            <div class="col-3">
-                                <label>Tipo Efeito</label>
-                                <select class="form-select" name="effect_type">
-                                    <option value="linear">Linear (+)</option>
-                                    <option value="percentage">Percentual (*)</option>
-                                </select>
-                            </div>
-                            <div class="col-3">
-                                <label>Valor</label>
-                                <input type="number" step="0.01" class="form-control" name="effect_value" required>
-                            </div>
-                            <div class="col-12 mt-2">
-                                <label>Descrição</label>
-                                <input type="text" class="form-control" name="description"
-                                    placeholder="Ex: Ajuste fino para cargas altas">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary mt-3">Salvar Regra</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<div class="virtual-lab">
+<div id="loadingPanel" class="loading"><div class="box"><div class="fw-bold" id="loadingTitle">Executando Virtual Lab...</div><div class="text-muted small mb-2" id="loadingSubtitle">Modelos e regras em processamento.</div><div class="progress" style="height:10px"><div id="loadingBar" class="progress-bar progress-bar-striped progress-bar-animated bg-danger" style="width:8%"></div></div></div></div>
+<div class="surface">
+<div class="head"><div><h2>Virtual Lab Multiobjetivo</h2><p>Simulação, SHAP e otimização de formulações na mesma bancada.</p></div><div class="tools"><button class="btn-ghost" type="button" onclick="toggleEngineeringMode()"><i class="fas fa-cogs me-1"></i>Modo Engenharia</button><button class="btn-ghost" type="button" onclick="buscarSimilares()"><i class="fas fa-search me-1"></i>Buscar Similares</button><button class="btn-ghost" type="button" onclick="exportResultJSON()"><i class="fas fa-file-export me-1"></i>Exportar JSON</button><button class="btn-ghost" type="button" onclick="exportTechnicalPDF()"><i class="fas fa-file-pdf me-1"></i>Exportar PDF</button><button class="btn-ghost" type="button" data-bs-toggle="modal" data-bs-target="#knowledgeModal"><i class="fas fa-book me-1"></i>Conhecimento</button></div></div>
+<div id="feedbackArea"></div>
+<ul class="nav nav-tabs mb-3" role="tablist"><li class="nav-item"><button class="nav-link active" id="tab-sim-btn" data-bs-toggle="tab" data-bs-target="#tab-sim" type="button">Simulação</button></li><li class="nav-item"><button class="nav-link" id="tab-opt-btn" data-bs-toggle="tab" data-bs-target="#tab-opt" type="button">Otimização Pareto</button></li><li class="nav-item"><button class="nav-link" id="tab-comp-btn" data-bs-toggle="tab" data-bs-target="#tab-comp" type="button">Comparar Formulações</button></li></ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="tab-sim">
+<div class="grid3">
+<section class="cardx"><div class="hx"><span><i class="fas fa-flask me-2"></i>Input da Formulação</span><span class="badge-meta">Total PHR <strong id="phrTotal">0.00</strong></span></div><div class="bx">
+<div class="row g-2 mb-2"><div class="col-6"><label class="form-label small fw-bold mb-1">Aplicação</label><select id="applicationInput" class="form-select form-select-sm"><option value="DIN_X">DIN_X</option><option value="DIN_Y">DIN_Y</option><option value="GENERAL">GENERAL</option></select></div><div class="col-6"><label class="form-label small fw-bold mb-1">Tol. dureza</label><input id="targetHardnessTol" class="form-control form-control-sm" type="number" value="3" step="0.1"></div></div>
+<div class="row g-2 mb-2"><div class="col-6"><label class="form-label small fw-bold mb-1">Alvo dureza</label><input id="targetHardness" class="form-control form-control-sm" type="number" value="65" step="0.1"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Mín. tensile</label><input id="targetTensile" class="form-control form-control-sm" type="number" value="22" step="0.1"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Máx. abrasão</label><input id="targetAbrasion" class="form-control form-control-sm" type="number" value="100" step="0.1"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Máx. custo</label><input id="targetCost" class="form-control form-control-sm" type="number" value="18.5" step="0.01"></div></div>
+<div class="row g-2 mb-3"><div class="col-6"><label class="form-label small fw-bold mb-1">Min CB</label><input id="constraintMinCb" class="form-control form-control-sm" type="number" value="40" step="0.1"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Max CB</label><input id="constraintMaxCb" class="form-control form-control-sm" type="number" value="70" step="0.1"></div></div>
+<div class="table-responsive"><table class="table table-sm ing align-middle" id="ingredientTable"><thead><tr><th>Cód</th><th>Nome</th><th>PHR</th><th>Min</th><th>Max</th><th>Tipo</th><th></th></tr></thead><tbody></tbody></table></div>
+<div class="d-flex gap-2 flex-wrap"><button class="btn-ghost" type="button" onclick="addIngredientRow()"><i class="fas fa-plus me-1"></i>Ingrediente</button><button class="btn-ghost" type="button" onclick="clearIngredients()"><i class="fas fa-eraser me-1"></i>Limpar</button><button class="btn-main" type="button" onclick="runSimulation()"><i class="fas fa-play me-1"></i>Simular</button><button class="btn-main" type="button" onclick="runOptimization()"><i class="fas fa-bullseye me-1"></i>Otimizar</button></div>
+</div></section>
+<section class="cardx"><div class="hx"><span><i class="fas fa-chart-line me-2"></i>Propriedades Previstas</span><span id="modelVersionBadge" class="badge-meta">modelo: --</span></div><div class="bx"><div class="kpis" id="kpiGrid"></div><div class="goals"><div class="d-flex justify-content-between align-items-center mb-2"><strong class="small">Progresso das metas</strong><span id="riskIndicator" class="risk"><span class="dot warn"></span>Risco: --</span></div><div id="goalsContainer"></div></div><div class="props" id="propertyCards"></div><div id="engineeringPanel" class="eng"><div class="small fw-bold mb-2">Features de engenharia</div><div class="engg" id="engineeringGrid"></div></div></div></section>
+<section class="cardx full"><div class="hx"><span><i class="fas fa-lightbulb me-2"></i>Explainability (SHAP)</span><span class="badge-meta">Top efeitos</span></div><div class="bx"><div id="xaiStatus" class="small text-muted mb-2">Execute uma simulação para gerar explicabilidade.</div><div id="shapList" class="xlist"></div></div></section>
+</div></div>
+<div class="tab-pane fade" id="tab-opt"><div class="row g-3"><div class="col-12 col-xl-4"><div class="cardx"><div class="hx"><span><i class="fas fa-sliders-h me-2"></i>Configuração da busca</span></div><div class="bx"><div class="row g-2"><div class="col-6"><label class="form-label small fw-bold mb-1">População</label><input id="searchPopulation" class="form-control form-control-sm" type="number" value="96" min="24"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Gerações</label><input id="searchGenerations" class="form-control form-control-sm" type="number" value="24" min="6"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Mutação</label><input id="searchMutation" class="form-control form-control-sm" type="number" value="0.16" step="0.01"></div><div class="col-6"><label class="form-label small fw-bold mb-1">Seed</label><input id="searchSeed" class="form-control form-control-sm" type="number" value="42"></div></div><button class="btn-main mt-3" type="button" onclick="runOptimization()"><i class="fas fa-play-circle me-1"></i>Executar Otimização</button><div class="small text-muted mt-2">Clique em um ponto da fronteira para carregar a formulação no simulador.</div></div></div><div class="cardx mt-3"><div class="hx"><span><i class="fas fa-search-plus me-2"></i>Formulações similares</span></div><div class="bx"><div class="table-responsive" style="max-height:260px"><table class="table table-sm" id="similarTable"><thead><tr><th>Produto</th><th>Dist</th><th></th></tr></thead><tbody></tbody></table></div></div></div></div>
+<div class="col-12 col-xl-8"><div class="cardx"><div class="hx"><span><i class="fas fa-project-diagram me-2"></i>Fronteira de Pareto (custo x tensile, cor=risco)</span></div><div class="bx"><div id="paretoChart"></div></div></div><div class="cardx mt-3"><div class="hx"><span><i class="fas fa-list-ol me-2"></i>Top 10 formulações candidatas</span></div><div class="bx"><div class="table-responsive"><table class="table table-hover table-sm" id="topCandidatesTable"><thead><tr><th>ID</th><th>Tensile</th><th>Abrasão</th><th>Custo</th><th>Risco</th><th>Conf.</th><th></th></tr></thead><tbody></tbody></table></div></div></div></div></div></div>
+<div class="tab-pane fade" id="tab-comp"><div class="row g-3"><div class="col-12 col-xl-4"><div class="cardx"><div class="hx"><span><i class="fas fa-balance-scale me-2"></i>Selecionar formulações (2 ou 3)</span></div><div class="bx"><div id="comparePicker" class="picker"></div><button class="btn-main mt-3" type="button" onclick="renderComparison()"><i class="fas fa-chart-area me-1"></i>Comparar</button></div></div></div><div class="col-12 col-xl-8"><div class="cardx"><div class="hx"><span><i class="fas fa-chart-area me-2"></i>Radar (hardness, tensile, abrasion, cost, risk)</span></div><div class="bx"><canvas id="comparisonRadar" height="180"></canvas></div></div><div class="cardx mt-3"><div class="hx"><span><i class="fas fa-percent me-2"></i>Diferença percentual</span></div><div class="bx"><div class="table-responsive"><table class="table table-sm" id="diffTable"><thead><tr><th>Formulação</th><th>Hardness</th><th>Tensile</th><th>Abrasão</th><th>Custo</th><th>Risco</th></tr></thead><tbody></tbody></table></div></div></div></div></div></div>
+</div></div></div>
+<div class="modal fade" id="knowledgeModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Base de Conhecimento (Regras explícitas)</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><ul class="nav nav-pills mb-3"><li class="nav-item"><a href="#" class="nav-link active" onclick="showRulesList(event)">Listar Regras</a></li><li class="nav-item"><a href="#" class="nav-link" onclick="showAddRule(event)">Nova Regra</a></li></ul><div id="rulesList"><table class="table table-sm"><thead><tr><th>Propriedade</th><th>Efeito</th><th>Descrição</th></tr></thead><tbody id="rulesTableBody"></tbody></table></div><div id="addRuleForm" class="d-none"><form onsubmit="saveRule(event)"><div class="row g-2"><div class="col-6"><label class="form-label">Propriedade Alvo</label><select class="form-select" name="target_property" required><option value="dureza">Dureza</option><option value="densidade">Densidade</option><option value="abrasao">Abrasão</option><option value="resiliencia">Resiliência</option><option value="ts2">TS2</option><option value="t90">T90</option></select></div><div class="col-3"><label class="form-label">Tipo Efeito</label><select class="form-select" name="effect_type"><option value="linear">Linear (+)</option><option value="percentage">Percentual (*)</option></select></div><div class="col-3"><label class="form-label">Valor</label><input type="number" step="0.01" class="form-control" name="effect_value" required></div><div class="col-12 mt-2"><label class="form-label">Descrição</label><input type="text" class="form-control" name="description" placeholder="Ex: Ajuste fino para cargas altas"></div></div><button type="submit" class="btn btn-primary mt-3">Salvar Regra</button></form></div></div></div></div></div>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
-    const materiasPrimas = {{ materias_primas | tojson }};
-    const formEl = document.getElementById('formSimulador');
-    const containerEl = document.getElementById('ingredientesContainer');
-
-    // --- Logic Identical to legacy for Ingredients Input (omitted for brevity, handled by shared logic usually) ---
-    // (Re-implementing minimal version for functionality)
-
-    const mpMap = new Map();
-    materiasPrimas.forEach(m => mpMap.set(String(m.codigo), m.nome));
-
-    function addRow(code = '', phr = '') {
-        const div = document.createElement('div');
-        div.className = 'ingrediente-row d-flex gap-2 align-items-center';
-        div.innerHTML = `
-            <input type="text" class="form-control form-control-sm mp-code" placeholder="Cód" style="width: 80px;" value="${code}">
-            <input type="text" class="form-control form-control-sm mp-name" placeholder="Nome" readonly tabindex="-1">
-            <input type="number" class="form-control form-control-sm mp-phr" placeholder="PHR" style="width: 100px;" value="${phr}" min="0" step="0.01">
-            <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.remove(); updateTotal()">X</button>
-        `;
-
-        const inputCode = div.querySelector('.mp-code');
-        inputCode.addEventListener('blur', () => {
-            const val = inputCode.value.trim();
-            const nome = mpMap.get(val);
-            div.querySelector('.mp-name').value = nome || 'Não encontrado';
-        });
-
-        div.querySelector('.mp-phr').addEventListener('input', updateTotal);
-        containerEl.appendChild(div);
-    }
-
-    document.getElementById('btnAdicionarIngrediente').addEventListener('click', () => addRow());
-
-    function updateTotal() {
-        let total = 0;
-        document.querySelectorAll('.mp-phr').forEach(el => total += Number(el.value || 0));
-        document.getElementById('phrTotal').innerText = total.toFixed(2);
-    }
-
-    function getIngredients() {
-        const payload = {};
-        document.querySelectorAll('.ingrediente-row').forEach(row => {
-            const code = row.querySelector('.mp-code').value.trim();
-            const phr = Number(row.querySelector('.mp-phr').value || 0);
-            if (code && phr > 0) payload[`mp_${code}`] = phr;
-        });
-        return payload;
-    }
-
-    formEl.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const ingredientes = getIngredients();
-        if (Object.keys(ingredientes).length === 0) return alert("Adicione ingredientes.");
-
-        document.getElementById('loadingOverlay').classList.remove('d-none');
-        document.getElementById('resultsArea').classList.add('d-none');
-        document.getElementById('welcomeState').classList.add('d-none');
-
-        try {
-            const res = await fetch('/simulador', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ingredientes })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                renderProperties(data.results);
-                document.getElementById('resultsArea').classList.remove('d-none');
-            } else {
-                alert('Erro: ' + data.erro);
-            }
-        } catch (err) {
-            console.error(err);
-            alert('Erro na requisição.');
-        } finally {
-            document.getElementById('loadingOverlay').classList.add('d-none');
-        }
-    });
-
-    function renderProperties(results) {
-        const grid = document.getElementById('propertiesGrid');
-        grid.innerHTML = '';
-
-        for (const [prop, data] of Object.entries(results)) {
-            if (prop === 'prior_diagnostics') continue;
-
-            const val = data.value !== null ? data.value : '--';
-            const col = document.createElement('div');
-            col.className = 'col-6 col-md-4 col-lg-3';
-            col.innerHTML = `
-                <div class="property-card h-100">
-                    <div class="prop-name">${prop.replace('_', ' ')}</div>
-                    <div class="prop-val">${val}</div>
-                    ${data.shap ? '<small class="text-muted">IA + Exp</small>' : '<small class="text-muted">Regra</small>'}
-                    ${data.rules_applied ? '<div class="badge bg-warning text-dark mt-1">Regra Aplicada</div>' : ''}
-                </div>
-            `;
-            grid.appendChild(col);
-        }
-    }
-
-    async function buscarSimilares() {
-        const ingredientes = getIngredients();
-        if (Object.keys(ingredientes).length === 0) return alert("Preencha a receita primeiro.");
-
-        try {
-            const res = await fetch('/simulador/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ingredientes })
-            });
-            const data = await res.json();
-            if (data.success) {
-                const tbody = document.querySelector('#similarTable tbody');
-                tbody.innerHTML = data.results.map(r => `
-                    <tr>
-                        <td><a href="/detalhe_formula/${r.id}" target="_blank">${r.id}</a></td>
-                        <td>${r.description || '-'}</td>
-                        <td>${r.distance}</td>
-                        <td><button class="btn btn-sm btn-link">Carregar</button></td>
-                    </tr>
-                `).join('');
-                // Switch to tab
-                const bsTab = new bootstrap.Tab(document.querySelector('#resultTabs button[data-bs-target="#tab-similar"]'));
-                bsTab.show();
-            }
-        } catch (e) { console.error(e); }
-    }
-
-    // Initial rows
-    addRow(); addRow();
-
-    // Knowledge Base Logic
-    async function loadRules() {
-        const res = await fetch('/knowledge');
-        const rules = await res.json();
-        const tbody = document.getElementById('rulesTableBody');
-        tbody.innerHTML = rules.map(r => `
-            <tr>
-                <td>${r.property}</td>
-                <td>${r.effect}</td>
-                <td>${r.desc || '-'}</td>
-            </tr>
-        `).join('');
-    }
-
-    function showRulesList() {
-        document.getElementById('rulesList').classList.remove('d-none');
-        document.getElementById('addRuleForm').classList.add('d-none');
-        loadRules();
-    }
-
-    function showAddRule() {
-        document.getElementById('rulesList').classList.add('d-none');
-        document.getElementById('addRuleForm').classList.remove('d-none');
-    }
-
-    async function saveRule(e) {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const data = Object.fromEntries(fd.entries());
-
-        await fetch('/knowledge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-
-        alert('Regra salva!');
-        e.target.reset();
-        showRulesList();
-    }
-
-    document.getElementById('knowledgeModal').addEventListener('show.bs.modal', loadRules);
-
+const materiasPrimas={{ materias_primas | tojson }};const mpByCode=new Map(materiasPrimas.map(m=>[String(m.codigo),m.nome]));
+const state={lastSimulation:null,lastOptimization:null,formulationLibrary:[],compareSelection:[],engineeringMode:false,loadingTimer:null,loadingProgress:8,radarChart:null,paretoData:[]};
+const ingredientTbody=document.querySelector('#ingredientTable tbody');
+const n=(v,f=null)=>{const x=Number(v);return Number.isFinite(x)?x:f};const fmt=(v,d=3)=>{const x=Number(v);return Number.isFinite(x)?x.toFixed(d):'--'};
+const feedback=(m,t='danger')=>{document.getElementById('feedbackArea').innerHTML=`<div class="alert alert-${t} alert-dismissible fade show" role="alert">${m}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`};
+const loadStart=(t,s)=>{const p=document.getElementById('loadingPanel');p.style.display='flex';document.getElementById('loadingTitle').textContent=t||'Executando Virtual Lab...';document.getElementById('loadingSubtitle').textContent=s||'Modelos e regras em processamento.';state.loadingProgress=8;const b=document.getElementById('loadingBar');b.style.width='8%';clearInterval(state.loadingTimer);state.loadingTimer=setInterval(()=>{state.loadingProgress=Math.min(88,state.loadingProgress+Math.random()*8);b.style.width=`${state.loadingProgress}%`},230)};
+const loadStop=()=>{clearInterval(state.loadingTimer);const p=document.getElementById('loadingPanel');const b=document.getElementById('loadingBar');b.style.width='100%';setTimeout(()=>{p.style.display='none';b.style.width='8%'},220)};
+async function jfetch(url,payload,method='POST'){const opt={method,headers:{'Content-Type':'application/json'}};if(payload!==undefined&&payload!==null)opt.body=JSON.stringify(payload);const r=await fetch(url,opt);let d={};try{d=await r.json()}catch(_){d={}}if(!r.ok)throw new Error(d?.mensagem||d?.erro||`Falha HTTP ${r.status}`);return d}
+function addIngredientRow(initial={}){const tr=document.createElement('tr');tr.innerHTML=`<td><input class="form-control form-control-sm mp-code" list="mpCodes" value="${initial.code||''}" placeholder="491"></td><td><input class="form-control form-control-sm mp-name" value="${initial.name||''}" readonly></td><td><input class="form-control form-control-sm mp-phr" type="number" min="0" step="0.01" value="${initial.phr??''}"></td><td><input class="form-control form-control-sm mp-min" type="number" min="0" step="0.01" value="${initial.min??''}"></td><td><input class="form-control form-control-sm mp-max" type="number" min="0" step="0.01" value="${initial.max??''}"></td><td><select class="form-select form-select-sm mp-type"><option value="">auto</option><option value="polymer">polymer</option><option value="filler">filler</option><option value="oil">oil</option><option value="curative">curative</option><option value="additive">additive</option></select></td><td><button class="btn btn-sm btn-outline-danger" type="button"><i class="fas fa-times"></i></button></td>`;
+if(initial.type)tr.querySelector('.mp-type').value=initial.type;const code=tr.querySelector('.mp-code');const name=tr.querySelector('.mp-name');const sync=()=>{const c=String(code.value||'').replace(/^mp_/i,'').trim();const nm=mpByCode.get(c);if(nm)name.value=nm;else if(!name.value)name.value=''};code.addEventListener('input',sync);code.addEventListener('blur',sync);tr.querySelector('.mp-phr').addEventListener('input',updateTotals);tr.querySelector('.mp-min').addEventListener('input',updateTotals);tr.querySelector('.mp-max').addEventListener('input',updateTotals);tr.querySelector('button').addEventListener('click',()=>{tr.remove();updateTotals()});ingredientTbody.appendChild(tr);sync();updateTotals()}
+function clearIngredients(){ingredientTbody.innerHTML='';addIngredientRow();addIngredientRow();updateTotals()}
+function rows(){const out=[];ingredientTbody.querySelectorAll('tr').forEach(tr=>{const code=String(tr.querySelector('.mp-code').value||'').trim().replace(/^mp_/i,'');const phr=n(tr.querySelector('.mp-phr').value,null);if(!code||phr===null||phr<=0)return;out.push({code,name:tr.querySelector('.mp-name').value||mpByCode.get(code)||null,phr,min:n(tr.querySelector('.mp-min').value,null),max:n(tr.querySelector('.mp-max').value,null),type:tr.querySelector('.mp-type').value||null})});return out}
+function legacyMap(arr){const o={};arr.forEach(r=>o[`mp_${r.code}`]=Number(r.phr));return o}
+function updateTotals(){const total=rows().reduce((a,r)=>a+Number(r.phr||0),0);document.getElementById('phrTotal').textContent=total.toFixed(2)}
+const target=()=>({hardness:n(document.getElementById('targetHardness').value,null),hardness_tolerance:n(document.getElementById('targetHardnessTol').value,3),min_tensile:n(document.getElementById('targetTensile').value,null),max_abrasion:n(document.getElementById('targetAbrasion').value,null),max_cost:n(document.getElementById('targetCost').value,null)});
+const pv=(src,k)=>{const v=src?.[k];return v&&typeof v==='object'&&'value'in v?Number(v.value):Number(v)};
+function normSim(legacyRes,adv,exp,input){const p={};if(adv?.status==='sucesso'){p.hardness=pv(adv.predicted_properties,'hardness');p.tensile=pv(adv.predicted_properties,'tensile');p.elongation=pv(adv.predicted_properties,'elongation');p.abrasion=pv(adv.predicted_properties,'abrasion');p.ts2=pv(adv.predicted_properties,'ts2');p.t90=pv(adv.predicted_properties,'t90');p.cost=Number(adv.predicted?.estimated_cost_per_kg??adv.derived_features?.total_cost_per_kg);p.risk=Number(adv.predicted?.risk_score??adv.objective_signals?.risk);p.confidence=Number(adv.predicted?.confidence_index??adv.confidence_index??adv.objective_signals?.confidence_index)}
+if(!Number.isFinite(p.hardness)&&legacyRes?.results){p.hardness=pv(legacyRes.results,'dureza');p.tensile=pv(legacyRes.results,'tensao_ruptura');p.abrasion=pv(legacyRes.results,'abrasao');p.ts2=pv(legacyRes.results,'ts2');p.t90=pv(legacyRes.results,'t90');p.elongation=pv(legacyRes.results,'alongamento')}
+return{id:`SIM-${Date.now()}`,type:'simulation',label:`Simulação ${new Date().toLocaleTimeString('pt-BR')}`,timestamp:new Date().toISOString(),target:target(),application:document.getElementById('applicationInput').value||'GENERAL',ingredients:input,legacy:legacyRes||null,advanced:adv||null,explain:exp||null,predicted:p,modelVersion:adv?.model_version||'--',derivedFeatures:adv?.derived_features||{}}}
+async function runSimulation(){const input=rows();if(!input.length){feedback('Adicione pelo menos um ingrediente com PHR > 0.');return}const map=legacyMap(input);const advPayload={formulation:{ingredients:input.map(r=>({material_code:r.code,material_name:r.name,phr:r.phr,ingredient_type:r.type}))},process_parameters:{},auto_train_if_missing:true};loadStart('Simulando formulação','Executando modelos preditivos e explainability.');try{const [legacyRes,adv,exp]=await Promise.all([jfetch('/simulador',{ingredientes:map}),jfetch('/predict-formulation',advPayload).catch(()=>null),jfetch('/explain-formulation',{...advPayload,top_n:14}).catch(()=>null)]);if(!legacyRes?.success)throw new Error(legacyRes?.erro||'Falha na simulação principal.');const sim=normSim(legacyRes,adv,exp,input);state.lastSimulation=sim;libFromSim(sim);renderSim(sim);renderPicker();new bootstrap.Tab(document.getElementById('tab-sim-btn')).show();if(!adv)feedback('Simulação executada com fallback do simulador legado. Endpoints avançados podem exigir perfil admin.','warning')}catch(e){feedback(`Erro na simulação: ${e.message}`)}finally{loadStop()}}
+const riskStyle=v=>!Number.isFinite(v)?{c:'warn',t:'Risco: indisponível'}:v<=.35?{c:'safe',t:`Risco: baixo (${v.toFixed(3)})`}:v<=.65?{c:'warn',t:`Risco: moderado (${v.toFixed(3)})`}:{c:'bad',t:`Risco: alto (${v.toFixed(3)})`};
+function goal(label,val,t,mode,tol=0){let p=0;if(Number.isFinite(val)&&Number.isFinite(t)){if(mode==='target'){const x=Math.max(Number.isFinite(tol)?tol:.1,.1);p=Math.max(0,100-Math.abs(val-t)/x*100)}if(mode==='min')p=Math.min(100,val/t*100);if(mode==='max')p=val<=t?100:Math.max(0,100-(val-t)/Math.max(t,1)*100)}const cls=p>=90?'bg-success':p>=65?'bg-warning':'bg-danger';return`<div class="goal"><div class="gh"><span>${label}</span><span>${Number.isFinite(val)?val.toFixed(2):'--'} / ${Number.isFinite(t)?t.toFixed(2):'--'}</span></div><div class="progress" style="height:8px"><div class="progress-bar ${cls}" style="width:${p.toFixed(1)}%"></div></div></div>`}
+function renderSim(sim){document.getElementById('modelVersionBadge').textContent=`modelo: ${sim.modelVersion||'--'}`;const p=sim.predicted||{};document.getElementById('kpiGrid').innerHTML=[['Hardness',p.hardness,'Shore A'],['Tensile',p.tensile,'MPa'],['Abrasão',p.abrasion,'mm3'],['Custo',p.cost,'R$/kg']].map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="v">${Number.isFinite(k[1])?k[1].toFixed(2):'--'}</div><div class="small text-muted">${k[2]}</div></div>`).join('');const t=sim.target||{};document.getElementById('goalsContainer').innerHTML=[goal('Hardness target',p.hardness,t.hardness,'target',t.hardness_tolerance),goal('Tensile mínimo',p.tensile,t.min_tensile,'min'),goal('Abrasão máxima',p.abrasion,t.max_abrasion,'max'),goal('Custo máximo',p.cost,t.max_cost,'max')].join('');const rs=riskStyle(p.risk);document.getElementById('riskIndicator').innerHTML=`<span class="dot ${rs.c}"></span>${rs.t}`;
+const cards=[['Hardness',p.hardness,sim.advanced?.predicted_properties?.hardness?.confidence_interval],['Tensile',p.tensile,sim.advanced?.predicted_properties?.tensile?.confidence_interval],['Abrasão',p.abrasion,sim.advanced?.predicted_properties?.abrasion?.confidence_interval],['Elongation',p.elongation,sim.advanced?.predicted_properties?.elongation?.confidence_interval],['TS2',p.ts2,sim.advanced?.predicted_properties?.ts2?.confidence_interval],['T90',p.t90,sim.advanced?.predicted_properties?.t90?.confidence_interval],['Risco',p.risk,null],['Confidence Index',p.confidence,null]];
+document.getElementById('propertyCards').innerHTML=cards.map(c=>{const ci=Array.isArray(c[2])?`[${fmt(c[2][0],2)} , ${fmt(c[2][1],2)}]`:'--';return`<div class="pc"><h6>${c[0]}</h6><div class="pv">${Number.isFinite(c[1])?Number(c[1]).toFixed(3):'--'}</div><div class="ci">CI90: ${ci}</div></div>`}).join('');renderXai(sim);renderEng(sim)}
+function renderXai(sim){const list=document.getElementById('shapList');const st=document.getElementById('xaiStatus');let rows=[];if(sim.explain?.status==='sucesso'&&Array.isArray(sim.explain.global_importance)){rows=sim.explain.global_importance.slice(0,14).map(i=>({f:i.feature,v:Math.abs(Number(i.mean_abs_shap||0))}));st.textContent='Explicabilidade do modelo de formulação (mean |SHAP|).'}else if(sim.legacy?.results){const agg=new Map();Object.values(sim.legacy.results).forEach(prop=>{if(!prop||typeof prop!=='object')return;Object.entries(prop.shap||{}).forEach(([k,v])=>agg.set(k,(agg.get(k)||0)+Math.abs(Number(v||0))))});rows=Array.from(agg.entries()).sort((a,b)=>b[1]-a[1]).slice(0,14).map(([f,v])=>({f,v}));st.textContent='Explicabilidade agregada do simulador legado.'}
+if(!rows.length){list.innerHTML='<div class="small text-muted">Sem dados de SHAP para exibir.</div>';return}const max=Math.max(...rows.map(r=>r.v),1e-9);list.innerHTML=rows.map(r=>`<div class="xitem"><div class="n">${r.f}</div><div class="bar" style="width:${(r.v/max)*100}%"></div><div class="small text-muted mt-1">impacto: ${r.v.toFixed(4)}</div></div>`).join('')}
+function renderEng(sim){const d=sim.derivedFeatures||{};document.getElementById('engineeringGrid').innerHTML=[['crosslink_proxy',d.crosslink_proxy??d.crosslink_density_proxy],['reinforcement_weighted',d.reinforcement_weighted??d.weighted_filler_reinforcement_index],['oil_to_rubber',d.oil_to_rubber??d.oil_to_polymer_ratio],['curing_severity_proxy',d.curing_severity_proxy??d.curing_severity_index]].map(r=>`<div class="engi"><div class="t">${r[0]}</div><div class="v">${Number.isFinite(Number(r[1]))?Number(r[1]).toFixed(6):'--'}</div></div>`).join('')}
+function toggleEngineeringMode(){state.engineeringMode=!state.engineeringMode;document.getElementById('engineeringPanel').style.display=state.engineeringMode?'block':'none'}
+function optPayload(input){const b={};input.forEach(r=>{if(Number.isFinite(r.min)||Number.isFinite(r.max)){b[r.code]={};if(Number.isFinite(r.min))b[r.code].min=r.min;if(Number.isFinite(r.max))b[r.code].max=r.max}});return{formulation:{ingredients:input.map(r=>({material_code:r.code,material_name:r.name,phr:r.phr,ingredient_type:r.type}))},process_parameters:{},target:target(),application:document.getElementById('applicationInput').value||'GENERAL',constraints:{min_cb:n(document.getElementById('constraintMinCb').value,null),max_cb:n(document.getElementById('constraintMaxCb').value,null),max_filler_total:120,hardness_tolerance:n(document.getElementById('targetHardnessTol').value,3),elastomer_target_sum:100},ingredient_bounds:b,search_config:{population_size:n(document.getElementById('searchPopulation').value,96),generations:n(document.getElementById('searchGenerations').value,24),mutation_scale:n(document.getElementById('searchMutation').value,.16),random_seed:n(document.getElementById('searchSeed').value,42),top_k:10}}}
+async function runOptimization(){const input=rows();if(!input.length){feedback('Informe ingredientes antes de iniciar a otimização.');return}loadStart('Otimizador Multiobjetivo','Executando NSGA-II no espaço de formulações.');try{const res=await jfetch('/optimize-formulation',optPayload(input));if(res.status!=='sucesso')throw new Error(res.mensagem||'Falha ao otimizar formulação.');state.lastOptimization=res;state.paretoData=Array.isArray(res.pareto_front)?res.pareto_front:[];renderPareto(state.paretoData);renderTop(Array.isArray(res.top_candidates)?res.top_candidates:[]);libFromOpt(res);renderPicker();new bootstrap.Tab(document.getElementById('tab-opt-btn')).show()}catch(e){feedback(`Erro na otimização: ${e.message}`)}finally{loadStop()}}
+function renderPareto(arr){const el=document.getElementById('paretoChart');if(!arr?.length){el.innerHTML='<div class="p-3 text-muted small">Sem dados de Pareto para exibir.</div>';return}const pts=arr.map((r,i)=>({i,x:Number(r.cost),y:Number((r.predicted||{}).tensile_pred),risk:Number(r.risk),txt:`Candidato ${r.candidate_id||i+1}`})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));if(!pts.length){el.innerHTML='<div class="p-3 text-muted small">Fronteira recebida sem pontos válidos.</div>';return}
+Plotly.newPlot(el,[{x:pts.map(p=>p.x),y:pts.map(p=>p.y),mode:'markers',type:'scatter',text:pts.map(p=>p.txt),customdata:pts.map(p=>p.i),marker:{size:12,color:pts.map(p=>Number.isFinite(p.risk)?p.risk:.5),colorscale:'RdYlGn',reversescale:true,colorbar:{title:'Risco'},line:{color:'#122033',width:.5},opacity:.9},hovertemplate:'Custo: %{x:.3f}<br>Tensile: %{y:.3f}<br>%{text}<extra></extra>'}],{margin:{l:52,r:20,t:16,b:52},xaxis:{title:'Custo estimado (R$/kg)',gridcolor:'#e6edf7'},yaxis:{title:'Tensile previsto (MPa)',gridcolor:'#e6edf7'},paper_bgcolor:'#fff',plot_bgcolor:'#fff'},{responsive:true,displaylogo:false});
+el.on('plotly_click',ev=>{const i=ev?.points?.[0]?.customdata;if(i===undefined||i===null)return;const cand=arr[i];if(!cand)return;loadCandidate(cand);new bootstrap.Tab(document.getElementById('tab-sim-btn')).show()})}
+function renderTop(arr){const tb=document.querySelector('#topCandidatesTable tbody');if(!arr.length){tb.innerHTML='<tr><td colspan="7" class="text-muted">Sem candidatos.</td></tr>';return}tb.innerHTML=arr.slice(0,10).map((r,i)=>{const p=r.predicted||{};return`<tr><td>${r.candidate_id||i+1}</td><td>${Number.isFinite(Number(p.tensile_pred))?Number(p.tensile_pred).toFixed(3):'--'}</td><td>${Number.isFinite(Number((p.abrasion_pred??p.abrasion_resistance_pred)))?Number((p.abrasion_pred??p.abrasion_resistance_pred)).toFixed(3):'--'}</td><td>${Number.isFinite(Number(r.cost))?Number(r.cost).toFixed(3):'--'}</td><td>${Number.isFinite(Number(r.risk))?Number(r.risk).toFixed(3):'--'}</td><td>${Number.isFinite(Number(r.confidence_index))?Number(r.confidence_index).toFixed(3):'--'}</td><td><button class="btn btn-sm btn-outline-primary" type="button" data-i="${i}">Carregar</button></td></tr>`}).join('');Array.from(tb.querySelectorAll('button[data-i]')).forEach(b=>b.addEventListener('click',()=>{const r=arr[Number(b.getAttribute('data-i'))];if(r){loadCandidate(r);new bootstrap.Tab(document.getElementById('tab-sim-btn')).show()}}))}
+function loadCandidate(c){const ing=c?.formulation?.ingredients||[];if(!ing.length)return;ingredientTbody.innerHTML='';ing.forEach(i=>addIngredientRow({code:String(i.material_code||''),name:i.material_name||mpByCode.get(String(i.material_code||''))||'',phr:Number(i.phr),type:i.ingredient_type||''}));updateTotals();feedback(`Formulação candidata ${c.candidate_id||''} carregada no simulador.`,'success')}
+function libUp(e){const i=state.formulationLibrary.findIndex(x=>x.id===e.id);if(i>=0)state.formulationLibrary[i]=e;else state.formulationLibrary.unshift(e);state.formulationLibrary=state.formulationLibrary.slice(0,40)}
+function libFromSim(sim){libUp({id:sim.id,label:sim.label,source:'Simulação',timestamp:sim.timestamp,predicted:{hardness:Number(sim.predicted.hardness),tensile:Number(sim.predicted.tensile),abrasion:Number(sim.predicted.abrasion),cost:Number(sim.predicted.cost),risk:Number(sim.predicted.risk)},payload:sim})}
+function libFromOpt(opt){(Array.isArray(opt?.top_candidates)?opt.top_candidates:[]).slice(0,10).forEach((r,i)=>{const p=r.predicted||{};libUp({id:`OPT-${r.candidate_id||i+1}`,label:`OTM ${r.candidate_id||i+1}`,source:'Otimização',timestamp:new Date().toISOString(),predicted:{hardness:Number(p.hardness_pred),tensile:Number(p.tensile_pred),abrasion:Number(p.abrasion_pred??(p.abrasion_pred??p.abrasion_resistance_pred)),cost:Number(r.cost),risk:Number(r.risk)},payload:r})})}
+function renderPicker(){const w=document.getElementById('comparePicker');if(!state.formulationLibrary.length){w.innerHTML='<div class="small text-muted">Nenhuma formulação disponível ainda.</div>';return}w.innerHTML=state.formulationLibrary.map(i=>{const c=state.compareSelection.includes(i.id)?'checked':'';return`<label class="pick"><div class="form-check"><input class="form-check-input cbox" type="checkbox" value="${i.id}" ${c}><span class="form-check-label fw-bold">${i.label}</span></div><small>${i.source} · ${new Date(i.timestamp).toLocaleString('pt-BR')}</small></label>`}).join('');w.querySelectorAll('.cbox').forEach(b=>b.addEventListener('change',()=>{const s=Array.from(w.querySelectorAll('.cbox:checked')).map(e=>e.value);if(s.length>3){b.checked=false;feedback('Selecione no máximo 3 formulações para comparar.','warning');return}state.compareSelection=s}))}
+function renderComparison(){const sel=state.formulationLibrary.filter(i=>state.compareSelection.includes(i.id));if(sel.length<2){feedback('Selecione 2 ou 3 formulações para comparar.','warning');return}const m=['hardness','tensile','abrasion','cost','risk'];const label={hardness:'Hardness',tensile:'Tensile',abrasion:'Abrasão',cost:'Custo',risk:'Risco'};const inv=new Set(['abrasion','cost','risk']);
+const norm=sel.map(it=>{const o={};m.forEach(k=>{const all=sel.map(r=>Number(r.predicted?.[k])).filter(v=>Number.isFinite(v));const v=Number(it.predicted?.[k]);if(!Number.isFinite(v)||!all.length){o[k]=0;return}const min=Math.min(...all),max=Math.max(...all);let x=Math.abs(max-min)<1e-9?0.5:(v-min)/(max-min);if(inv.has(k))x=1-x;o[k]=Math.max(0,Math.min(1,x))});return o});
+if(state.radarChart)state.radarChart.destroy();state.radarChart=new Chart(document.getElementById('comparisonRadar'),{type:'radar',data:{labels:m.map(k=>label[k]),datasets:sel.map((it,i)=>({label:it.label,data:m.map(k=>norm[i][k]*100),fill:true,borderWidth:2}))},options:{responsive:true,scales:{r:{beginAtZero:true,max:100,ticks:{stepSize:20}}}}});
+const base=sel[0];document.querySelector('#diffTable tbody').innerHTML=sel.map(it=>`<tr><td>${it.label}</td>${m.map(k=>{const b=Number(base.predicted?.[k]),v=Number(it.predicted?.[k]);if(!Number.isFinite(b)||!Number.isFinite(v)||Math.abs(b)<1e-9)return'<td>--</td>';const d=((v-b)/Math.abs(b))*100;const c=d>0?'text-success':d<0?'text-danger':'';return`<td class="${c}">${d.toFixed(2)}%</td>`}).join('')}</tr>`).join('');new bootstrap.Tab(document.getElementById('tab-comp-btn')).show()}
+async function buscarSimilares(){const input=rows();if(!input.length){feedback('Preencha a formulação antes de buscar similares.','warning');return}try{const res=await jfetch('/simulador/search',{ingredientes:legacyMap(input)});if(!res.success)throw new Error(res.erro||'Falha na busca de similares.');document.querySelector('#similarTable tbody').innerHTML=(res.results||[]).map(r=>`<tr><td><a href="/detalhe_formula/${r.id}" target="_blank">${r.id}</a></td><td>${Number.isFinite(Number(r.distance))?Number(r.distance).toFixed(4):'--'}</td><td><button class="btn btn-sm btn-link" type="button" onclick="loadSimilar(${r.id})">abrir</button></td></tr>`).join('');new bootstrap.Tab(document.getElementById('tab-opt-btn')).show()}catch(e){feedback(`Erro ao buscar similares: ${e.message}`)}}
+function loadSimilar(id){window.open(`/detalhe_formula/${id}`,'_blank')}
+function exportResultJSON(){if(!state.lastSimulation&&!state.lastOptimization){feedback('Nenhum resultado disponível para exportação.','warning');return}const blob=new Blob([JSON.stringify({generated_at:new Date().toISOString(),simulation:state.lastSimulation,optimization:state.lastOptimization,compare_selection:state.compareSelection},null,2)],{type:'application/json;charset=utf-8'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=`virtual_lab_result_${Date.now()}.json`;a.click();URL.revokeObjectURL(u)}
+function exportTechnicalPDF(){if(!window.jspdf||!window.jspdf.jsPDF){feedback('Biblioteca de PDF indisponível no navegador.','warning');return}if(!state.lastSimulation&&!state.lastOptimization){feedback('Nenhum resultado disponível para PDF.','warning');return}const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});let y=12;const sim=state.lastSimulation,opt=state.lastOptimization;doc.setFontSize(13);doc.text('ReoScore Virtual Lab - Relatório Técnico',12,y);y+=7;doc.setFontSize(9);doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`,12,y);y+=6;if(sim){doc.setFontSize(11);doc.text('1) Simulação atual',12,y);y+=5;doc.setFontSize(9);const p=sim.predicted||{};[`Hardness: ${fmt(p.hardness,3)}`,`Tensile: ${fmt(p.tensile,3)}`,`Abrasão: ${fmt(p.abrasion,3)}`,`Custo estimado: ${fmt(p.cost,3)}`,`Risco: ${fmt(p.risk,3)}`,`Confidence Index: ${fmt(p.confidence,3)}`].forEach(l=>{doc.text(l,14,y);y+=4.5});y+=2}if(opt){doc.setFontSize(11);doc.text('2) Otimização multiobjetivo',12,y);y+=5;doc.setFontSize(9);doc.text(`Modelo: ${opt.model_version||'--'} | Seed: ${opt.seed??'--'}`,14,y);y+=4.5;const s=opt.summary||{};doc.text(`Avaliadas: ${s.num_candidates_evaluated||0} | Pareto: ${s.num_pareto||0}`,14,y);y+=4.5;(opt.top_candidates||[]).slice(0,5).forEach((r,i)=>{const p=r.predicted||{};doc.text(`${i+1}. ID ${r.candidate_id||'-'} | Tensile ${fmt(p.tensile_pred,2)} | Abr ${fmt((p.abrasion_pred??p.abrasion_resistance_pred),2)} | Custo ${fmt(r.cost,2)} | Risco ${fmt(r.risk,2)}`,14,y);y+=4.5})}doc.save(`virtual_lab_relatorio_${Date.now()}.pdf`)}
+async function loadRules(){try{const res=await fetch('/knowledge');const rules=await res.json();document.getElementById('rulesTableBody').innerHTML=rules.map(r=>`<tr><td>${r.property}</td><td>${r.effect}</td><td>${r.desc||'-'}</td></tr>`).join('')}catch(e){document.getElementById('rulesTableBody').innerHTML=`<tr><td colspan="3" class="text-danger">Erro ao carregar regras: ${e.message}</td></tr>`}}
+function setKnowledgeTab(list){document.getElementById('rulesList').classList.toggle('d-none',!list);document.getElementById('addRuleForm').classList.toggle('d-none',list);const t=document.querySelectorAll('#knowledgeModal .nav-link');t.forEach(x=>x.classList.remove('active'));if(list)t[0].classList.add('active');else t[1].classList.add('active')}
+function showRulesList(e){if(e)e.preventDefault();setKnowledgeTab(true);loadRules()}
+function showAddRule(e){if(e)e.preventDefault();setKnowledgeTab(false)}
+async function saveRule(e){e.preventDefault();const fd=new FormData(e.target);const data=Object.fromEntries(fd.entries());try{const r=await fetch('/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const p=await r.json();if(!r.ok||!p.success)throw new Error(p?.erro||'Falha ao salvar regra.');e.target.reset();feedback('Regra salva com sucesso.','success');showRulesList()}catch(err){feedback(`Erro ao salvar regra: ${err.message}`)}}
+document.getElementById('knowledgeModal').addEventListener('show.bs.modal',()=>showRulesList());
+const dl=document.createElement('datalist');dl.id='mpCodes';dl.innerHTML=materiasPrimas.map(m=>`<option value="${m.codigo}">${m.nome}</option>`).join('');document.body.appendChild(dl);
+clearIngredients();renderPicker();
 </script>
 {% endblock %}

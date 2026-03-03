@@ -3,6 +3,7 @@ from .formulation_v2 import (
     Formulation,
     FormulationIngredient,
     MeasuredProperties,
+    OptimizationHistory,
     ProcessParameters,
 )
 from .usuario import db
@@ -14,4 +15,5 @@ __all__ = [
     "FormulationIngredient",
     "ProcessParameters",
     "MeasuredProperties",
+    "OptimizationHistory",
 ]
