@@ -2,12 +2,80 @@
 {% block title %}Resultado do Fit{% endblock %}
 {% block content %}
 <h2>Resultado do Ajuste Cinetico</h2>
+<style>
+  .param-value { font-size: 1.1rem; font-weight: 600; }
+  .param-editor {
+    border-top: 1px solid #e9ecef;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+  }
+</style>
+
+<div class="row g-3 mb-2">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <b>k0</b>
+          <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="k0">Slider</button>
+        </div>
+        <div class="param-value" id="display-k0">{{ '%.6e'|format(payload.k0 or 0) }}</div>
+        <div class="param-editor d-none" id="editor-k0">
+          <label for="slider-k0" class="form-label small text-muted mb-1">Ajuste (log10)</label>
+          <input type="range" class="form-range" id="slider-k0" min="-8" max="15" step="0.01">
+          <label for="input-k0" class="form-label small text-muted mb-1">Valor direto</label>
+          <input type="number" class="form-control form-control-sm" id="input-k0" min="1e-8" max="1e15" step="any">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <b>Ea (J/mol)</b>
+          <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="Ea">Slider</button>
+        </div>
+        <div class="param-value" id="display-Ea">{{ '%.2f'|format(payload.Ea or 0) }}</div>
+        <div class="param-editor d-none" id="editor-Ea">
+          <label for="slider-Ea" class="form-label small text-muted mb-1">Ajuste</label>
+          <input type="range" class="form-range" id="slider-Ea" min="50000" max="250000" step="100">
+          <label for="input-Ea" class="form-label small text-muted mb-1">Valor direto</label>
+          <input type="number" class="form-control form-control-sm" id="input-Ea" min="50000" max="250000" step="100">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <b>n</b>
+          <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="n">Slider</button>
+        </div>
+        <div class="param-value" id="display-n">{{ '%.4f'|format(payload.n or 0) }}</div>
+        <div class="param-editor d-none" id="editor-n">
+          <label for="slider-n" class="form-label small text-muted mb-1">Ajuste</label>
+          <input type="range" class="form-range" id="slider-n" min="0.5" max="12.0" step="0.01">
+          <label for="input-n" class="form-label small text-muted mb-1">Valor direto</label>
+          <input type="number" class="form-control form-control-sm" id="input-n" min="0.5" max="12.0" step="0.01">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-none mb-3" id="paramActions">
+  <button type="button" class="btn btn-success btn-sm" id="saveParamChanges">Salvar alteracoes</button>
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelParamChanges">Cancelar alteracoes</button>
+  <small class="text-muted ms-2">As alteracoes atualizam o grafico em tempo real.</small>
+</div>
+
 <div class="row g-3 mb-3">
-  <div class="col-md-3"><div class="card"><div class="card-body"><b>k0</b><div>{{ '%.6e'|format(payload.k0 or 0) }}</div></div></div></div>
-  <div class="col-md-3"><div class="card"><div class="card-body"><b>Ea (J/mol)</b><div>{{ '%.2f'|format(payload.Ea or 0) }}</div></div></div></div>
-  <div class="col-md-2"><div class="card"><div class="card-body"><b>n</b><div>{{ '%.4f'|format(payload.n or 0) }}</div></div></div></div>
-  <div class="col-md-2"><div class="card"><div class="card-body"><b>RMSE alpha</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
-  <div class="col-md-2"><div class="card"><div class="card-body"><b>Status</b><div>{{ 'OK' if payload.success else 'Falhou' }}</div></div></div></div>
+  <div class="col-md-6"><div class="card"><div class="card-body"><b>RMSE alpha</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
+  <div class="col-md-6"><div class="card"><div class="card-body"><b>Status</b><div>{{ 'OK' if payload.success else 'Falhou' }}</div></div></div></div>
 </div>
 
 <div class="mb-3">
@@ -20,11 +88,15 @@
 {% for e in payload.ensaios %}<li>{{ e.COD_ENSAIO }} - {{ ('%.1f'|format(e.T_C)).replace('.', ',') }} C</li>{% endfor %}
 </ul>
 
-<h5 class="mt-4">Comparacao de tempos por alpha</h5>
+<div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+  <h5 class="mb-0">Comparacao de tempos por alpha</h5>
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleAlphaComparisonBtn">Ocultar tabela</button>
+</div>
 <p class="text-muted">
   t real = tempo de cruzamento da curva medida; t simulacao = tempo de cruzamento da curva ajustada.
   Delta = simulacao - real.
 </p>
+<div id="alphaComparisonWrap">
 {% if alpha_time_comparison %}
   {% for curve in alpha_time_comparison %}
   <div class="card mb-3">
@@ -45,7 +117,7 @@
         <tbody>
           {% for row in curve.comparisons %}
           <tr>
-            <td>{{ ('%.1f'|format(row.alpha)).replace('.', ',') }}</td>
+            <td>{{ '%.0f%%'|format((row.alpha or 0) * 100) }}</td>
             <td>{% if row.real_s is not none %}{{ ('%.2f'|format(row.real_s)).replace('.', ',') }}{% else %}--{% endif %}</td>
             <td>{% if row.sim_s is not none %}{{ ('%.2f'|format(row.sim_s)).replace('.', ',') }}{% else %}--{% endif %}</td>
             <td class="{% if row.diff_s is not none and row.diff_s > 0 %}text-danger{% elif row.diff_s is not none and row.diff_s < 0 %}text-success{% endif %}">
@@ -61,23 +133,474 @@
 {% else %}
   <div class="alert alert-warning">Nao ha dados de curva para comparar tempos de alpha.</div>
 {% endif %}
+</div>
 
 <div id="alpha_chart" style="height:420px;"></div>
 <div id="torque_chart" style="height:420px;"></div>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
-  const curves = {{ payload.curves|tojson }};
-  const alphaData = [];
-  const torqueData = [];
-  curves.forEach((c) => {
-    alphaData.push({ x: c.t_rel, y: c.alpha, mode: 'lines', name: `alpha real ${c.COD_ENSAIO}` });
-    if (c.alpha_model) {
-      alphaData.push({ x: c.t_rel, y: c.alpha_model, mode: 'lines', line: { dash: 'dot' }, name: `alpha modelo ${c.COD_ENSAIO}` });
+  const curvesRaw = {{ payload.curves|tojson }};
+  const alphaComparisonSeed = {{ alpha_time_comparison|tojson }};
+  const updateUrl = {{ url_for('reometria_fit_update', fit_id=payload.fit_id)|tojson }};
+  const R_GAS = 8.314462618;
+  const LIMITS = {
+    k0: { min: 1e-8, max: 1e15 },
+    Ea: { min: 50000.0, max: 250000.0 },
+    n: { min: 0.5, max: 12.0 },
+  };
+
+  const state = {
+    original: {
+      k0: Number({{ (payload.k0 if payload.k0 is not none else 1e6)|tojson }}),
+      Ea: Number({{ (payload.Ea if payload.Ea is not none else 80000.0)|tojson }}),
+      n: Number({{ (payload.n if payload.n is not none else 1.2)|tojson }}),
+    },
+    current: null,
+  };
+  state.current = { ...state.original };
+
+  const controls = {
+    k0: { slider: document.getElementById('slider-k0'), input: document.getElementById('input-k0') },
+    Ea: { slider: document.getElementById('slider-Ea'), input: document.getElementById('input-Ea') },
+    n: { slider: document.getElementById('slider-n'), input: document.getElementById('input-n') },
+  };
+  const displayEls = {
+    k0: document.getElementById('display-k0'),
+    Ea: document.getElementById('display-Ea'),
+    n: document.getElementById('display-n'),
+  };
+  const actionsEl = document.getElementById('paramActions');
+  const saveBtn = document.getElementById('saveParamChanges');
+  const cancelBtn = document.getElementById('cancelParamChanges');
+  const toggleComparisonBtn = document.getElementById('toggleAlphaComparisonBtn');
+  const comparisonWrap = document.getElementById('alphaComparisonWrap');
+  const alphaTargets = (
+    Array.isArray(alphaComparisonSeed) &&
+    alphaComparisonSeed.length > 0 &&
+    Array.isArray(alphaComparisonSeed[0].comparisons)
+      ? alphaComparisonSeed[0].comparisons.map((row) => Number(row.alpha)).filter((value) => Number.isFinite(value))
+      : []
+  );
+  if (!alphaTargets.length) {
+    alphaTargets.push(0.1, 0.2, 0.5, 0.9);
+  }
+
+  const palette = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6610f2', '#20c997', '#6f42c1', '#d63384'];
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function toNumericArray(values) {
+    if (!Array.isArray(values)) return [];
+    return values
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+  }
+
+  function normalizeCurve(curve) {
+    const tRel = toNumericArray(curve.t_rel);
+    const alpha = toNumericArray(curve.alpha);
+    const tempo = toNumericArray(curve.tempo);
+    const torque = toNumericArray(curve.torque);
+    const pairedLen = Math.min(tRel.length, alpha.length);
+    const torqueLen = Math.min(tempo.length, torque.length);
+    return {
+      ...curve,
+      T_C: Number(curve.T_C),
+      t_rel: tRel.slice(0, pairedLen),
+      alpha: alpha.slice(0, pairedLen),
+      tempo: tempo.slice(0, torqueLen),
+      torque: torque.slice(0, torqueLen),
+    };
+  }
+
+  const curves = curvesRaw.map(normalizeCurve);
+
+  function maxCurveTime(curve) {
+    if (!curve.t_rel.length) return 0;
+    return Math.max(...curve.t_rel);
+  }
+
+  function firstCrossingTime(timeVec, alphaVec, alphaTarget) {
+    const size = Math.min(timeVec.length, alphaVec.length);
+    if (size < 2) return null;
+
+    for (let i = 1; i < size; i += 1) {
+      const a0 = Number(alphaVec[i - 1]);
+      const a1 = Number(alphaVec[i]);
+      if (!Number.isFinite(a0) || !Number.isFinite(a1)) continue;
+      if (a0 <= alphaTarget && alphaTarget <= a1) {
+        const t0 = Number(timeVec[i - 1]);
+        const t1 = Number(timeVec[i]);
+        if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+        if (a1 === a0) return t1;
+        const frac = (alphaTarget - a0) / (a1 - a0);
+        return t0 + frac * (t1 - t0);
+      }
     }
-    torqueData.push({ x: c.tempo, y: c.torque, mode: 'lines', name: `Torque ${c.COD_ENSAIO}` });
+    return null;
+  }
+
+  function nearestAlphaTime(timeVec, alphaVec, alphaTarget) {
+    const size = Math.min(timeVec.length, alphaVec.length);
+    if (size === 0) return null;
+
+    let bestIdx = -1;
+    let bestDiff = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < size; i += 1) {
+      const alphaValue = Number(alphaVec[i]);
+      const timeValue = Number(timeVec[i]);
+      if (!Number.isFinite(alphaValue) || !Number.isFinite(timeValue)) continue;
+      const diff = Math.abs(alphaValue - alphaTarget);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx < 0) return null;
+    return Number(timeVec[bestIdx]);
+  }
+
+  function crossingOrNearestTime(timeVec, alphaVec, alphaTarget) {
+    const crossing = firstCrossingTime(timeVec, alphaVec, alphaTarget);
+    if (crossing !== null) return crossing;
+    return nearestAlphaTime(timeVec, alphaVec, alphaTarget);
+  }
+
+  function buildModelTimeline() {
+    if (!curves.length) return [0];
+    let longest = curves[0];
+    curves.forEach((curve) => {
+      if (maxCurveTime(curve) > maxCurveTime(longest)) longest = curve;
+    });
+
+    const timeline = longest.t_rel.filter((value, idx, arr) => idx === 0 || value > arr[idx - 1]);
+    if (timeline.length >= 2) return timeline;
+
+    const maxTime = Math.max(...curves.map(maxCurveTime), 0);
+    const generated = [];
+    for (let t = 0; t <= maxTime; t += 1) generated.push(Number(t.toFixed(6)));
+    return generated.length ? generated : [0];
+  }
+
+  const modelTimeline = buildModelTimeline();
+
+  function formatK0(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return num.toExponential(6);
+  }
+
+  function formatEa(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return num.toFixed(2);
+  }
+
+  function formatN(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return num.toFixed(4);
+  }
+
+  function updateParamDisplays() {
+    displayEls.k0.textContent = formatK0(state.current.k0);
+    displayEls.Ea.textContent = formatEa(state.current.Ea);
+    displayEls.n.textContent = formatN(state.current.n);
+  }
+
+  function syncControlValuesFromState() {
+    const k0Safe = clamp(state.current.k0, LIMITS.k0.min, LIMITS.k0.max);
+    const eaSafe = clamp(state.current.Ea, LIMITS.Ea.min, LIMITS.Ea.max);
+    const nSafe = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
+
+    controls.k0.slider.value = String(Math.log10(k0Safe));
+    controls.k0.input.value = k0Safe.toExponential(6);
+
+    controls.Ea.slider.value = String(eaSafe);
+    controls.Ea.input.value = eaSafe.toFixed(2);
+
+    controls.n.slider.value = String(nSafe);
+    controls.n.input.value = nSafe.toFixed(4);
+  }
+
+  function isDirty() {
+    const logK0Current = Math.log10(clamp(state.current.k0, LIMITS.k0.min, LIMITS.k0.max));
+    const logK0Original = Math.log10(clamp(state.original.k0, LIMITS.k0.min, LIMITS.k0.max));
+    return (
+      Math.abs(logK0Current - logK0Original) > 1e-9 ||
+      Math.abs(state.current.Ea - state.original.Ea) > 1e-6 ||
+      Math.abs(state.current.n - state.original.n) > 1e-6
+    );
+  }
+
+  function updateActionButtons() {
+    const dirty = isDirty();
+    actionsEl.classList.toggle('d-none', !dirty);
+    saveBtn.disabled = !dirty;
+    cancelBtn.disabled = !dirty;
+  }
+
+  function computeAlphaModelForTimeline(curve, timeline) {
+    const tempK = Math.max((Number.isFinite(curve.T_C) ? curve.T_C : 0) + 273.15, 1.0);
+    const n = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
+    const k_t = Math.max(state.current.k0 * Math.exp(-state.current.Ea / (R_GAS * tempK)), 1e-300);
+    const lnK = Math.log(k_t);
+
+    return timeline.map((tValue) => {
+      const tSafe = Math.max(Number(tValue) || 0, 1e-12);
+      const expArg = clamp(n * (lnK + Math.log(tSafe)), -700.0, 700.0);
+      const x = Math.exp(expArg);
+      return x / (1.0 + x);
+    });
+  }
+
+  function computeAlphaModelForCurve(curve) {
+    return computeAlphaModelForTimeline(curve, modelTimeline);
+  }
+
+  function formatSeconds(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return num.toFixed(2).replace('.', ',');
+  }
+
+  function renderAlphaComparisonTable() {
+    if (!comparisonWrap) return;
+    if (!curves.length || !alphaTargets.length) {
+      comparisonWrap.innerHTML = '<div class="alert alert-warning">Nao ha dados de curva para comparar tempos de alpha.</div>';
+      return;
+    }
+
+    const blocks = curves.map((curve) => {
+      const realTime = curve.t_rel;
+      const realAlpha = curve.alpha;
+      const simAlpha = computeAlphaModelForTimeline(curve, realTime);
+
+      const canEvalReal = realTime.length >= 1 && realTime.length === realAlpha.length;
+      const canEvalSim = realTime.length >= 1 && realTime.length === simAlpha.length;
+
+      const rowsHtml = alphaTargets.map((alphaTarget) => {
+        const tReal = canEvalReal ? crossingOrNearestTime(realTime, realAlpha, alphaTarget) : null;
+        const tSim = canEvalSim ? crossingOrNearestTime(realTime, simAlpha, alphaTarget) : null;
+        const diff = (tReal !== null && tSim !== null) ? (tSim - tReal) : null;
+        const diffClass = diff !== null && diff > 0 ? 'text-danger' : (diff !== null && diff < 0 ? 'text-success' : '');
+
+        return `
+          <tr>
+            <td>${Math.round(alphaTarget * 100)}%</td>
+            <td>${formatSeconds(tReal)}</td>
+            <td>${formatSeconds(tSim)}</td>
+            <td class="${diffClass}">${formatSeconds(diff)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const tempLabel = Number.isFinite(curve.T_C) ? ` - ${curve.T_C.toFixed(1).replace('.', ',')} C` : '';
+      return `
+        <div class="card mb-3">
+          <div class="card-header"><b>Ensaio ${curve.COD_ENSAIO}</b>${tempLabel}</div>
+          <div class="table-responsive">
+            <table class="table table-striped table-sm mb-0">
+              <thead>
+                <tr>
+                  <th>alpha</th>
+                  <th>t real (s)</th>
+                  <th>t simulacao (s)</th>
+                  <th>delta (s)</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    comparisonWrap.innerHTML = blocks;
+  }
+
+  function buildAlphaData() {
+    const traces = [];
+    curves.forEach((curve, idx) => {
+      const color = palette[idx % palette.length];
+      traces.push({
+        x: curve.t_rel,
+        y: curve.alpha,
+        mode: 'lines',
+        name: `alpha real ${curve.COD_ENSAIO}`,
+        line: { color, width: 2 },
+      });
+
+      traces.push({
+        x: modelTimeline,
+        y: computeAlphaModelForCurve(curve),
+        mode: 'lines',
+        name: `alpha modelo ${curve.COD_ENSAIO}`,
+        line: { color, width: 2, dash: 'dot' },
+      });
+    });
+    return traces;
+  }
+
+  function buildTorqueData() {
+    const traces = [];
+    curves.forEach((curve, idx) => {
+      traces.push({
+        x: curve.tempo,
+        y: curve.torque,
+        mode: 'lines',
+        name: `Torque ${curve.COD_ENSAIO}`,
+        line: { color: palette[idx % palette.length], width: 2 },
+      });
+    });
+    return traces;
+  }
+
+  function drawAlphaChart() {
+    Plotly.react(
+      'alpha_chart',
+      buildAlphaData(),
+      {
+        title: 'Alpha real vs modelo',
+        xaxis: {
+          title: 't relativo (s)',
+          dtick: 60,
+          tick0: 0,
+          gridcolor: '#d9d9d9',
+        },
+        yaxis: {
+          title: 'alpha (%)',
+          dtick: 0.1,
+          tick0: 0,
+          tickformat: '.0%',
+          range: [0, 1],
+          gridcolor: '#d9d9d9',
+        },
+        margin: { t: 56, r: 24, b: 56, l: 64 },
+      },
+      { responsive: true, displaylogo: false }
+    );
+  }
+
+  function drawTorqueChart() {
+    Plotly.react(
+      'torque_chart',
+      buildTorqueData(),
+      {
+        title: 'Torque vs tempo',
+        xaxis: {
+          title: 'Tempo (s)',
+          dtick: 60,
+          tick0: 0,
+          gridcolor: '#d9d9d9',
+        },
+        yaxis: { title: 'Torque' },
+        margin: { t: 56, r: 24, b: 56, l: 64 },
+      },
+      { responsive: true, displaylogo: false }
+    );
+  }
+
+  function refreshUiAndCharts() {
+    updateParamDisplays();
+    syncControlValuesFromState();
+    updateActionButtons();
+    drawAlphaChart();
+    renderAlphaComparisonTable();
+  }
+
+  function setParamValue(param, value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    state.current[param] = clamp(parsed, LIMITS[param].min, LIMITS[param].max);
+    refreshUiAndCharts();
+  }
+
+  function bindControls() {
+    controls.k0.slider.addEventListener('input', () => {
+      const logValue = Number(controls.k0.slider.value);
+      if (!Number.isFinite(logValue)) return;
+      setParamValue('k0', Math.pow(10, logValue));
+    });
+    controls.k0.input.addEventListener('input', () => setParamValue('k0', controls.k0.input.value));
+    controls.k0.input.addEventListener('change', () => setParamValue('k0', controls.k0.input.value));
+
+    controls.Ea.slider.addEventListener('input', () => setParamValue('Ea', controls.Ea.slider.value));
+    controls.Ea.input.addEventListener('input', () => setParamValue('Ea', controls.Ea.input.value));
+    controls.Ea.input.addEventListener('change', () => setParamValue('Ea', controls.Ea.input.value));
+
+    controls.n.slider.addEventListener('input', () => setParamValue('n', controls.n.slider.value));
+    controls.n.input.addEventListener('input', () => setParamValue('n', controls.n.input.value));
+    controls.n.input.addEventListener('change', () => setParamValue('n', controls.n.input.value));
+  }
+
+  async function saveChanges() {
+    if (!isDirty()) return;
+    if (!window.confirm('Confirmar salvamento das alteracoes de k0, Ea e n?')) return;
+
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    try {
+      const response = await fetch(updateUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          k0: state.current.k0,
+          Ea: state.current.Ea,
+          n: state.current.n,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Falha ao salvar alteracoes.');
+      }
+
+      state.original = {
+        k0: Number(data.k0),
+        Ea: Number(data.Ea),
+        n: Number(data.n),
+      };
+      state.current = { ...state.original };
+      refreshUiAndCharts();
+      window.alert('Parametros salvos com sucesso.');
+    } catch (error) {
+      window.alert(error.message || 'Erro ao salvar alteracoes.');
+      updateActionButtons();
+    }
+  }
+
+  function cancelChanges() {
+    if (!isDirty()) return;
+    if (!window.confirm('Descartar as alteracoes nao salvas?')) return;
+    state.current = { ...state.original };
+    refreshUiAndCharts();
+  }
+
+  document.querySelectorAll('.param-edit-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const param = button.dataset.param;
+      const editor = document.getElementById(`editor-${param}`);
+      const isHidden = editor.classList.contains('d-none');
+      editor.classList.toggle('d-none', !isHidden);
+      button.textContent = isHidden ? 'Ocultar' : 'Slider';
+    });
   });
-  Plotly.newPlot('alpha_chart', alphaData, { title: 'Alpha real vs modelo', xaxis: { title: 't relativo (s)' }, yaxis: { title: 'alpha' } });
-  Plotly.newPlot('torque_chart', torqueData, { title: 'Torque vs tempo', xaxis: { title: 'Tempo (s)' }, yaxis: { title: 'Torque' } });
+
+  if (toggleComparisonBtn && comparisonWrap) {
+    toggleComparisonBtn.addEventListener('click', () => {
+      const isHidden = comparisonWrap.classList.toggle('d-none');
+      toggleComparisonBtn.textContent = isHidden ? 'Exibir tabela' : 'Ocultar tabela';
+    });
+  }
+
+  saveBtn.addEventListener('click', saveChanges);
+  cancelBtn.addEventListener('click', cancelChanges);
+  bindControls();
+  refreshUiAndCharts();
+  drawTorqueChart();
 </script>
 {% endblock %}

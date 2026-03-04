@@ -14,6 +14,24 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 ALPHA_COMPARE_TARGETS_DEFAULT = [0.10, 0.20, 0.50, 0.90]
 
 
+def _nearest_alpha_time(time_vec, alpha_vec, alpha_target):
+    size = min(len(time_vec), len(alpha_vec))
+    if size == 0:
+        return None
+
+    t = np.asarray(time_vec[:size], dtype=float)
+    a = np.asarray(alpha_vec[:size], dtype=float)
+    idx = int(np.argmin(np.abs(a - float(alpha_target))))
+    return float(t[idx])
+
+
+def _crossing_or_nearest_time(time_vec, alpha_vec, alpha_target):
+    t_cross = first_crossing_time(time_vec, alpha_vec, alpha_target)
+    if t_cross is not None:
+        return float(t_cross)
+    return _nearest_alpha_time(time_vec, alpha_vec, alpha_target)
+
+
 def list_ensaios_for_fit(date_start=None, date_end=None, text_query=None, limit=300):
     conn = connect_to_database()
     cur = conn.cursor()
@@ -165,6 +183,30 @@ def load_fit_payload(fit_id):
         return json.load(f)
 
 
+def update_fit_parameters(fit_id, k0, ea, n):
+    payload = load_fit_payload(fit_id)
+    if not payload:
+        return None
+
+    k0_val = float(np.clip(float(k0), 1e-8, 1e15))
+    ea_val = float(np.clip(float(ea), 50000.0, 250000.0))
+    n_val = float(np.clip(float(n), 0.5, 12.0))
+
+    payload["k0"] = k0_val
+    payload["Ea"] = ea_val
+    payload["n"] = n_val
+
+    curves = payload.get("curves") or []
+    for c in curves:
+        t = np.array(c.get("t_rel") or [], dtype=float)
+        tk = np.full_like(t, fill_value=float(c.get("T_C") or 0) + 273.15)
+        pred = alpha_model(t, tk, payload["k0"], payload["Ea"], payload["n"])
+        c["alpha_model"] = pred.tolist()
+
+    save_fit_payload(payload)
+    return payload
+
+
 def get_preview_curve(cod_ensaio):
     rows = get_curve_points([int(cod_ensaio)])
     curves = _group_curves(rows)
@@ -190,13 +232,13 @@ def build_alpha_time_comparison(payload, alpha_targets=None):
         alpha_real = np.array(c.get("alpha") or [], dtype=float)
         alpha_sim = np.array(c.get("alpha_model") or [], dtype=float) if c.get("alpha_model") is not None else None
 
-        can_eval_real = len(t_rel) >= 2 and len(t_rel) == len(alpha_real)
-        can_eval_sim = alpha_sim is not None and len(t_rel) >= 2 and len(t_rel) == len(alpha_sim)
+        can_eval_real = len(t_rel) >= 1 and len(t_rel) == len(alpha_real)
+        can_eval_sim = alpha_sim is not None and len(t_rel) >= 1 and len(t_rel) == len(alpha_sim)
 
         comparisons = []
         for alpha_target in alpha_targets:
-            t_real = first_crossing_time(t_rel, alpha_real, alpha_target) if can_eval_real else None
-            t_sim = first_crossing_time(t_rel, alpha_sim, alpha_target) if can_eval_sim else None
+            t_real = _crossing_or_nearest_time(t_rel, alpha_real, alpha_target) if can_eval_real else None
+            t_sim = _crossing_or_nearest_time(t_rel, alpha_sim, alpha_target) if can_eval_sim else None
             comparisons.append(
                 {
                     "alpha": alpha_target,

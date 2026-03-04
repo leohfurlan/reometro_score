@@ -57,8 +57,14 @@ def build_fit_dataset(curves: List[Dict], alphas_ref=None):
 
 
 def alpha_model(t: np.ndarray, t_kelvin: np.ndarray, k0: float, ea: float, n: float):
-    k_t = k0 * np.exp(-ea / (R_GAS * t_kelvin))
-    x = k_t * np.power(np.maximum(t, 1e-12), n)
+    temp_safe = np.maximum(t_kelvin, 1.0)
+    n_safe = float(np.clip(n, 0.5, 12.0))
+    k_t = k0 * np.exp(-ea / (R_GAS * temp_safe))
+
+    # x = (k*t)^n = exp(n * ln(k*t)); using logs avoids power overflow in wide ranges.
+    ln_kt = np.log(np.maximum(k_t, 1e-300)) + np.log(np.maximum(t, 1e-12))
+    exp_arg = np.clip(n_safe * ln_kt, -700.0, 700.0)
+    x = np.exp(exp_arg)
     return x / (1.0 + x)
 
 
@@ -78,9 +84,9 @@ def fit_kinetics(curves: List[Dict]):
         pred = alpha_model(t_obs, t_kelvin, k0, ea, n)
         return pred - alpha_target
 
-    p0 = np.array([math.log(1e6), 45000.0, 1.2], dtype=float)
-    lb = np.array([math.log(1e-8), 1000.0, 0.2], dtype=float)
-    ub = np.array([math.log(1e12), 200000.0, 4.0], dtype=float)
+    p0 = np.array([math.log(1e6), 80000.0, 1.2], dtype=float)
+    lb = np.array([math.log(1e-8), 50000.0, 0.5], dtype=float)
+    ub = np.array([math.log(1e15), 250000.0, 4.0], dtype=float)
 
     result = least_squares(residuals, p0, bounds=(lb, ub), method="trf", max_nfev=3000)
     k0 = math.exp(result.x[0])
@@ -101,9 +107,12 @@ def fit_kinetics(curves: List[Dict]):
 
 
 def alpha_from_timeline(time: np.ndarray, temp_k: np.ndarray, k0: float, ea: float, n: float):
+    time = np.asarray(time, dtype=float)
+    temp_k = np.asarray(temp_k, dtype=float)
     dt = np.diff(time, prepend=time[0])
     dt[0] = 0.0
     k_t = np.maximum(k0 * np.exp(-ea / (R_GAS * np.maximum(temp_k, 1.0))), 0.0)
-    z = np.cumsum(np.power(k_t, 1.0 / max(n, 1e-6)) * dt)
-    z_n = np.power(np.maximum(z, 0.0), n)
+    n_safe = float(np.clip(n, 0.5, 12.0))
+    z = np.cumsum(np.power(k_t, 1.0 / n_safe) * dt)
+    z_n = np.power(np.maximum(z, 0.0), n_safe)
     return z_n / (1.0 + z_n)

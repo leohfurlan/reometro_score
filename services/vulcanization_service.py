@@ -33,7 +33,7 @@ def run_simulation(fit_payload, mode, dim, shape_raw, dx, dt, t_end, mold_temp_c
 
     k0 = float(fit_payload["k0"])
     ea = float(fit_payload["Ea"])
-    n = float(fit_payload["n"])
+    n = float(np.clip(fit_payload["n"], 0.5, 12.0))
 
     times, t_snaps, alpha_snaps = [], [], []
 
@@ -57,7 +57,7 @@ def run_simulation(fit_payload, mode, dim, shape_raw, dx, dt, t_end, mold_temp_c
             t_field[tuple(high)] = t_bc
 
         k_t = np.maximum(k0 * np.exp(-ea / (R_GAS * np.maximum(t_field, 1.0))), 0.0)
-        z_field = z_field + np.power(k_t, 1.0 / max(n, 1e-6)) * dt
+        z_field = z_field + np.power(k_t, 1.0 / n) * dt
         z_n = np.power(np.maximum(z_field, 0.0), n)
         alpha_field = z_n / (1.0 + z_n)
 

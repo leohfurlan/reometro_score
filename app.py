@@ -65,6 +65,7 @@ from services.kinetics_service import (
     load_fit_payload,
     get_preview_curve,
     build_alpha_time_comparison,
+    update_fit_parameters,
 )
 from services.vulcanization_service import run_simulation, load_simulation
 
@@ -2453,6 +2454,36 @@ def reometria_fit_result(fit_id):
         return redirect(url_for('reometria_fit'))
     alpha_time_comparison = build_alpha_time_comparison(payload)
     return render_template('reometria/fit_result.html', payload=payload, alpha_time_comparison=alpha_time_comparison)
+
+
+@app.route('/reometria/fit/update/<fit_id>', methods=['POST'])
+@login_required
+def reometria_fit_update(fit_id):
+    data = request.get_json(silent=True) or {}
+
+    k0 = _parse_float_locale(data.get('k0'), default=None)
+    ea = _parse_float_locale(data.get('Ea'), default=None)
+    n = _parse_float_locale(data.get('n'), default=None)
+
+    if k0 is None or ea is None or n is None:
+        return jsonify({"success": False, "message": "Parametros invalidos para atualizacao."}), 400
+    if k0 <= 0:
+        return jsonify({"success": False, "message": "k0 deve ser positivo."}), 400
+
+    payload = update_fit_parameters(fit_id, k0, ea, n)
+    if not payload:
+        return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Parametros atualizados com sucesso.",
+            "fit_id": payload.get("fit_id"),
+            "k0": float(payload.get("k0", 0.0)),
+            "Ea": float(payload.get("Ea", 0.0)),
+            "n": float(payload.get("n", 0.0)),
+        }
+    )
 
 
 @app.route('/reometria/simulate/<fit_id>')
