@@ -28,7 +28,8 @@ from services.config_manager import (
 )
 from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
-from models.score_versioning import ScoreResultado
+from models.score_versioning import ScoreResultado, ScoreVersao
+from services.scoring_engine import ScoringEngine
 from models.formula import Formula, FormulaItem
 from models.formulation_v2 import (
     Formulation as FormulationV2,
@@ -294,6 +295,12 @@ with app.app_context():
             "ids_reo": "TEXT",
             "ids_visc": "TEXT",
             "origem_viscosidade": "TEXT",
+            "ts2_alta": "REAL",
+            "t90_alta": "REAL",
+            "ts2_baixa": "REAL",
+            "t90_baixa": "REAL",
+            "reometro_alta": "TEXT",
+            "reometro_baixa": "TEXT",
             "metodo_identificacao": "TEXT",
             "lote_original": "TEXT",
             "material_original": "TEXT",
@@ -751,6 +758,8 @@ def controle_qualidade():
         EnsaioConsolidado.t90,
         EnsaioConsolidado.viscosidade,
         EnsaioConsolidado.origem_viscosidade,
+        EnsaioConsolidado.reometro_alta,
+        EnsaioConsolidado.reometro_baixa,
         EnsaioConsolidado.score_final,
         EnsaioConsolidado.acao_recomendada,
         EnsaioConsolidado.metodo_identificacao,
@@ -1127,19 +1136,104 @@ def api_estatisticas_massa(cod_sankhya, parametro):
 @login_required
 def analise_curva(id_ensaio):
     """
-    ROTA ANALÃƒÂTICA: Detalhes profundos de um ensaio especÃƒÂ­fico.
+    Rota analitica: detalhes de um ensaio especifico.
     """
     ensaio = EnsaioConsolidado.query.get_or_404(id_ensaio)
-    
-    # Busca o detalhe do cÃƒÂ¡lculo (logs da engine)
-    resultado = ScoreResultado.query.filter_by(id_ensaio=id_ensaio).order_by(ScoreResultado.id.desc()).first()
-    detalhes_score = resultado.detalhes_log if resultado else {}
-    
-    # Se 'params' estiver aninhado (dependendo da versÃƒÂ£o da engine)
-    if 'params' in detalhes_score:
-        detalhes_score = detalhes_score['params']
 
-    return render_template('detalhe_curva.html', ensaio=ensaio, detalhes=detalhes_score)
+    # Detalhe persistido da ultima execucao da engine para este ensaio.
+    resultado = (
+        ScoreResultado.query
+        .filter_by(id_ensaio=id_ensaio)
+        .order_by(ScoreResultado.id.desc())
+        .first()
+    )
+    detalhes_score = resultado.detalhes_log if resultado else {}
+
+    if isinstance(detalhes_score, dict) and 'params' in detalhes_score:
+        detalhes_score = detalhes_score.get('params') or {}
+
+    def _tem_valor(v):
+        return v is not None
+
+    def _to_params_dict(log):
+        if not isinstance(log, dict):
+            return {}
+        if isinstance(log.get('params'), dict):
+            return log.get('params') or {}
+        return log
+
+    tem_alta = _tem_valor(getattr(ensaio, 'ts2_alta', None)) or _tem_valor(getattr(ensaio, 't90_alta', None))
+    tem_baixa = _tem_valor(getattr(ensaio, 'ts2_baixa', None)) or _tem_valor(getattr(ensaio, 't90_baixa', None))
+    detalhes_por_perfil = []
+
+    versao_engine = None
+    if resultado and getattr(resultado, 'id_versao', None):
+        versao_engine = ScoreVersao.query.get(resultado.id_versao)
+    if versao_engine is None:
+        versao_engine = ScoreVersao.query.filter_by(status='ACTIVE').order_by(ScoreVersao.id.desc()).first()
+
+    if versao_engine:
+        engine = ScoringEngine(versao_engine)
+        payload_base = {
+            'id_ensaio': ensaio.id_ensaio,
+            'cod_sankhya': ensaio.cod_sankhya,
+            'viscosidade': ensaio.viscosidade,
+            'origem_viscosidade': ensaio.origem_viscosidade,
+            'temp_plato': ensaio.temp_plato,
+            'ts2': ensaio.ts2,
+            't90': ensaio.t90,
+            'ts2_alta': getattr(ensaio, 'ts2_alta', None),
+            't90_alta': getattr(ensaio, 't90_alta', None),
+            'ts2_baixa': getattr(ensaio, 'ts2_baixa', None),
+            't90_baixa': getattr(ensaio, 't90_baixa', None),
+            'reometro_alta': getattr(ensaio, 'reometro_alta', None),
+            'reometro_baixa': getattr(ensaio, 'reometro_baixa', None),
+        }
+
+        perfis = []
+        if tem_alta:
+            perfis.append('alta')
+        if tem_baixa:
+            perfis.append('baixa')
+        if not perfis:
+            perfis.append('auto')
+
+        for perfil in perfis:
+            dados = dict(payload_base)
+            if perfil == 'alta':
+                dados['temp_plato'] = max(float(dados.get('temp_plato') or 0), 175.0)
+                titulo = 'Reometria Alta'
+            elif perfil == 'baixa':
+                dados['temp_plato'] = 120.0
+                titulo = 'Reometria Baixa'
+            else:
+                titulo = 'Reometria'
+
+            ensaio_tmp = type('EnsaioTmp', (), dados)()
+            res_tmp = engine.calcular(ensaio_tmp)
+            detalhes_por_perfil.append({
+                'perfil': perfil,
+                'titulo': titulo,
+                'score': float(res_tmp.score or 0),
+                'acao': res_tmp.acao,
+                'params': _to_params_dict(res_tmp.detalhes_log or {}),
+            })
+
+    if not detalhes_por_perfil and isinstance(detalhes_score, dict) and detalhes_score:
+        detalhes_por_perfil.append({
+            'perfil': 'auto',
+            'titulo': 'Reometria',
+            'score': float(getattr(ensaio, 'score_final', 0) or 0),
+            'acao': getattr(ensaio, 'acao_recomendada', ''),
+            'params': detalhes_score,
+        })
+
+    return render_template(
+        'detalhe_curva.html',
+        ensaio=ensaio,
+        detalhes=detalhes_score,
+        detalhes_por_perfil=detalhes_por_perfil,
+    )
 
 # ==========================================
 # 4. ROTAS DE CONFIGURAÃƒâ€¡ÃƒÆ’O (ADMIN)
@@ -1635,6 +1729,16 @@ def api_grafico():
             for i in range(0, len(items), chunk_size):
                 yield items[i:i + chunk_size]
 
+        def _rotulo_reometro(descricao_grupo):
+            txt = str(descricao_grupo or '').strip().upper()
+            if not txt:
+                return None
+            if 'PRETO' in txt:
+                return 'PRETO'
+            if 'BRANCO' in txt or 'CINZA' in txt:
+                return 'BRANCO'
+            return txt
+
         rows = []
         try:
             for chunk in _chunks(lista_ids, 2000):
@@ -1675,6 +1779,8 @@ def api_grafico():
             # ClassificaÃƒÂ§ÃƒÂ£o
             dados_grupo = _MAPA_GRUPOS.get(c_grupo, {})
             tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
+            desc_grupo = dados_grupo.get('descricao')
+            rotulo_reometro = _rotulo_reometro(desc_grupo)
             
             is_viscosity = False
             
@@ -1705,10 +1811,16 @@ def api_grafico():
                     temp_type = 'ALTA' if c_temp >= 175 else 'BAIXA'
                 # ----------------------------------------------------
 
+                if not is_viscosity and rotulo_reometro:
+                    label = f"{label} [{temp_type}/{rotulo_reometro}]"
+                elif not is_viscosity:
+                    label = f"{label} [{temp_type}]"
+
                 target_dict[c_id] = {
                     'label': label,
                     'material': material_desc,
                     'tempType': temp_type, # <--- Enviando para o Frontend
+                    'reometro': rotulo_reometro if not is_viscosity else None,
                     'data': [],
                     'pointRadius': 0,
                     'borderWidth': 2,
@@ -1722,11 +1834,19 @@ def api_grafico():
 
         ids_reo = sorted([int(k) for k in datasets_reo.keys()])
         ids_visc = sorted([int(k) for k in datasets_visc.keys()])
+        ids_reo_alta = sorted([int(k) for k, v in datasets_reo.items() if (v.get('tempType') == 'ALTA')])
+        ids_reo_baixa = sorted([int(k) for k, v in datasets_reo.items() if (v.get('tempType') == 'BAIXA')])
+        reometros_alta = sorted({str(v.get('reometro')) for v in datasets_reo.values() if v.get('tempType') == 'ALTA' and v.get('reometro')})
+        reometros_baixa = sorted({str(v.get('reometro')) for v in datasets_reo.values() if v.get('tempType') == 'BAIXA' and v.get('reometro')})
 
         return jsonify({
             'ids': lista_ids,
             'ids_reometria': ids_reo,
+            'ids_reometria_alta': ids_reo_alta,
+            'ids_reometria_baixa': ids_reo_baixa,
             'ids_viscosidade': ids_visc,
+            'reometros_alta': reometros_alta,
+            'reometros_baixa': reometros_baixa,
             'materiais': materiais,
             'reometria': list(datasets_reo.values()),
             'viscosidade': list(datasets_visc.values())

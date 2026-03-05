@@ -84,6 +84,12 @@ class EnsaioConsolidado(db.Model):
     ts2 = db.Column(db.Float)
     t90 = db.Column(db.Float)
     viscosidade = db.Column(db.Float)
+    ts2_alta = db.Column(db.Float)
+    t90_alta = db.Column(db.Float)
+    ts2_baixa = db.Column(db.Float)
+    t90_baixa = db.Column(db.Float)
+    reometro_alta = db.Column(db.String(100))
+    reometro_baixa = db.Column(db.String(100))
     
     # --- Novas Propriedades Físicas (Vindas das Planilhas de Laboratório) ---
     dureza = db.Column(db.Float)          # Shore A

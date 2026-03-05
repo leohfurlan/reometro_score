@@ -71,8 +71,21 @@
                 </td>
 
                 <td class="col-lote">
+                    {% set usa_alta = ensaio.temp_plato and ensaio.temp_plato >= 175 %}
+                    {% set reo_usado = ensaio.reometro_alta if usa_alta else ensaio.reometro_baixa %}
+                    {% if not reo_usado %}
+                        {% set reo_usado = ensaio.reometro_alta or ensaio.reometro_baixa %}
+                    {% endif %}
+                    {% set reo_norm = (reo_usado or '')|lower %}
                     <div class="fw-bold truncate-responsive" title="{{ ensaio.lote }}">
                         {{ ensaio.lote }}
+                        {% if reo_usado %}
+                            {% if 'preto' in reo_norm %}
+                                <span class="ms-1" title="Reômetro usado: {{ reo_usado }}">🤖⚫</span>
+                            {% else %}
+                                <span class="ms-1" style="opacity: 0.55;" title="Reômetro usado: {{ reo_usado }}">🤖⚫</span>
+                            {% endif %}
+                        {% endif %}
                     </div>
                     {% if ensaio.batch %} <div class="text-muted small">Batch: {{ ensaio.batch }}</div> {% endif %}
                 </td>
@@ -83,13 +96,18 @@
                 {# Uso de .get('Chave', 0) seguro agora que corrigimos o modelo #}
                 <td class="col-ts2">{{ "%.1f"|format(ensaio.valores_medidos.get('Ts2', 0)) if ensaio.valores_medidos.get('Ts2') else '--' }}</td>
                 <td class="col-t90">{{ "%.1f"|format(ensaio.valores_medidos.get('T90', 0)) if ensaio.valores_medidos.get('T90') else '--' }}</td>
-                
+
                 <td class="col-visc">
                     {% set val_visc = ensaio.valores_medidos.get('Viscosidade') %}
                     {% if val_visc %}
                         {{ "%.1f"|format(val_visc) }}
-                        {% if 'Média' in ensaio.origem_viscosidade %}
-                            <span class="badge bg-light text-dark border ms-1" title="Média do Lote" style="font-size: 0.6em;">M</span>
+                        {% set origem_visc = (ensaio.origem_viscosidade or '')|lower %}
+                        {% if 'media' in origem_visc or 'média' in origem_visc %}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1" title="Média do lote" style="font-size: 0.62em;">MEDIA</span>
+                        {% elif 'real' in origem_visc %}
+                            <span class="badge bg-success-subtle text-success-emphasis border ms-1" title="Valor medido no viscosímetro" style="font-size: 0.62em;">REAL</span>
+                        {% else %}
+                            <span class="badge bg-light text-dark border ms-1" title="Origem não informada" style="font-size: 0.62em;">N/A</span>
                         {% endif %}
                     {% else %}
                         <span class="text-muted">--</span>

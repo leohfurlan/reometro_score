@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Análise Detalhada - {{ ensaio.lote }}{% endblock %}
+{% block title %}Analise Detalhada - {{ ensaio.lote }}{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
@@ -15,7 +15,7 @@
                 </h4>
                 <div class="text-muted small mt-1">
                     <i class="fas fa-layer-group me-1"></i> {{ ensaio.massa_descricao }}
-                    <span class="mx-2">•</span>
+                    <span class="mx-2">&bull;</span>
                     <i class="fas fa-calendar me-1"></i> {{ ensaio.data_hora.strftime('%d/%m/%Y %H:%M') }}
                 </div>
             </div>
@@ -38,45 +38,69 @@
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-header bg-white py-3">
                     <h6 class="fw-bold text-secondary mb-0">
-                        <i class="fas fa-ruler-combined me-2"></i>Parâmetros e Limites
+                        <i class="fas fa-ruler-combined me-2"></i>Parametros e Limites
                     </h6>
                 </div>
                 <div class="card-body p-3">
-                    {% if detalhes and detalhes|length > 0 %}
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped align-middle mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Parâmetro</th>
-                                    <th class="text-end">Mín</th>
-                                    <th class="text-end">Alvo</th>
-                                    <th class="text-end">Máx</th>
-                                    <th class="text-end">Medido</th>
-                                    <th class="text-end">Score</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for param, info in detalhes.items() %}
-                                <tr>
-                                    <td class="fw-bold">{{ param }}</td>
-                                    <td class="text-end">{{ "%.2f"|format(info.min) if info.min is not none else '--' }}</td>
-                                    <td class="text-end">{{ "%.2f"|format(info.alvo) if info.alvo is not none else '--' }}</td>
-                                    <td class="text-end">{{ "%.2f"|format(info.max) if info.max is not none else '--' }}</td>
-                                    <td class="text-end">{{ "%.2f"|format(info.valor_real) if info.valor_real is not none else '--' }}</td>
-                                    <td class="text-end">
-                                        <span class="badge {% if info.nota >= 100 %}bg-success{% elif info.nota > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
-                                            {{ "%.0f"|format(info.nota) }}
-                                        </span>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                        <div class="text-center text-muted py-4">
-                            Nenhum parâmetro configurado ou avaliado para este material.
+                    <div class="small text-muted mb-3">
+                        <div>
+                            <strong>Reometria Alta:</strong>
+                            Ts2={{ "%.2f"|format(ensaio.ts2_alta) if ensaio.ts2_alta is not none else "--" }},
+                            T90={{ "%.2f"|format(ensaio.t90_alta) if ensaio.t90_alta is not none else "--" }},
+                            Reometro={{ ensaio.reometro_alta or "-" }}
                         </div>
+                        <div>
+                            <strong>Reometria Baixa:</strong>
+                            Ts2={{ "%.2f"|format(ensaio.ts2_baixa) if ensaio.ts2_baixa is not none else "--" }},
+                            T90={{ "%.2f"|format(ensaio.t90_baixa) if ensaio.t90_baixa is not none else "--" }},
+                            Reometro={{ ensaio.reometro_baixa or "-" }}
+                        </div>
+                    </div>
+                    {% if detalhes_por_perfil and detalhes_por_perfil|length > 0 %}
+                        {% for bloco in detalhes_por_perfil %}
+                        <div class="mb-3 border rounded p-2">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-bold">{{ bloco.titulo }}</span>
+                                <span class="badge {% if bloco.score >= 85 %}bg-success{% elif bloco.score >= 70 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                    Score {{ "%.0f"|format(bloco.score) }}
+                                </span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Parametro</th>
+                                            <th class="text-end">Min</th>
+                                            <th class="text-end">Alvo</th>
+                                            <th class="text-end">Max</th>
+                                            <th class="text-end">Medido</th>
+                                            <th class="text-end">Score</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for param, info in bloco.params.items() %}
+                                        <tr>
+                                            <td class="fw-bold">{{ param }}</td>
+                                            <td class="text-end">{{ "%.2f"|format(info.min) if info.min is not none else '--' }}</td>
+                                            <td class="text-end">{{ "%.2f"|format(info.alvo) if info.alvo is not none else '--' }}</td>
+                                            <td class="text-end">{{ "%.2f"|format(info.max) if info.max is not none else '--' }}</td>
+                                            <td class="text-end">{{ "%.2f"|format(info.valor_real) if info.valor_real is not none else '--' }}</td>
+                                            <td class="text-end">
+                                                <span class="badge {% if info.nota >= 100 %}bg-success{% elif info.nota > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                    {{ "%.0f"|format(info.nota) }}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        Nenhum parametro configurado ou avaliado para este material.
+                    </div>
                     {% endif %}
                 </div>
             </div>
@@ -91,10 +115,19 @@
                 <div class="card-body position-relative" style="min-height: 450px;">
                     <div class="text-muted small mb-2">
                         IDs exibidos (API): <span id="idsEnsaiosExibidos">{{ ensaio.id_ensaio }}</span>
-                        <span class="mx-2">•</span>
-                        Reometria: <span id="idsEnsaiosReo">-</span>
-                        <span class="mx-2">•</span>
+                        <span class="mx-2">&bull;</span>
+                        Reometria (total): <span id="idsEnsaiosReo">-</span>
+                        <span class="mx-2">&bull;</span>
+                        Alta: <span id="idsEnsaiosReoAlta">-</span>
+                        <span class="mx-1">/</span>
+                        Baixa: <span id="idsEnsaiosReoBaixa">-</span>
+                        <span class="mx-2">&bull;</span>
                         Viscosidade: <span id="idsEnsaiosVisc">-</span>
+                    </div>
+                    <div class="text-muted small mb-2">
+                        Reometro Alta: <span id="reometrosAlta">{{ ensaio.reometro_alta or '-' }}</span>
+                        <span class="mx-2">&bull;</span>
+                        Reometro Baixa: <span id="reometrosBaixa">{{ ensaio.reometro_baixa or '-' }}</span>
                     </div>
 
                     <div id="containerDetailReo" class="mb-4" style="height: 220px; display: none;">
@@ -109,7 +142,7 @@
 
                     <div id="loadingChart" class="position-absolute top-50 start-50 translate-middle text-center">
                         <div class="spinner-border text-primary" role="status"></div>
-                        <div class="mt-2 text-muted small">Carregando gráfico...</div>
+                        <div class="mt-2 text-muted small">Carregando grafico...</div>
                     </div>
                 </div>
             </div>
@@ -189,11 +222,19 @@
 
                 const idsSpan = document.getElementById('idsEnsaiosExibidos');
                 const idsReoSpan = document.getElementById('idsEnsaiosReo');
+                const idsReoAltaSpan = document.getElementById('idsEnsaiosReoAlta');
+                const idsReoBaixaSpan = document.getElementById('idsEnsaiosReoBaixa');
                 const idsViscSpan = document.getElementById('idsEnsaiosVisc');
+                const reometrosAltaSpan = document.getElementById('reometrosAlta');
+                const reometrosBaixaSpan = document.getElementById('reometrosBaixa');
 
                 if (idsSpan) idsSpan.textContent = (data.ids && data.ids.length) ? data.ids.join(', ') : '{{ ensaio.id_ensaio }}';
                 if (idsReoSpan) idsReoSpan.textContent = (data.ids_reometria && data.ids_reometria.length) ? data.ids_reometria.join(', ') : '-';
+                if (idsReoAltaSpan) idsReoAltaSpan.textContent = (data.ids_reometria_alta && data.ids_reometria_alta.length) ? data.ids_reometria_alta.join(', ') : '-';
+                if (idsReoBaixaSpan) idsReoBaixaSpan.textContent = (data.ids_reometria_baixa && data.ids_reometria_baixa.length) ? data.ids_reometria_baixa.join(', ') : '-';
                 if (idsViscSpan) idsViscSpan.textContent = (data.ids_viscosidade && data.ids_viscosidade.length) ? data.ids_viscosidade.join(', ') : '-';
+                if (reometrosAltaSpan) reometrosAltaSpan.textContent = (data.reometros_alta && data.reometros_alta.length) ? data.reometros_alta.join(' / ') : (reometrosAltaSpan.textContent || '-');
+                if (reometrosBaixaSpan) reometrosBaixaSpan.textContent = (data.reometros_baixa && data.reometros_baixa.length) ? data.reometros_baixa.join(' / ') : (reometrosBaixaSpan.textContent || '-');
 
                 const reo = (data.reometria || []);
                 const visc = (data.viscosidade || []);

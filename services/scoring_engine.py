@@ -18,7 +18,7 @@ class ScoringEngine:
         spec_material = self.specs.get(cod_sankhya, {})
 
         # 1. Identificar Perfil e Hidratar dados do formato Flat para Dict
-        perfil_usado, nome_perfil_log = self._selecionar_perfil(spec_material, ensaio)
+        perfil_usado, nome_perfil_log, perfil_chave = self._selecionar_perfil(spec_material, ensaio)
         
         detalhes_log = {
             "meta_perfil": nome_perfil_log,
@@ -28,7 +28,7 @@ class ScoringEngine:
         soma_pontos = 0
         soma_pesos = 0
         
-        # Se não achou perfil (material sem config), retorna 0
+        # Se nÃ£o achou perfil (material sem config), retorna 0
         if not perfil_usado:
             return ScoreResultado(
                 id_ensaio=ensaio.id_ensaio,
@@ -39,17 +39,20 @@ class ScoringEngine:
                 detalhes_log=detalhes_log
             )
 
-        # 2. Iterar parâmetros e calcular notas parciais
+        # 2. Iterar parÃ¢metros e calcular notas parciais
         for nome_param, config in perfil_usado.items():
-            # Ignora configurações de cabeçalho (temp_padrao, tempo_total)
+            # Ignora configuraÃ§Ãµes de cabeÃ§alho (temp_padrao, tempo_total)
             if not isinstance(config, dict):
                 continue
 
-            # Pega o valor real do ensaio de forma dinâmica
+            # Pega o valor real do ensaio de forma dinÃ¢mica
             # Tenta pegar 'Ts2', 'T90'. Se for 'Viscosidade', pega especial.
             key_lookup = nome_param
+            fonte_valor = key_lookup.lower()
             if key_lookup == 'Viscosidade':
                 valor_real = ensaio.viscosidade
+            elif key_lookup in ('Ts2', 'T90'):
+                valor_real, fonte_valor = self._obter_valor_reometria(ensaio, key_lookup, perfil_chave)
             else:
                 valor_real = getattr(ensaio, key_lookup.lower(), None)
 
@@ -58,7 +61,7 @@ class ScoringEngine:
             
             peso = config.get('peso', 10)
             
-            # Se o valor for N/A (não medido), a nota é 0 mas o peso conta (penaliza)
+            # Se o valor for N/A (nÃ£o medido), a nota Ã© 0 mas o peso conta (penaliza)
             # A menos que o peso seja 0.
             soma_pontos += (nota_param * peso)
             soma_pesos += peso
@@ -70,13 +73,14 @@ class ScoringEngine:
                 'max': config.get('max'),
                 'peso': peso,
                 'nota': nota_param,
-                'status': status
+                'status': status,
+                'fonte_valor': fonte_valor,
             }
 
         # 3. Fechar Score Final
         score_final = soma_pontos / soma_pesos if soma_pesos > 0 else 0
         
-        # 4. Determinar Ação
+        # 4. Determinar AÃ§Ã£o
         acao_final, aprovado = self._determinar_acao(score_final, ensaio)
 
         return ScoreResultado(
@@ -90,126 +94,140 @@ class ScoringEngine:
 
     def _selecionar_perfil(self, specs_gerais, ensaio):
         """
-        Lógica robusta para extrair o perfil correto do JSON achatado (Legacy).
+        Logica robusta para extrair o perfil correto do JSON achatado (Legacy).
         Ex: Transforma {'alta_cinza_Ts2': {...}} em {'Ts2': {...}}
         """
         if not specs_gerais:
-            return {}, "N/A"
+            return {}, "N/A", None
 
         temp = ensaio.temp_plato or 0
-        
-        # Definição dos prefixos baseada na temperatura e equipamento
         prefixo_alvo = None
         nome_perfil = "Indefinido"
+        perfil_chave = None
 
         if temp >= 170:
-            # Lógica para Alta Temperatura
-            # Tenta detectar se é Cinza ou Preto (se tiver essa info no ensaio, 
-            # mas o ensaio consolidado não guarda 'equipamento' explicitamente, 
-            # então tentamos a sorte ou padrão)
-            
-            # Ordem de preferência: 
-            # 1. Se tiver configs explícitas de 'alta_cinza' (Padrão atual)
-            # 2. Se tiver 'alta_preto'
-            # 3. Se tiver 'alta' (Legacy puro)
-            
             keys = specs_gerais.keys()
-            tem_cinza = any(k.startswith('alta_cinza_') for k in keys)
-            tem_preto = any(k.startswith('alta_preto_') for k in keys)
-            tem_alta_legacy = any(k.startswith('alta_') and not '_' in k.replace('alta_', '') for k in keys)
+            tem_cinza = any(k.startswith("alta_cinza_") for k in keys)
+            tem_preto = any(k.startswith("alta_preto_") for k in keys)
+            cor_reometro = self._inferir_cor_reometro(getattr(ensaio, "reometro_alta", None))
 
-            if tem_cinza:
-                prefixo_alvo = 'alta_cinza_'
+            if tem_cinza and tem_preto:
+                if cor_reometro == "PRETO":
+                    prefixo_alvo = "alta_preto_"
+                    nome_perfil = "Alta (Preto)"
+                    perfil_chave = "alta_preto"
+                else:
+                    prefixo_alvo = "alta_cinza_"
+                    nome_perfil = "Alta (Cinza)"
+                    perfil_chave = "alta_cinza"
+            elif tem_cinza:
+                prefixo_alvo = "alta_cinza_"
                 nome_perfil = "Alta (Cinza)"
+                perfil_chave = "alta_cinza"
             elif tem_preto:
-                prefixo_alvo = 'alta_preto_'
+                prefixo_alvo = "alta_preto_"
                 nome_perfil = "Alta (Preto)"
+                perfil_chave = "alta_preto"
             else:
-                prefixo_alvo = 'alta_'
-                nome_perfil = "Alta (Genérico)"
-        
+                prefixo_alvo = "alta_"
+                nome_perfil = "Alta (Generico)"
+                perfil_chave = "alta"
         elif temp >= 100:
-            # Baixa Temperatura
-            prefixo_alvo = 'baixa_'
+            prefixo_alvo = "baixa_"
             nome_perfil = "Baixa"
-        
+            perfil_chave = "baixa"
         else:
-            # Viscosidade pura ou temperatura muito baixa
-            # Geralmente usa perfil de baixa ou viscosidade isolada
-            prefixo_alvo = 'baixa_'
+            prefixo_alvo = "baixa_"
             nome_perfil = "Viscosidade/Baixa"
+            perfil_chave = "baixa"
 
-        # Monta o dicionário limpo
         perfil_montado = {}
-        
         for key, valor in specs_gerais.items():
-            # Verifica se a chave começa com o prefixo
             if key.startswith(prefixo_alvo):
-                # Remove o prefixo para ficar só o nome do parametro (Ex: "Ts2")
                 nome_limpo = key.replace(prefixo_alvo, "")
                 perfil_montado[nome_limpo] = valor
-            
-            # Também aceita parâmetros globais sem prefixo se não colidirem
-            elif key in ['Ts2', 'T90', 'Viscosidade'] and key not in perfil_montado:
+            elif key in ["Ts2", "T90", "Viscosidade"] and key not in perfil_montado:
                 perfil_montado[key] = valor
 
-        return perfil_montado, nome_perfil
+        return perfil_montado, nome_perfil, perfil_chave
+
+    def _inferir_cor_reometro(self, rotulo):
+        txt = str(rotulo or "").upper()
+        if not txt:
+            return None
+        if "PRETO" in txt:
+            return "PRETO"
+        if "BRANCO" in txt or "CINZA" in txt:
+            return "BRANCO"
+        return None
+
+    def _obter_valor_reometria(self, ensaio, nome_param, perfil_chave):
+        base = str(nome_param or "").strip().lower()
+        if not base:
+            return None, None
+
+        if perfil_chave == "baixa":
+            candidatos = [f"{base}_baixa", f"{base}_alta", base]
+        elif perfil_chave in ("alta_cinza", "alta_preto", "alta"):
+            candidatos = [f"{base}_alta", f"{base}_baixa", base]
+        else:
+            candidatos = [base, f"{base}_alta", f"{base}_baixa"]
+
+        for attr in candidatos:
+            val = getattr(ensaio, attr, None)
+            if val is not None:
+                return val, attr
+        return None, candidatos[0]
 
     def _calcular_nota_parametro(self, valor, config):
-        if valor is None: return 0, "N/A"
-        
+        if valor is None:
+            return 0, "N/A"
+
         # Garante float
         try:
             val = float(valor)
-        except:
+        except Exception:
             return 0, "ERR"
 
         alvo = float(config.get('alvo', 0))
         minimo = float(config.get('min', 0))
         maximo = float(config.get('max', 0))
-        
-        # Se min e max forem 0, provavelmente não está configurado corretamente
+
+        # Sem limites configurados = sem especificacao valida.
         if minimo == 0 and maximo == 0:
             return 0, "NO_SPECS"
 
-        # Fora dos limites = Nota 0
-        if val < minimo or val > maximo:
-            return 0, "OUT"
-            
-        # Cálculo linear de proximidade do alvo
+        fora_limite = (val < minimo or val > maximo)
+
+        # Calculo linear de proximidade ao alvo (mesma curva dentro e fora da faixa).
         if val >= alvo:
             distancia = val - alvo
             range_total = maximo - alvo
         else:
             distancia = alvo - val
             range_total = alvo - minimo
-            
-        if range_total <= 0: 
-            # Se alvo == min ou alvo == max, e valor está dentro, é 100
-            return 100, "OK"
-        
-        # Penalidade: Quanto mais longe do alvo, menor a nota
-        # Regra: Se estiver no limite (min ou max), nota é 0? 
-        # Ou regra proporcional?
-        # Usando regra proporcional padrão:
-        # Se desvio = range_total (está no limite), perde 30% a 100% dependendo da rigidez.
-        # Vamos usar a lógica linear simples: No limite = Nota 70 (Aceitável) ou Nota 0?
-        # O código original usava: score_item = 100 - (percentual_desvio * 30) -> No limite dava 70.
-        
+
+        if range_total <= 0:
+            # Faixa util degenerada: somente o alvo pontua.
+            if distancia == 0:
+                return 100, "OK"
+            return 0, ("OUT" if fora_limite else "NO_SPECS")
+
         percentual_desvio = distancia / range_total
-        nota = 100 - (percentual_desvio * 30) # Mantendo lógica do legado (aprovado no limite)
-        
-        return max(0, min(100, nota)), "OK"
+        nota = 100 - (percentual_desvio * 30)
+        status = "OUT" if fora_limite else "OK"
+        return max(0, min(100, nota)), status
 
     def _determinar_acao(self, score, ensaio):
-        # Itera sobre as regras da versão
-        visc_real = (ensaio.origem_viscosidade != 'Média' and ensaio.origem_viscosidade != 'N/A')
+        # Itera sobre as regras da versao.
+        origem_visc = str(getattr(ensaio, 'origem_viscosidade', '') or '').strip().lower()
+        visc_real = origem_visc not in {'media', 'média', 'n/a', 'na', ''}
         
         for regra in self.regras_acao:
             if score >= regra['min_score']:
-                # Verifica condição extra (viscosidade)
+                # Verifica condiÃ§Ã£o extra (viscosidade)
                 if regra.get('exige_visc_real', False) and not visc_real:
-                    continue # Pula regra se exigir visc real e não tiver
+                    continue # Pula regra se exigir visc real e nÃ£o tiver
                 
                 # Regra aceita!
                 is_aprovado = regra.get('cor') == 'success'

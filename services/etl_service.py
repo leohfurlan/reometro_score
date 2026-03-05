@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 from difflib import get_close_matches
 
-# --- NOVAS IMPORTAÃ‡Ã•ES (ARQUITETURA V13) ---
+# --- NOVAS IMPORTAÃƒâ€¡Ãƒâ€¢ES (ARQUITETURA V13) ---
 from models.usuario import db
 from models.consolidado import EnsaioConsolidado
 from models.score_versioning import ScoreVersao, ScoreResultado
@@ -16,18 +16,23 @@ from services.scoring_engine import ScoringEngine
 from connection import connect_to_database
 from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
-from services.config_manager import aplicar_configuracoes_no_catalogo
+from services.config_manager import (
+    aplicar_configuracoes_no_catalogo,
+    carregar_configuracoes,
+    carregar_regras_acao,
+)
 from services.learning_service import carregar_aprendizado_mapa
 
-# --- VARIÃVEIS DE REFERÃŠNCIA (CACHE DO MÃ“DULO) ---
+# --- VARIÃƒÂVEIS DE REFERÃƒÅ NCIA (CACHE DO MÃƒâ€œDULO) ---
 _CATALOGO_CODIGO = {}
 _CATALOGO_NOME = {}
 _MAPA_LOTES_PLANILHA = {}
 _MAPA_GRUPOS = {} 
 _DE_PARA_CORRECOES = {}
 _MAPA_APRENDIZADO = {}
+_STATUS_VERSAO_ATIVA = {"ACTIVE", "ATIVA", "ATIVO"}
 
-# --- FUNÃ‡Ã•ES AUXILIARES ---
+# --- FUNÃƒâ€¡Ãƒâ€¢ES AUXILIARES ---
 
 def safe_float(val):
     if val is None: return None
@@ -42,10 +47,120 @@ def chunk_list(lista, tamanho):
     for i in range(0, len(lista), tamanho):
         yield lista[i:i + tamanho]
 
+
+def _rotulo_reometro_por_descricao(descricao_grupo):
+    txt = str(descricao_grupo or "").strip().upper()
+    if not txt:
+        return None
+    if "PRETO" in txt:
+        return "PRETO"
+    if "BRANCO" in txt or "CINZA" in txt:
+        return "BRANCO"
+    return txt
+
+
+def _faixa_reometria(v_temp, descricao_grupo):
+    temp = safe_float(v_temp)
+    if temp is not None:
+        return "alta" if temp >= 175 else "baixa"
+
+    desc = str(descricao_grupo or "").upper()
+    if "ALTA" in desc or "HIGH" in desc:
+        return "alta"
+    if "BAIXA" in desc or "LOW" in desc:
+        return "baixa"
+    return "alta"
+
+
+def _normalizar_status_versao(status):
+    return str(status or "").strip().upper()
+
+
+def _buscar_versao_ativa():
+    """
+    Localiza versao ativa aceitando aliases legados de status.
+    """
+    versao = ScoreVersao.query.filter_by(status='ACTIVE').order_by(ScoreVersao.id.desc()).first()
+    if versao:
+        return versao
+
+    candidatas = ScoreVersao.query.order_by(ScoreVersao.id.desc()).all()
+    for cand in candidatas:
+        if _normalizar_status_versao(cand.status) in _STATUS_VERSAO_ATIVA:
+            # Corrige o status para o padrao sem impactar o snapshot.
+            if cand.status != "ACTIVE":
+                cand.status = "ACTIVE"
+                if not cand.ativado_em:
+                    cand.ativado_em = datetime.now()
+                db.session.commit()
+            return cand
+    return None
+
+
+def _criar_versao_ativa_bootstrap():
+    """
+    Cria uma versao ACTIVE a partir dos arquivos JSON atuais quando o banco ainda
+    nao possui nenhuma versao de score.
+    """
+    specs = carregar_configuracoes()
+    regras = carregar_regras_acao()
+
+    if not isinstance(specs, dict):
+        specs = {}
+    if not isinstance(regras, list):
+        regras = []
+
+    agora = datetime.now()
+    snapshot = {
+        "specs": specs,
+        "regras": regras,
+        "meta": {
+            "descricao": "Bootstrap automatico por ausencia de versao ativa",
+            "criado_em": agora.isoformat(timespec="seconds"),
+        },
+    }
+
+    # Garante unicidade logica de ACTIVE.
+    for versao in ScoreVersao.query.all():
+        if _normalizar_status_versao(versao.status) in _STATUS_VERSAO_ATIVA:
+            versao.status = "ARCHIVED"
+
+    nome = f"AutoBootstrap {agora.strftime('%Y-%m-%d %H:%M')}"
+    nova_versao = ScoreVersao(
+        nome=nome,
+        status="ACTIVE",
+        config_snapshot=snapshot,
+        ativado_em=agora,
+    )
+    db.session.add(nova_versao)
+    db.session.commit()
+    return nova_versao
+
+
+def _obter_engine_ativa():
+    """
+    Retorna a engine pronta para calculo, bootstrapando uma versao ACTIVE quando
+    necessario.
+    """
+    versao_ativa = _buscar_versao_ativa()
+    if versao_ativa:
+        print(f"   Engine ativada: {versao_ativa.nome}")
+        return ScoringEngine(versao_ativa)
+
+    print("   Nenhuma versao ACTIVE encontrada. Criando bootstrap automatico...")
+    try:
+        versao_bootstrap = _criar_versao_ativa_bootstrap()
+        print(f"   Engine bootstrap criada: {versao_bootstrap.nome}")
+        return ScoringEngine(versao_bootstrap)
+    except Exception as e:
+        db.session.rollback()
+        print(f"   Falha ao criar versao bootstrap: {e}")
+        return None
+
 def _obter_dados_lote_planilha(chave_lote):
     """
-    Resolve lote no dicionÃ¡rio da planilha com compatibilidade para chaves antigas
-    no formato numÃ©rico com '.0' (ex: '10091.0').
+    Resolve lote no dicionÃƒÂ¡rio da planilha com compatibilidade para chaves antigas
+    no formato numÃƒÂ©rico com '.0' (ex: '10091.0').
     """
     if not chave_lote:
         return None
@@ -68,9 +183,9 @@ def _obter_dados_lote_planilha(chave_lote):
 
 def _gerar_candidatos_numericos(token_num):
     """
-    Gera candidatos de lote a partir de um bloco numÃ©rico.
-    Quando detecta sufixo de zeros longos (ruÃ­do tÃ­pico do reÃ´metro),
-    tenta versÃµes progressivamente aparadas.
+    Gera candidatos de lote a partir de um bloco numÃƒÂ©rico.
+    Quando detecta sufixo de zeros longos (ruÃƒÂ­do tÃƒÂ­pico do reÃƒÂ´metro),
+    tenta versÃƒÂµes progressivamente aparadas.
     """
     bruto = re.sub(r'\D', '', str(token_num or ''))
     if not bruto:
@@ -199,11 +314,11 @@ def _score_lote_limpo(candidato, origem):
 
 def carregar_referencias_estaticas():
     """
-    Carrega mapas de configuraÃ§Ã£o, incluindo o Aprendizado Manual.
+    Carrega mapas de configuraÃƒÂ§ÃƒÂ£o, incluindo o Aprendizado Manual.
     """
     global _CATALOGO_CODIGO, _CATALOGO_NOME, _MAPA_LOTES_PLANILHA, _MAPA_GRUPOS, _DE_PARA_CORRECOES, _MAPA_APRENDIZADO
     
-    print("---  ETL: Carregando referÃªncias estÃ¡ticas... ---")
+    print("---  ETL: Carregando referÃƒÂªncias estÃƒÂ¡ticas... ---")
     
     try:
         _CATALOGO_CODIGO, _CATALOGO_NOME = importar_catalogo_sankhya()
@@ -213,7 +328,7 @@ def carregar_referencias_estaticas():
 
     _MAPA_LOTES_PLANILHA = carregar_dicionario_lotes()
     
-    print("  > Carregando Grupos de MÃ¡quinas do SQL Server...")
+    print("  > Carregando Grupos de MÃƒÂ¡quinas do SQL Server...")
     _MAPA_GRUPOS = {}
     conn = None
     try:
@@ -244,7 +359,7 @@ def carregar_referencias_estaticas():
         except: pass
 
     _MAPA_APRENDIZADO = carregar_aprendizado_mapa()
-    print(f"MemÃ³ria carregada (SQLAlchemy): {len(_MAPA_APRENDIZADO)} correÃ§Ãµes manuais.")
+    print(f"MemÃƒÂ³ria carregada (SQLAlchemy): {len(_MAPA_APRENDIZADO)} correÃƒÂ§ÃƒÂµes manuais.")
 
 
 def recarregar_aprendizado_memoria():
@@ -299,7 +414,7 @@ def match_nome_inteligente(texto_bruto):
     if matches: return _CATALOGO_NOME[matches[0]]
     return None
 
-# --- LÃ“GICA PRINCIPAL (ETL V2) ---
+# --- LÃƒâ€œGICA PRINCIPAL (ETL V2) ---
 
 def processar_carga_dados(data_corte='2025-07-01'):
     if not _CATALOGO_CODIGO:
@@ -308,16 +423,12 @@ def processar_carga_dados(data_corte='2025-07-01'):
         qtd = recarregar_aprendizado_memoria()
         print(f"Memoria de aprendizado atualizada para ETL: {qtd} correcoes.")
 
-    print(f"---  ETL V2: Iniciando carga e cÃ¡lculo de score... ---")
+    print(f"---  ETL V2: Iniciando carga e cÃƒÂ¡lculo de score... ---")
     start_time = datetime.now()
     
-    versao_ativa = ScoreVersao.query.filter_by(status='ACTIVE').first()
-    engine = None
-    if versao_ativa:
-        print(f"   Engine ativada: {versao_ativa.nome}")
-        engine = ScoringEngine(versao_ativa)
-    else:
-        print("   Nenhuma versÃ£o de score ATIVA encontrada. Scores serÃ£o 0.")
+    engine = _obter_engine_ativa()
+    if engine is None:
+        print("   Nenhuma versao de score disponivel. Scores serao 0.")
 
     conn = None
     resultados_brutos = []
@@ -338,7 +449,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
         colunas = [c[0] for c in cursor.description]
         resultados_brutos = [dict(zip(colunas, row)) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"Erro CrÃ­tico no SQL: {e}")
+        print(f"Erro CrÃƒÂ­tico no SQL: {e}")
         return None
     finally:
         if conn: conn.close()
@@ -403,8 +514,12 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 'material_original': str(amostra).strip(),
                 'data': row['DATA'],
                 'ts2': None, 't90': None, 'visc': None, 'temps': [],
+                'ts2_alta': None, 't90_alta': None, 'ts2_baixa': None, 't90_baixa': None,
+                'reometro_alta': None, 'reometro_baixa': None,
                 'ids_reo': [], 'ids_visc': [],
+                'ids_reo_alta': [], 'ids_reo_baixa': [],
                 'temps_reo': [], 'temps_visc': [],
+                'temps_reo_alta': [], 'temps_reo_baixa': [],
                 'metodo_id': metodo_id,
                 'equip_planilha': equip_planilha
             }
@@ -423,7 +538,9 @@ def processar_carga_dados(data_corte='2025-07-01'):
         v_temp = safe_float(row['TEMP_PLATO_INF'])
 
         # Classifica o tipo do ensaio (Reometria vs Viscosidade) para persistir temps/ids corretamente.
-        tipo_maquina = _MAPA_GRUPOS.get(grupo, {}).get('tipo', 'INDEFINIDO')
+        dados_grupo = _MAPA_GRUPOS.get(grupo, {})
+        tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
+        desc_grupo = dados_grupo.get('descricao')
         is_visc = False
         if tipo_maquina == 'VISCOSIMETRO':
             is_visc = True
@@ -437,21 +554,54 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 is_visc = False
             else:
                 is_visc = bool(v_visc and not (v_ts2 or v_t90))
-        
-        if v_ts2: reg['ts2'] = v_ts2
-        if v_t90: reg['t90'] = v_t90
-        if v_visc: reg['visc'] = v_visc
+
+        faixa_reo = None
+        if not is_visc:
+            faixa_reo = _faixa_reometria(v_temp, desc_grupo)
+            rotulo_reometro = _rotulo_reometro_por_descricao(desc_grupo)
+
+            if v_ts2 and reg['ts2'] is None:
+                reg['ts2'] = v_ts2
+            if v_t90 and reg['t90'] is None:
+                reg['t90'] = v_t90
+
+            if faixa_reo == 'alta':
+                if v_ts2 and reg['ts2_alta'] is None:
+                    reg['ts2_alta'] = v_ts2
+                if v_t90 and reg['t90_alta'] is None:
+                    reg['t90_alta'] = v_t90
+                if rotulo_reometro and not reg['reometro_alta']:
+                    reg['reometro_alta'] = rotulo_reometro
+            else:
+                if v_ts2 and reg['ts2_baixa'] is None:
+                    reg['ts2_baixa'] = v_ts2
+                if v_t90 and reg['t90_baixa'] is None:
+                    reg['t90_baixa'] = v_t90
+                if rotulo_reometro and not reg['reometro_baixa']:
+                    reg['reometro_baixa'] = rotulo_reometro
+        else:
+            if v_visc and reg['visc'] is None:
+                reg['visc'] = v_visc
+
         if v_temp:
             reg['temps'].append(v_temp)
             if is_visc:
                 reg['temps_visc'].append(v_temp)
             else:
                 reg['temps_reo'].append(v_temp)
+                if faixa_reo == 'alta':
+                    reg['temps_reo_alta'].append(v_temp)
+                else:
+                    reg['temps_reo_baixa'].append(v_temp)
 
         if is_visc:
             reg['ids_visc'].append(cod_ensaio)
         else:
             reg['ids_reo'].append(cod_ensaio)
+            if faixa_reo == 'alta':
+                reg['ids_reo_alta'].append(cod_ensaio)
+            else:
+                reg['ids_reo_baixa'].append(cod_ensaio)
 
     acumuladores_visc = {}
     for dados in dados_agrupados.values():
@@ -473,18 +623,33 @@ def processar_carga_dados(data_corte='2025-07-01'):
         origem_visc = "Real" if valor_visc else "N/A"
         if not valor_visc and dados['lote_visivel'] in medias_visc:
             valor_visc = medias_visc[dados['lote_visivel']]
-            origem_visc = "MÃ©dia"
+            origem_visc = "Media"
 
         ids_merge = sorted({int(i) for i in (dados['ids_ensaio'] or []) if i is not None})
         temps_merge = sorted({float(t) for t in (dados['temps'] or []) if t}, reverse=True)
 
         ids_reo = sorted({int(i) for i in (dados.get('ids_reo') or []) if i is not None})
         ids_visc = sorted({int(i) for i in (dados.get('ids_visc') or []) if i is not None})
+        ids_reo_alta = sorted({int(i) for i in (dados.get('ids_reo_alta') or []) if i is not None})
+        ids_reo_baixa = sorted({int(i) for i in (dados.get('ids_reo_baixa') or []) if i is not None})
 
         temps_reo = sorted({float(t) for t in (dados.get('temps_reo') or []) if t}, reverse=True)
         temps_visc = sorted({float(t) for t in (dados.get('temps_visc') or []) if t}, reverse=True)
+        temps_reo_alta = sorted({float(t) for t in (dados.get('temps_reo_alta') or []) if t}, reverse=True)
+        temps_reo_baixa = sorted({float(t) for t in (dados.get('temps_reo_baixa') or []) if t}, reverse=True)
 
         temp_plato = (temps_reo[0] if temps_reo else (temps_visc[0] if temps_visc else (temps_merge[0] if temps_merge else 0)))
+        usar_alta = bool(temp_plato and temp_plato >= 175)
+        ts2_final = (
+            dados['ts2_alta'] if usar_alta else dados['ts2_baixa']
+        ) or (
+            dados['ts2_baixa'] if usar_alta else dados['ts2_alta']
+        ) or dados['ts2']
+        t90_final = (
+            dados['t90_alta'] if usar_alta else dados['t90_baixa']
+        ) or (
+            dados['t90_baixa'] if usar_alta else dados['t90_alta']
+        ) or dados['t90']
 
         novo_ensaio = EnsaioConsolidado(
             id_ensaio=dados['ids_ensaio'][0],
@@ -494,8 +659,14 @@ def processar_carga_dados(data_corte='2025-07-01'):
             cod_sankhya=dados['massa'].cod_sankhya,
             massa_descricao=dados['massa'].descricao,
             temp_plato=temp_plato,
-            ts2=dados['ts2'],
-            t90=dados['t90'],
+            ts2=ts2_final,
+            t90=t90_final,
+            ts2_alta=dados['ts2_alta'],
+            t90_alta=dados['t90_alta'],
+            ts2_baixa=dados['ts2_baixa'],
+            t90_baixa=dados['t90_baixa'],
+            reometro_alta=dados.get('reometro_alta'),
+            reometro_baixa=dados.get('reometro_baixa'),
             viscosidade=valor_visc,
             origem_viscosidade=origem_visc,
             ids_agrupados=json.dumps(ids_merge),
@@ -522,7 +693,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
         lista_consolidada.append(novo_ensaio)
 
-    # 6. PersistÃªncia com Chunking (CorreÃ§Ã£o do Erro)
+    # 6. PersistÃƒÂªncia com Chunking (CorreÃƒÂ§ÃƒÂ£o do Erro)
     try:
         print(f"   Salvando {len(lista_consolidada)} registros consolidados...")
         
@@ -531,16 +702,16 @@ def processar_carga_dados(data_corte='2025-07-01'):
         for e in lista_consolidada:
             db.session.merge(e)
             count += 1
-            # Commit parcial para aliviar memÃ³ria
+            # Commit parcial para aliviar memÃƒÂ³ria
             if count % 1000 == 0:
                 db.session.commit()
         db.session.commit() # Commit final do merge
         
-        # B. HistÃ³rico de Score (Com Chunking no Delete)
+        # B. HistÃƒÂ³rico de Score (Com Chunking no Delete)
         if engine and ids_ensaios_processados:
-            print(f"   Limpando histÃ³rico anterior...")
+            print(f"   Limpando histÃƒÂ³rico anterior...")
             
-            # Limite seguro para SQLite (999 Ã© o padrÃ£o antigo, 900 Ã© seguro)
+            # Limite seguro para SQLite (999 ÃƒÂ© o padrÃƒÂ£o antigo, 900 ÃƒÂ© seguro)
             BATCH_SIZE = 900 
             
             # Deleta em lotes
@@ -550,7 +721,7 @@ def processar_carga_dados(data_corte='2025-07-01'):
                     ScoreResultado.id_ensaio.in_(lote_ids)
                 ).delete(synchronize_session=False)
             
-            db.session.commit() # Confirma deleÃ§Ãµes
+            db.session.commit() # Confirma deleÃƒÂ§ÃƒÂµes
             
             print(f"   Inserindo novos resultados...")
             # Insere em lotes
@@ -570,4 +741,3 @@ def processar_carga_dados(data_corte='2025-07-01'):
 
 def get_catalogo_codigo():
     return _CATALOGO_CODIGO
-

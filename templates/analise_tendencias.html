@@ -336,7 +336,7 @@
             name: 'Aprovado',
             x: aprovados.map(p => p.data_hora),
             y: aprovados.map(p => p.valor),
-            text: aprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
+            text: aprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Batch: ${p.batch || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
             hovertemplate: '%{text}<extra></extra>',
             marker: { color: '#198754', size: 8, line: { width: 0.5, color: '#0f5132' } }
         };
@@ -347,7 +347,7 @@
             name: 'Reprovado',
             x: reprovados.map(p => p.data_hora),
             y: reprovados.map(p => p.valor),
-            text: reprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
+            text: reprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Batch: ${p.batch || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
             hovertemplate: '%{text}<extra></extra>',
             marker: { color: '#dc3545', size: 9, line: { width: 0.6, color: '#842029' } }
         };
