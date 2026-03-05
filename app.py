@@ -5,7 +5,8 @@ from models.usuario import db, Usuario
 from models.consolidado import EnsaioConsolidado # Novo Modelo
 from cache_manager import CacheManager
 
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 import math
 import os
 import statistics 
@@ -827,6 +828,301 @@ def controle_qualidade():
         
     return render_template('controle_qualidade.html', **context)
 
+
+@app.route('/analise-tendencias')
+@login_required
+def analise_tendencias():
+    massas = _listar_massas_tendencia()
+    parametros = _listar_parametros_tendencia()
+
+    cod_default = request.args.get('cod_sankhya', type=int)
+    if cod_default is None and massas:
+        cod_default = massas[0]['cod_sankhya']
+
+    param_default = request.args.get('parametro', '')
+    if param_default:
+        param_default = _normalizar_metadados_parametro(param_default).get('key')
+    elif parametros:
+        param_default = parametros[0]['key']
+    else:
+        param_default = 't90_alta'
+
+    periodo_default = str(request.args.get('periodo', '3m') or '3m').strip().lower()
+    if periodo_default not in PERIODOS_TENDENCIA_DIAS:
+        periodo_default = '3m'
+
+    return render_template(
+        'analise_tendencias.html',
+        massas=massas,
+        parametros=parametros,
+        cod_sankhya_default=cod_default,
+        parametro_default=param_default,
+        periodo_default=periodo_default,
+    )
+
+
+@app.route('/api/estatisticas/massa/<int:cod_sankhya>/<string:parametro>')
+@login_required
+def api_estatisticas_massa(cod_sankhya, parametro):
+    try:
+        meta_param = _normalizar_metadados_parametro(parametro)
+        periodo, data_inicio = _periodo_para_data_inicio(request.args.get('periodo', '3m'))
+        temperatura_raw = str(request.args.get('temperatura', 'auto') or 'auto').strip().lower()
+
+        agrupamento = str(request.args.get('agrupar', 'semana') or 'semana').strip().lower()
+        if agrupamento not in ('semana', 'mes'):
+            agrupamento = 'semana'
+
+        query = EnsaioConsolidado.query.filter(EnsaioConsolidado.cod_sankhya == cod_sankhya)
+        if data_inicio is not None:
+            query = query.filter(EnsaioConsolidado.data_hora >= data_inicio)
+
+        ensaios = query.order_by(EnsaioConsolidado.data_hora.asc()).all()
+
+        massa_desc = None
+        if ensaios:
+            massa_desc = str(getattr(ensaios[0], 'massa_descricao', '') or '').strip()
+        if not massa_desc:
+            massa_desc = f"Massa {cod_sankhya}"
+
+        dados_brutos = []
+        limites_freq_total = Counter()
+        temperaturas_freq = Counter()
+
+        for ensaio in ensaios:
+            faixa_temp = meta_param.get('faixa_temp')
+            if faixa_temp and _faixa_temperatura_ensaio(ensaio) != faixa_temp:
+                continue
+
+            valor = _valor_medido_por_parametro(ensaio, meta_param)
+            data_hora = getattr(ensaio, 'data_hora', None)
+            if valor is None or data_hora is None:
+                continue
+
+            temperatura_analise = _temperatura_analise_ensaio(ensaio, meta_param)
+            temperatura_key = int(round(temperatura_analise)) if temperatura_analise is not None else None
+            if temperatura_key is not None:
+                temperaturas_freq[temperatura_key] += 1
+
+            is_aprovado = _ensaio_aprovado(ensaio)
+            status_item = 'APROVADO' if is_aprovado else 'REPROVADO'
+            cor_item = '#198754' if is_aprovado else '#dc3545'
+
+            lie, lse, alvo, perfil_nome, nome_spec = _limites_parametro_para_ensaio(ensaio, meta_param)
+            if lie is not None or lse is not None or alvo is not None:
+                limites_freq_total[(lie, lse, alvo)] += 1
+
+            dados_brutos.append({
+                'ensaio_obj': ensaio,
+                'id_ensaio': int(ensaio.id_ensaio),
+                'data_iso': data_hora.isoformat(),
+                'data_hora': data_hora,
+                'valor': valor,
+                'status': status_item,
+                'aprovado': is_aprovado,
+                'cor': cor_item,
+                'lote': str(getattr(ensaio, 'lote', '') or ''),
+                'batch': str(getattr(ensaio, 'batch', '') or ''),
+                'faixa_temperatura': _faixa_temperatura_ensaio(ensaio),
+                'temperatura_analise': temperatura_analise,
+                'temperatura_key': temperatura_key,
+                'perfil': perfil_nome,
+                'parametro_spec': nome_spec,
+                'lie': lie,
+                'lse': lse,
+                'alvo': alvo,
+            })
+
+        temperaturas_disponiveis = sorted(temperaturas_freq.keys())
+        temperatura_aplicada = None
+        temperatura_modo = 'sem_temperatura'
+        aviso_temperatura = ''
+
+        if temperaturas_disponiveis:
+            temperatura_modo = 'auto'
+            if temperatura_raw not in ('', 'auto', 'mais_frequente'):
+                temp_manual = _parse_float_locale(temperatura_raw, default=None)
+                if temp_manual is not None:
+                    temp_manual_key = int(round(temp_manual))
+                    if temp_manual_key in temperaturas_freq:
+                        temperatura_aplicada = temp_manual_key
+                        temperatura_modo = 'manual'
+                    else:
+                        aviso_temperatura = (
+                            f"Temperatura {temp_manual_key} C nao encontrada para os filtros atuais. "
+                            "Aplicado valor automatico."
+                        )
+                else:
+                    aviso_temperatura = "Temperatura invalida informada. Aplicado valor automatico."
+
+            if temperatura_aplicada is None:
+                temperatura_aplicada = temperaturas_freq.most_common(1)[0][0]
+
+        dados_filtrados = [
+            item for item in dados_brutos
+            if temperatura_aplicada is None or item['temperatura_key'] == temperatura_aplicada
+        ]
+
+        datas = []
+        valores = []
+        status = []
+        cores = []
+        pontos = []
+        boxplot_map = {}
+        pareto = Counter()
+        limites_freq = Counter()
+
+        aprovados = 0
+        reprovados = 0
+
+        for item in dados_filtrados:
+            data_hora = item['data_hora']
+
+            if item['aprovado']:
+                aprovados += 1
+            else:
+                reprovados += 1
+                pareto.update(_motivos_reprovacao_ensaio(item['ensaio_obj']))
+
+            lie = item.get('lie')
+            lse = item.get('lse')
+            alvo = item.get('alvo')
+            if lie is not None or lse is not None or alvo is not None:
+                limites_freq[(lie, lse, alvo)] += 1
+
+            datas.append(item['data_iso'])
+            valores.append(item['valor'])
+            status.append(item['status'])
+            cores.append(item['cor'])
+
+            grupo = _nome_grupo_boxplot(data_hora, agrupamento=agrupamento)
+            if grupo:
+                boxplot_map.setdefault(grupo, []).append(item['valor'])
+
+            pontos.append({
+                'id_ensaio': item['id_ensaio'],
+                'data_hora': item['data_iso'],
+                'valor': item['valor'],
+                'status': item['status'],
+                'aprovado': item['aprovado'],
+                'lote': item['lote'],
+                'batch': item['batch'],
+                'faixa_temperatura': item['faixa_temperatura'],
+                'temperatura_analise': item['temperatura_analise'],
+                'perfil': item['perfil'],
+                'parametro_spec': item['parametro_spec'],
+            })
+
+        if limites_freq:
+            (lie_final, lse_final, alvo_final), _ = limites_freq.most_common(1)[0]
+        elif limites_freq_total:
+            (lie_final, lse_final, alvo_final), _ = limites_freq_total.most_common(1)[0]
+        else:
+            lie_final, lse_final, alvo_final, _, _ = _limites_parametro_na_config(cod_sankhya, meta_param)
+
+        qtd_valores = len(valores)
+        media_valores = statistics.mean(valores) if qtd_valores else None
+        desvio_padrao = statistics.stdev(valores) if qtd_valores >= 2 else None
+
+        cp = None
+        cpk = None
+        cpl = None
+        cpu = None
+        if desvio_padrao and desvio_padrao > 0:
+            if lie_final is not None and lse_final is not None and lse_final > lie_final:
+                cp = (lse_final - lie_final) / (6 * desvio_padrao)
+            if lie_final is not None and media_valores is not None:
+                cpl = (media_valores - lie_final) / (3 * desvio_padrao)
+            if lse_final is not None and media_valores is not None:
+                cpu = (lse_final - media_valores) / (3 * desvio_padrao)
+
+            if cpl is not None and cpu is not None:
+                cpk = min(cpl, cpu)
+            elif cpl is not None:
+                cpk = cpl
+            elif cpu is not None:
+                cpk = cpu
+
+        boxplot = [
+            {'grupo': grupo, 'valores': boxplot_map[grupo]}
+            for grupo in sorted(boxplot_map.keys())
+        ]
+
+        pareto_lista = [
+            {'motivo': motivo, 'quantidade': quantidade}
+            for motivo, quantidade in pareto.most_common(10)
+        ]
+
+        mensagens = []
+        if aviso_temperatura:
+            mensagens.append(aviso_temperatura)
+        if not pontos:
+            mensagens.append(
+                f"Sem dados de {meta_param.get('label')} para a massa {cod_sankhya} "
+                f"no periodo selecionado."
+            )
+        mensagem = " ".join(mensagens)
+
+        return jsonify({
+            'massa': {
+                'cod_sankhya': cod_sankhya,
+                'descricao': massa_desc,
+            },
+            'parametro': {
+                'solicitado': parametro,
+                'chave': meta_param.get('key'),
+                'label': meta_param.get('label'),
+                'faixa_temp': meta_param.get('faixa_temp'),
+            },
+            'temperatura': {
+                'solicitada': temperatura_raw,
+                'aplicada': temperatura_aplicada,
+                'modo': temperatura_modo,
+                'disponiveis': temperaturas_disponiveis,
+            },
+            'periodo': periodo,
+            'agrupamento': agrupamento,
+            'limites': {
+                'lie': lie_final,
+                'lse': lse_final,
+                'alvo': alvo_final,
+            },
+            'resumo': {
+                'total': len(pontos),
+                'aprovados': aprovados,
+                'reprovados': reprovados,
+            },
+            'datas': datas,
+            'valores': valores,
+            'status_aprovacao': status,
+            'series': {
+                'datas': datas,
+                'valores': valores,
+                'status': status,
+                'cores': cores,
+            },
+            'distribuicao': {
+                'valores': valores,
+            },
+            'capabilidade': {
+                'n': qtd_valores,
+                'media': media_valores,
+                'desvio_padrao': desvio_padrao,
+                'cp': cp,
+                'cpk': cpk,
+                'cpl': cpl,
+                'cpu': cpu,
+            },
+            'pontos': pontos,
+            'boxplot': boxplot,
+            'pareto_reprovacoes': pareto_lista,
+            'mensagem': mensagem,
+        })
+    except Exception as exc:
+        print(f"[ERRO] Falha na API de estatisticas de massa: {exc}")
+        return jsonify({'error': str(exc)}), 500
+
+
 @app.route('/analise/<int:id_ensaio>')
 @login_required
 def analise_curva(id_ensaio):
@@ -1598,6 +1894,544 @@ def _obter_limites_spec(spec):
         maximo = _to_float_or_none(spec.get('maximo', spec.get('max', maximo)))
 
     return minimo, maximo
+
+
+PERIODOS_TENDENCIA_DIAS = {
+    '30d': 30,
+    '3m': 90,
+    '6m': 180,
+    '12m': 365,
+    'all': None,
+}
+
+PARAMETROS_TENDENCIA_BASE = {
+    'mh': {
+        'label': 'MH',
+        'attrs': ['mh'],
+        'spec_keys': ['MH', 'Mh', 'mh'],
+    },
+    'ml': {
+        'label': 'ML',
+        'attrs': ['ml'],
+        'spec_keys': ['ML', 'Ml', 'ml'],
+    },
+    'ts1': {
+        'label': 'Ts1',
+        'attrs': ['ts1', 'ts2'],
+        'spec_keys': ['Ts1', 'TS1', 'ts1', 'Ts2', 'TS2', 'ts2'],
+    },
+    'ts2_alta': {
+        'label': 'Ts2 (Alta temperatura)',
+        'attrs': ['ts2', 'ts1'],
+        'spec_keys': ['Ts2', 'TS2', 'ts2', 'Ts1', 'TS1', 'ts1'],
+        'faixa_temp': 'alta',
+    },
+    'ts2_baixa': {
+        'label': 'Ts2 (Baixa temperatura)',
+        'attrs': ['ts2', 'ts1'],
+        'spec_keys': ['Ts2', 'TS2', 'ts2', 'Ts1', 'TS1', 'ts1'],
+        'faixa_temp': 'baixa',
+    },
+    't90_alta': {
+        'label': 'T90 (Alta temperatura)',
+        'attrs': ['t90'],
+        'spec_keys': ['T90', 't90'],
+        'faixa_temp': 'alta',
+    },
+    't90_baixa': {
+        'label': 'T90 (Baixa temperatura)',
+        'attrs': ['t90'],
+        'spec_keys': ['T90', 't90'],
+        'faixa_temp': 'baixa',
+    },
+    'viscosidade': {
+        'label': 'Viscosidade',
+        'attrs': ['viscosidade'],
+        'spec_keys': ['Viscosidade', 'viscosidade', 'mooney', 'Mooney'],
+    },
+    'dureza': {
+        'label': 'Dureza',
+        'attrs': ['dureza'],
+        'spec_keys': ['Dureza', 'dureza', 'Hardness', 'hardness'],
+    },
+    'densidade': {
+        'label': 'Densidade',
+        'attrs': ['densidade'],
+        'spec_keys': ['Densidade', 'densidade', 'Density', 'density'],
+    },
+    'abrasao': {
+        'label': 'Abrasao',
+        'attrs': ['abrasao'],
+        'spec_keys': ['Abrasao', 'Abrasão', 'abrasao', 'Abrasion', 'abrasion'],
+    },
+    'resiliencia': {
+        'label': 'Resiliencia',
+        'attrs': ['resiliencia'],
+        'spec_keys': ['Resiliencia', 'Resiliência', 'resiliencia', 'Resilience', 'resilience'],
+    },
+    'tensao_ruptura': {
+        'label': 'Tensao Ruptura',
+        'attrs': ['tensao_ruptura', 'tensaoruptura'],
+        'spec_keys': ['TensaoRuptura', 'Tensao Ruptura', 'Tensão Ruptura', 'tensao_ruptura', 'tensaoruptura'],
+    },
+    'alongamento': {
+        'label': 'Alongamento',
+        'attrs': ['alongamento'],
+        'spec_keys': ['Alongamento', 'alongamento', 'Elongation', 'elongation'],
+    },
+    'rasgo': {
+        'label': 'Rasgo',
+        'attrs': ['rasgo'],
+        'spec_keys': ['Rasgo', 'rasgo', 'Tear', 'tear'],
+    },
+    'modulo_100': {
+        'label': 'Modulo 100',
+        'attrs': ['modulo_100', 'modulo100'],
+        'spec_keys': ['Modulo100', 'modulo_100', 'modulo100'],
+    },
+    'modulo_300': {
+        'label': 'Modulo 300',
+        'attrs': ['modulo_300', 'modulo300'],
+        'spec_keys': ['Modulo300', 'modulo_300', 'modulo300'],
+    },
+}
+
+ALIASES_PARAMETRO_TENDENCIA = {
+    'ts_1': 'ts1',
+    'ts': 'ts2',
+    'ts_2': 'ts2',
+    'ts2alta': 'ts2_alta',
+    'ts2_alta_temperatura': 'ts2_alta',
+    'ts2baixa': 'ts2_baixa',
+    'ts2_baixa_temperatura': 'ts2_baixa',
+    't90alta': 't90_alta',
+    't90_alta_temperatura': 't90_alta',
+    't90baixa': 't90_baixa',
+    't90_baixa_temperatura': 't90_baixa',
+    'mooney': 'viscosidade',
+    'viscosidade_mooney': 'viscosidade',
+    'mu': 'viscosidade',
+    'hardness': 'dureza',
+    'density': 'densidade',
+    'abrasion': 'abrasao',
+    'resilience': 'resiliencia',
+    'tensaoruptura': 'tensao_ruptura',
+    'modulo100': 'modulo_100',
+    'modulo300': 'modulo_300',
+}
+
+VARIANTES_CHAVE_PARAMETRO = {
+    'ts1': ['ts2'],
+    'ts2': ['ts1'],
+    'tensaoruptura': ['tensao_ruptura'],
+    'tensao_ruptura': ['tensaoruptura'],
+    'modulo100': ['modulo_100'],
+    'modulo_100': ['modulo100'],
+    'modulo300': ['modulo_300'],
+    'modulo_300': ['modulo300'],
+}
+
+ORDEM_PARAMETROS_TENDENCIA = [
+    'mh', 'ml', 'ts1', 'ts2_alta', 'ts2_baixa', 't90_alta', 't90_baixa', 'viscosidade',
+    'dureza', 'densidade', 'abrasao', 'resiliencia', 'tensao_ruptura',
+    'alongamento', 'rasgo', 'modulo_100', 'modulo_300',
+]
+
+
+def _obter_alvo_spec(spec):
+    if spec is None:
+        return None
+
+    alvo = _to_float_or_none(getattr(spec, 'alvo', None))
+    if isinstance(spec, dict):
+        alvo = _to_float_or_none(spec.get('alvo', alvo))
+    return alvo
+
+
+def _periodo_para_data_inicio(periodo_raw):
+    periodo = str(periodo_raw or '3m').strip().lower()
+    if periodo not in PERIODOS_TENDENCIA_DIAS:
+        periodo = '3m'
+
+    dias = PERIODOS_TENDENCIA_DIAS.get(periodo)
+    if dias is None:
+        return periodo, None
+
+    return periodo, datetime.now() - timedelta(days=dias)
+
+
+def _faixa_temperatura_ensaio(ensaio):
+    temp_ref = (
+        _to_float_or_none(getattr(ensaio, 'temp_reo', None))
+        or _to_float_or_none(getattr(ensaio, 'temp_plato', None))
+        or _to_float_or_none(getattr(ensaio, 'temp_visc', None))
+        or 0.0
+    )
+    return 'alta' if temp_ref >= 175 else 'baixa'
+
+
+def _temperatura_analise_ensaio(ensaio, meta_param=None):
+    chave_param = _normalizar_chave_config((meta_param or {}).get('key'))
+
+    if chave_param.startswith('ts2') or chave_param.startswith('t90') or chave_param in ('ts1', 'mh', 'ml'):
+        temp = _to_float_or_none(getattr(ensaio, 'temp_reo', None))
+        if temp is not None:
+            return temp
+
+    if chave_param == 'viscosidade':
+        temp = _to_float_or_none(getattr(ensaio, 'temp_visc', None))
+        if temp is not None:
+            return temp
+
+    temp = _to_float_or_none(getattr(ensaio, 'temp_plato', None))
+    if temp is not None:
+        return temp
+
+    temp = _to_float_or_none(getattr(ensaio, 'temp_reo', None))
+    if temp is not None:
+        return temp
+
+    return _to_float_or_none(getattr(ensaio, 'temp_visc', None))
+
+
+def _perfis_preferenciais_ensaio(ensaio, faixa_temp=None):
+    faixa = faixa_temp or _faixa_temperatura_ensaio(ensaio)
+    if faixa == 'alta':
+        return ['alta_cinza', 'alta_preto', 'alta', 'baixa']
+    return ['baixa', 'alta_cinza', 'alta_preto', 'alta']
+
+
+def _chave_parametro_por_perfil(nome_norm, prefixo_perfil):
+    if nome_norm not in ('ts2', 't90'):
+        return nome_norm
+
+    if prefixo_perfil == 'baixa_':
+        return f"{nome_norm}_baixa"
+    if prefixo_perfil in ('alta_cinza_', 'alta_preto_', 'alta_'):
+        return f"{nome_norm}_alta"
+    return nome_norm
+
+
+def _variantes_chave_normalizada(chave):
+    chave_norm = _normalizar_chave_config(chave)
+    if not chave_norm:
+        return []
+
+    variantes = [chave_norm]
+    sem_underscore = chave_norm.replace('_', '')
+    if sem_underscore and sem_underscore not in variantes:
+        variantes.append(sem_underscore)
+
+    for extra in VARIANTES_CHAVE_PARAMETRO.get(chave_norm, []):
+        extra_norm = _normalizar_chave_config(extra)
+        if extra_norm and extra_norm not in variantes:
+            variantes.append(extra_norm)
+
+    return variantes
+
+
+def _listar_parametros_tendencia():
+    catalogo = {}
+    for chave, meta in PARAMETROS_TENDENCIA_BASE.items():
+        catalogo[chave] = {
+            'key': chave,
+            'label': meta['label'],
+            'attrs': list(meta.get('attrs', [])),
+            'spec_keys': list(meta.get('spec_keys', [])),
+            'faixa_temp': meta.get('faixa_temp'),
+        }
+
+    try:
+        configs = carregar_configuracoes() or {}
+    except Exception:
+        configs = {}
+
+    for _cod, specs in configs.items():
+        if not isinstance(specs, dict):
+            continue
+
+        for chave_cfg in specs.keys():
+            chave_txt = str(chave_cfg or '')
+            nome_param = None
+            prefixo_encontrado = None
+            for prefixo in ('alta_cinza_', 'alta_preto_', 'alta_', 'baixa_'):
+                if chave_txt.startswith(prefixo):
+                    nome_param = chave_txt[len(prefixo):]
+                    prefixo_encontrado = prefixo
+                    break
+
+            if not nome_param:
+                continue
+
+            nome_norm = _normalizar_chave_config(nome_param)
+            if nome_norm in ('temp_padrao', 'tempo_total'):
+                continue
+            nome_norm = ALIASES_PARAMETRO_TENDENCIA.get(nome_norm, nome_norm)
+            if not nome_norm:
+                continue
+
+            chave_catalogo = _chave_parametro_por_perfil(nome_norm, prefixo_encontrado)
+
+            if chave_catalogo not in catalogo:
+                faixa_temp = None
+                if str(chave_catalogo).endswith('_alta'):
+                    faixa_temp = 'alta'
+                elif str(chave_catalogo).endswith('_baixa'):
+                    faixa_temp = 'baixa'
+
+                catalogo[chave_catalogo] = {
+                    'key': chave_catalogo,
+                    'label': str(nome_param).replace('_', ' '),
+                    'attrs': [nome_norm],
+                    'spec_keys': [nome_param, nome_norm],
+                    'faixa_temp': faixa_temp,
+                }
+            else:
+                if nome_param not in catalogo[chave_catalogo]['spec_keys']:
+                    catalogo[chave_catalogo]['spec_keys'].append(nome_param)
+
+    indice_ordem = {chave: idx for idx, chave in enumerate(ORDEM_PARAMETROS_TENDENCIA)}
+    return sorted(
+        catalogo.values(),
+        key=lambda item: (indice_ordem.get(item['key'], 999), str(item.get('label', '')).lower())
+    )
+
+
+def _normalizar_metadados_parametro(parametro_raw):
+    catalogo = {p['key']: p for p in _listar_parametros_tendencia()}
+
+    chave = _normalizar_chave_config(parametro_raw)
+    chave = ALIASES_PARAMETRO_TENDENCIA.get(chave, chave)
+
+    if chave in catalogo:
+        item = catalogo[chave]
+        return {
+            'key': item['key'],
+            'label': item['label'],
+            'attrs': list(item.get('attrs', [])),
+            'spec_keys': list(item.get('spec_keys', [])),
+            'faixa_temp': item.get('faixa_temp'),
+        }
+
+    label_fallback = str(parametro_raw or '').strip() or str(chave or 'parametro')
+    return {
+        'key': chave or 'parametro',
+        'label': label_fallback,
+        'attrs': [chave] if chave else [],
+        'spec_keys': [label_fallback] + ([chave] if chave else []),
+        'faixa_temp': None,
+    }
+
+
+def _valor_medido_por_chave(ensaio, chave, extras=None):
+    candidatos = []
+    for base in [chave] + (extras or []):
+        for variante in _variantes_chave_normalizada(base):
+            if variante not in candidatos:
+                candidatos.append(variante)
+
+    for cand in candidatos:
+        if hasattr(ensaio, cand):
+            valor = _to_float_or_none(getattr(ensaio, cand, None))
+            if valor is not None:
+                return valor
+
+    valores = getattr(ensaio, 'valores_medidos', None)
+    if isinstance(valores, dict):
+        normalizados = {}
+        for k, v in valores.items():
+            k_norm = _normalizar_chave_config(k)
+            if k_norm:
+                normalizados[k_norm] = v
+
+        for cand in candidatos:
+            if cand in normalizados:
+                valor = _to_float_or_none(normalizados.get(cand))
+                if valor is not None:
+                    return valor
+
+    return None
+
+
+def _valor_medido_por_parametro(ensaio, meta_param):
+    chave = meta_param.get('key')
+    extras = list(meta_param.get('attrs', [])) + list(meta_param.get('spec_keys', []))
+    return _valor_medido_por_chave(ensaio, chave, extras=extras)
+
+
+def _buscar_spec_no_perfil(perfil, meta_param):
+    if not isinstance(perfil, dict):
+        return None, None
+
+    chaves_candidatas = set()
+    for origem in [meta_param.get('key')] + list(meta_param.get('attrs', [])) + list(meta_param.get('spec_keys', [])):
+        for variante in _variantes_chave_normalizada(origem):
+            chaves_candidatas.add(variante)
+
+    for chave_cfg, spec in perfil.items():
+        chave_norm = _normalizar_chave_config(chave_cfg)
+        if chave_norm in ('temp_padrao', 'tempo_total'):
+            continue
+        if chave_norm in chaves_candidatas:
+            return spec, chave_cfg
+    return None, None
+
+
+def _limites_parametro_na_config(cod_sankhya, meta_param):
+    try:
+        cfg_massa = (carregar_configuracoes() or {}).get(str(cod_sankhya), {}) or {}
+    except Exception:
+        cfg_massa = {}
+
+    if not isinstance(cfg_massa, dict):
+        return None, None, None, None, None
+
+    faixa_temp = meta_param.get('faixa_temp')
+    prefixos_permitidos = {
+        'alta': {'alta_cinza_', 'alta_preto_', 'alta_'},
+        'baixa': {'baixa_'},
+    }.get(faixa_temp)
+
+    chaves_candidatas = set()
+    for origem in [meta_param.get('key')] + list(meta_param.get('attrs', [])) + list(meta_param.get('spec_keys', [])):
+        for variante in _variantes_chave_normalizada(origem):
+            chaves_candidatas.add(variante)
+
+    for chave_cfg, spec in cfg_massa.items():
+        chave_txt = str(chave_cfg or '')
+        nome_param = None
+        perfil_nome = None
+        for prefixo in ('alta_cinza_', 'alta_preto_', 'alta_', 'baixa_'):
+            if chave_txt.startswith(prefixo):
+                if prefixos_permitidos and prefixo not in prefixos_permitidos:
+                    nome_param = None
+                    break
+                nome_param = chave_txt[len(prefixo):]
+                perfil_nome = prefixo.rstrip('_')
+                break
+        if not nome_param:
+            continue
+
+        nome_norm = _normalizar_chave_config(nome_param)
+        if nome_norm in chaves_candidatas:
+            lie, lse = _obter_limites_spec(spec)
+            alvo = _obter_alvo_spec(spec)
+            return lie, lse, alvo, perfil_nome, nome_param
+
+    return None, None, None, None, None
+
+
+def _limites_parametro_para_ensaio(ensaio, meta_param):
+    perfis = getattr(getattr(ensaio, 'massa', None), 'perfis', {}) or {}
+    for perfil_nome in _perfis_preferenciais_ensaio(ensaio, faixa_temp=meta_param.get('faixa_temp')):
+        spec, nome_spec = _buscar_spec_no_perfil(perfis.get(perfil_nome), meta_param)
+        if spec is None:
+            continue
+        lie, lse = _obter_limites_spec(spec)
+        alvo = _obter_alvo_spec(spec)
+        return lie, lse, alvo, perfil_nome, nome_spec
+
+    return _limites_parametro_na_config(getattr(ensaio, 'cod_sankhya', None), meta_param)
+
+
+def _nome_grupo_boxplot(data_hora, agrupamento='semana'):
+    if not data_hora:
+        return None
+
+    if agrupamento == 'mes':
+        return data_hora.strftime('%Y-%m')
+
+    ano, semana, _ = data_hora.isocalendar()
+    return f"{ano}-S{semana:02d}"
+
+
+def _ensaio_aprovado(ensaio):
+    acao = str(getattr(ensaio, 'acao_recomendada', '') or '').upper()
+    if 'REPROV' in acao:
+        return False
+
+    score = _to_float_or_none(getattr(ensaio, 'score_final', None))
+    if score is not None:
+        return score >= 70
+
+    return bool(acao)
+
+
+def _motivos_reprovacao_ensaio(ensaio):
+    if _ensaio_aprovado(ensaio):
+        return []
+
+    perfis = getattr(getattr(ensaio, 'massa', None), 'perfis', {}) or {}
+    motivos = []
+    vistos = set()
+
+    for perfil_nome in _perfis_preferenciais_ensaio(ensaio):
+        perfil = perfis.get(perfil_nome) or {}
+        if not isinstance(perfil, dict):
+            continue
+
+        for chave_cfg, spec in perfil.items():
+            chave_norm = _normalizar_chave_config(chave_cfg)
+            if chave_norm in ('temp_padrao', 'tempo_total') or chave_norm in vistos:
+                continue
+            vistos.add(chave_norm)
+
+            valor = _valor_medido_por_chave(ensaio, chave_norm, extras=[chave_cfg])
+            if valor is None:
+                continue
+
+            lie, lse = _obter_limites_spec(spec)
+            if lie is not None and valor < lie:
+                motivos.append(f"{chave_cfg} abaixo LIE")
+            if lse is not None and valor > lse:
+                motivos.append(f"{chave_cfg} acima LSE")
+
+    if motivos:
+        return sorted(set(motivos))
+
+    score = _to_float_or_none(getattr(ensaio, 'score_final', None))
+    if score is not None and score < 70:
+        return ['Score abaixo de 70']
+
+    acao = str(getattr(ensaio, 'acao_recomendada', '') or '').strip()
+    if acao:
+        return [acao]
+
+    return ['Reprovacao sem motivo detalhado']
+
+
+def _listar_massas_tendencia():
+    rows = (
+        db.session.query(
+            EnsaioConsolidado.cod_sankhya,
+            EnsaioConsolidado.massa_descricao
+        )
+        .filter(EnsaioConsolidado.cod_sankhya.isnot(None))
+        .order_by(EnsaioConsolidado.massa_descricao.asc(), EnsaioConsolidado.cod_sankhya.asc())
+        .distinct()
+        .all()
+    )
+
+    saida = []
+    vistos = set()
+    for cod, desc in rows:
+        try:
+            cod_int = int(cod)
+        except Exception:
+            continue
+
+        if cod_int in vistos:
+            continue
+
+        vistos.add(cod_int)
+        descricao = str(desc or '').strip() or f"Massa {cod_int}"
+        saida.append({
+            'cod_sankhya': cod_int,
+            'descricao': descricao,
+        })
+
+    saida.sort(key=lambda item: (item['descricao'].lower(), item['cod_sankhya']))
+    return saida
 
 
 def _encontrar_spec_fisica(perfil_alta, perfil_baixa, candidatos):
