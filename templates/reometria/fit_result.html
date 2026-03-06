@@ -79,8 +79,8 @@
 </div>
 
 <div class="mb-3">
-  <a class="btn btn-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='prensa') }}">Simular em prensa</a>
-  <a class="btn btn-outline-primary" href="{{ url_for('reometria_simulate_form', fit_id=payload.fit_id, mode='autoclave') }}">Simular em autoclave</a>
+  <a class="btn btn-primary" href="{{ url_for('reometria.reometria_simulate_form', fit_id=payload.fit_id, mode='prensa') }}">Simular em prensa</a>
+  <a class="btn btn-outline-primary" href="{{ url_for('reometria.reometria_simulate_form', fit_id=payload.fit_id, mode='autoclave') }}">Simular em autoclave</a>
 </div>
 
 <h5>Ensaios usados</h5>
@@ -142,7 +142,7 @@
 <script>
   const curvesRaw = {{ payload.curves|tojson }};
   const alphaComparisonSeed = {{ alpha_time_comparison|tojson }};
-  const updateUrl = {{ url_for('reometria_fit_update', fit_id=payload.fit_id)|tojson }};
+  const updateUrl = {{ url_for('reometria.reometria_fit_update', fit_id=payload.fit_id)|tojson }};
   const R_GAS = 8.314462618;
   const LIMITS = {
     k0: { min: 1e-8, max: 1e15 },

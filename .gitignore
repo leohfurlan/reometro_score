@@ -28,3 +28,4 @@ instance/users_reoscore.db
 *.csv
 scripts/
 data/
+users_reoscore.db

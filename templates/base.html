@@ -28,7 +28,7 @@
                 </a>
 
                 <a href="{{ url_for('controle_qualidade') }}"
-                class="list-group-item list-group-item-action {{ 'active' if request.endpoint in ['controle_qualidade', 'analise_curva'] else '' }}">
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint in ['controle_qualidade', 'analysis.analise_curva'] else '' }}">
                     <i class="fas fa-list-ul me-2"></i> Controle de Qualidade
                 </a>
 
@@ -52,8 +52,8 @@
                     <i class="fas fa-microscope me-2"></i> Simulador IA
                 </a>
 
-                <a href="{{ url_for('pagina_auditoria') }}"
-                class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_auditoria' else '' }}">
+                <a href="{{ url_for('admin.pagina_auditoria') }}"
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'admin.pagina_auditoria' else '' }}">
                     <i class="fas fa-clipboard-check me-2"></i> Auditoria
                 </a>
 
@@ -62,15 +62,15 @@
                     <i class="fas fa-file-code me-2"></i> Contratos API
                 </a>
 
-                <a href="{{ url_for('reometria_fit') }}" 
-                class="list-group-item list-group-item-action {{ 'active' if request.endpoint in ['reometria_fit', 'reometria_fit_result', 'reometria_simulate_form', 'reometria_simulate_view'] else '' }}">
+                <a href="{{ url_for('reometria.reometria_fit') }}" 
+                class="list-group-item list-group-item-action {{ 'active' if request.endpoint in ['reometria.reometria_fit', 'reometria.reometria_fit_result', 'reometria.reometria_simulate_form', 'reometria.reometria_simulate_view'] else '' }}">
                     <i class="fas fa-fire me-2"></i> Reometria & Vulcanização
                 </a>
                 
                 <!-- CORREÇÃO: Link visível para TODOS os usuários logados -->
                 {% if current_user.is_authenticated %}
-                    <a href="{{ url_for('pagina_config') }}"
-                    class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'pagina_config' else '' }}">
+                    <a href="{{ url_for('admin.pagina_config') }}"
+                    class="list-group-item list-group-item-action {{ 'active' if request.endpoint == 'admin.pagina_config' else '' }}">
                         <i class="fas fa-cogs me-2"></i> Configurações
                         {% if not current_user.is_admin %}
                             <span class="badge bg-light text-dark ms-2" style="font-size: 0.6em;">Ensinar</span>
@@ -97,7 +97,7 @@
                                     <span class="dropdown-header">Perfil: {{ current_user.role|upper }}</span>
 
                                     <div class="dropdown-divider"></div>
-                                    <a class="dropdown-item text-danger" href="{{ url_for('logout') }}">Sair</a>
+                                    <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">Sair</a>
                                 </div>
                             </li>
                         </ul>

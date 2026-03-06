@@ -9,7 +9,7 @@ from difflib import get_close_matches
 # --- NOVAS IMPORTAÃƒâ€¡Ãƒâ€¢ES (ARQUITETURA V13) ---
 from models.usuario import db
 from models.consolidado import EnsaioConsolidado
-from models.score_versioning import ScoreVersao, ScoreResultado
+from models.score_versioning import ScoreResultado
 from services.scoring_engine import ScoringEngine
 # -------------------------------------------
 
@@ -18,10 +18,9 @@ from etl_planilha import carregar_dicionario_lotes
 from services.sankhya_service import importar_catalogo_sankhya
 from services.config_manager import (
     aplicar_configuracoes_no_catalogo,
-    carregar_configuracoes,
-    carregar_regras_acao,
 )
 from services.learning_service import carregar_aprendizado_mapa
+from services.score_configuration_service import get_active_score_version
 
 # --- VARIÃƒÂVEIS DE REFERÃƒÅ NCIA (CACHE DO MÃƒâ€œDULO) ---
 _CATALOGO_CODIGO = {}
@@ -30,7 +29,6 @@ _MAPA_LOTES_PLANILHA = {}
 _MAPA_GRUPOS = {} 
 _DE_PARA_CORRECOES = {}
 _MAPA_APRENDIZADO = {}
-_STATUS_VERSAO_ATIVA = {"ACTIVE", "ATIVA", "ATIVO"}
 
 # --- FUNÃƒâ€¡Ãƒâ€¢ES AUXILIARES ---
 
@@ -72,90 +70,31 @@ def _faixa_reometria(v_temp, descricao_grupo):
     return "alta"
 
 
-def _normalizar_status_versao(status):
-    return str(status or "").strip().upper()
-
-
 def _buscar_versao_ativa():
     """
-    Localiza versao ativa aceitando aliases legados de status.
+    Localiza a versao ativa a partir da fonte oficial no banco.
     """
-    versao = ScoreVersao.query.filter_by(status='ACTIVE').order_by(ScoreVersao.id.desc()).first()
-    if versao:
-        return versao
-
-    candidatas = ScoreVersao.query.order_by(ScoreVersao.id.desc()).all()
-    for cand in candidatas:
-        if _normalizar_status_versao(cand.status) in _STATUS_VERSAO_ATIVA:
-            # Corrige o status para o padrao sem impactar o snapshot.
-            if cand.status != "ACTIVE":
-                cand.status = "ACTIVE"
-                if not cand.ativado_em:
-                    cand.ativado_em = datetime.now()
-                db.session.commit()
-            return cand
-    return None
+    return get_active_score_version(create_from_legacy=True)
 
 
 def _criar_versao_ativa_bootstrap():
     """
-    Cria uma versao ACTIVE a partir dos arquivos JSON atuais quando o banco ainda
-    nao possui nenhuma versao de score.
+    Mantido por compatibilidade com chamadas legadas do ETL.
     """
-    specs = carregar_configuracoes()
-    regras = carregar_regras_acao()
-
-    if not isinstance(specs, dict):
-        specs = {}
-    if not isinstance(regras, list):
-        regras = []
-
-    agora = datetime.now()
-    snapshot = {
-        "specs": specs,
-        "regras": regras,
-        "meta": {
-            "descricao": "Bootstrap automatico por ausencia de versao ativa",
-            "criado_em": agora.isoformat(timespec="seconds"),
-        },
-    }
-
-    # Garante unicidade logica de ACTIVE.
-    for versao in ScoreVersao.query.all():
-        if _normalizar_status_versao(versao.status) in _STATUS_VERSAO_ATIVA:
-            versao.status = "ARCHIVED"
-
-    nome = f"AutoBootstrap {agora.strftime('%Y-%m-%d %H:%M')}"
-    nova_versao = ScoreVersao(
-        nome=nome,
-        status="ACTIVE",
-        config_snapshot=snapshot,
-        ativado_em=agora,
-    )
-    db.session.add(nova_versao)
-    db.session.commit()
-    return nova_versao
+    return get_active_score_version(create_from_legacy=True)
 
 
 def _obter_engine_ativa():
     """
-    Retorna a engine pronta para calculo, bootstrapando uma versao ACTIVE quando
-    necessario.
+    Retorna a engine pronta para calculo a partir da versao ativa oficial.
     """
     versao_ativa = _buscar_versao_ativa()
     if versao_ativa:
         print(f"   Engine ativada: {versao_ativa.nome}")
         return ScoringEngine(versao_ativa)
 
-    print("   Nenhuma versao ACTIVE encontrada. Criando bootstrap automatico...")
-    try:
-        versao_bootstrap = _criar_versao_ativa_bootstrap()
-        print(f"   Engine bootstrap criada: {versao_bootstrap.nome}")
-        return ScoringEngine(versao_bootstrap)
-    except Exception as e:
-        db.session.rollback()
-        print(f"   Falha ao criar versao bootstrap: {e}")
-        return None
+    print("   Nenhuma versao de score disponivel.")
+    return None
 
 def _obter_dados_lote_planilha(chave_lote):
     """

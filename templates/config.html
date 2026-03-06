@@ -54,7 +54,7 @@
     {% if current_user.is_admin %}
     <div class="tab-pane fade show active" id="materiais" role="tabpanel">
         <div class="card p-4 mb-4 shadow-sm border-0">
-            <form method="GET" action="/config">
+            <form method="GET" action="{{ url_for('admin.pagina_config') }}">
                 <input type="hidden" name="sort" value="{{ sort_by }}">
                 <input type="hidden" name="order" value="{{ order }}">
                 
@@ -89,7 +89,7 @@
                 </div>
                 {% if query or filtro_tipo or filtro_status %}
                 <div class="mt-2 text-end">
-                    <a href="{{ url_for('pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
+                    <a href="{{ url_for('admin.pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
                 </div>
                 {% endif %}
             </form>
@@ -101,12 +101,12 @@
                     <tr>
                         {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status} %}
                         <th class="resizable-col" style="width: 80px;">
-                            <a href="{{ url_for('pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                            <a href="{{ url_for('admin.pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
                                 Cód. <i class="fas fa-sort small ms-1"></i>
                             </a>
                         </th>
                         <th class="resizable-col">
-                            <a href="{{ url_for('pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                            <a href="{{ url_for('admin.pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
                                 Descrição do Material <i class="fas fa-sort small ms-1"></i>
                             </a>
                         </th>
@@ -210,12 +210,12 @@
                     {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status, 'sort': sort_by, 'order': order} %}
                     
                     <li class="page-item {% if pagina_atual_mat == 1 %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat-1, **args) }}"><i class="fas fa-angle-left"></i></a>
+                        <a class="page-link border-0" href="{{ url_for('admin.pagina_config', page_mat=pagina_atual_mat-1, **args) }}"><i class="fas fa-angle-left"></i></a>
                     </li>
                     
                     <li class="page-item d-flex align-items-center mx-2">
                         <span class="small text-muted me-2">Pág.</span>
-                        <form action="/config" method="GET" style="display:inline;">
+                        <form action="{{ url_for('admin.pagina_config') }}" method="GET" style="display:inline;">
                             {% for k, v in args.items() %}
                                 <input type="hidden" name="{{ k }}" value="{{ v }}">
                             {% endfor %}
@@ -226,7 +226,7 @@
                     </li>
                     
                     <li class="page-item {% if pagina_atual_mat == total_paginas_mat %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat+1, **args) }}"><i class="fas fa-angle-right"></i></a>
+                        <a class="page-link border-0" href="{{ url_for('admin.pagina_config', page_mat=pagina_atual_mat+1, **args) }}"><i class="fas fa-angle-right"></i></a>
                     </li>
                 </ul>
             </nav>
@@ -245,7 +245,7 @@
 
         <div class="card shadow-sm border-0">
             <div class="card-body p-0">
-                <form id="formRegras" method="POST" action="{{ url_for('salvar_regras') }}">
+                <form id="formRegras" method="POST" action="{{ url_for('admin.salvar_regras') }}">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead class="bg-light text-secondary small text-uppercase">
@@ -321,7 +321,7 @@
                         <i class="fas fa-user-plus me-2"></i>Adicionar Usuário
                     </div>
                     <div class="card-body">
-                        <form action="{{ url_for('adicionar_usuario') }}" method="POST">
+                        <form action="{{ url_for('admin.adicionar_usuario') }}" method="POST">
                             <div class="mb-3">
                                 <label class="form-label small text-muted fw-bold">Username</label>
                                 <input type="text" name="username" class="form-control" required placeholder="ex: operador">
@@ -385,7 +385,7 @@
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         {% else %}
-                                            <a href="{{ url_for('remover_usuario', user_id=u.id) }}" class="btn btn-sm btn-outline-danger" 
+                                            <a href="{{ url_for('admin.remover_usuario', user_id=u.id) }}" class="btn btn-sm btn-outline-danger" 
                                                onclick="return confirm('Tem certeza que deseja remover o usuário {{ u.username }}?');"
                                                title="Remover Usuário">
                                                 <i class="fas fa-trash"></i>
@@ -416,7 +416,7 @@
         <!-- Filtros Auditoria -->
         <div class="card mb-3 border-0 bg-light shadow-sm">
             <div class="card-body py-3">
-                <form method="GET" action="{{ url_for('pagina_config') }}" class="row g-3 align-items-end">
+                <form method="GET" action="{{ url_for('admin.pagina_config') }}" class="row g-3 align-items-end">
                     <div class="col-md-3">
                         <label class="form-label small fw-bold text-muted">Buscar Lote</label>
                         <input type="text" name="audit_busca" class="form-control form-control-sm" placeholder="Ex: ANTIQ..." value="{{ audit_busca }}">
@@ -480,7 +480,7 @@
                             
                             {% set form_id = 'form_ensinar_' ~ ensaio.id_ensaio %}
                             <td>
-                                <form id="{{ form_id }}" action="{{ url_for('salvar_correcao') }}" method="POST" class="d-none">
+                                <form id="{{ form_id }}" action="{{ url_for('admin.salvar_correcao') }}" method="POST" class="d-none">
                                     <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
                                 </form>
                                 <input type="text" name="novo_lote" form="{{ form_id }}" class="form-control form-control-sm fw-bold text-primary"
@@ -515,11 +515,11 @@
                 <nav>
                     <ul class="pagination pagination-sm justify-content-center mb-0">
                         <li class="page-item {% if pagina_atual_audit == 1 %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit-1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Anterior</a>
+                            <a class="page-link" href="{{ url_for('admin.pagina_config', page_audit=pagina_atual_audit-1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Anterior</a>
                         </li>
                         <li class="page-item disabled"><span class="page-link">{{ pagina_atual_audit }} / {{ total_paginas_audit }}</span></li>
                         <li class="page-item {% if pagina_atual_audit == total_paginas_audit %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit+1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Próximo</a>
+                            <a class="page-link" href="{{ url_for('admin.pagina_config', page_audit=pagina_atual_audit+1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Próximo</a>
                         </li>
                     </ul>
                 </nav>
@@ -604,7 +604,7 @@
         {% for u in usuarios %}
             <div class="modal fade" id="modalEditUser{{ u.id }}" tabindex="-1" aria-hidden="true">
                 <div class="modal-dialog">
-                    <form action="{{ url_for('editar_usuario') }}" method="POST">
+                    <form action="{{ url_for('admin.editar_usuario') }}" method="POST">
                         <div class="modal-content">
                             <div class="modal-header bg-light">
                                 <h5 class="modal-title fw-bold"><i class="fas fa-user-edit me-2"></i>Editar Usuário</h5>
@@ -646,7 +646,7 @@
     {% for prod in produtos %}
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
             <div class="modal-dialog modal-xl">
-                <form action="/salvar_config" method="POST">
+                <form action="{{ url_for('admin.salvar_config') }}" method="POST">
                     {% set cfg_prod = configs_massas.get(prod.cod_sankhya ~ '', {}) if configs_massas else {} %}
                     {% set regra_ab5n = cfg_prod.get('regra_abrasao_5n', {}) if cfg_prod.get('regra_abrasao_5n') else {} %}
                     {% set ab5n_min = regra_ab5n.get('dureza_min', regra_ab5n.get('min', cfg_prod.get('abrasao_5n_dureza_min', cfg_prod.get('abrasao_metodologia_5n_dureza_min', 40)))) %}

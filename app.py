@@ -1,9 +1,8 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask import render_template, request, redirect, url_for, flash, jsonify
+from flask_login import login_required, current_user
 
-from models.usuario import db, Usuario
+from models.usuario import db
 from models.consolidado import EnsaioConsolidado # Novo Modelo
-from cache_manager import CacheManager
 
 from collections import Counter
 from datetime import datetime, timedelta
@@ -15,22 +14,15 @@ import json
 import re
 import unicodedata
 from urllib.parse import urlparse, urljoin
-from sqlalchemy import or_, func, case, desc, and_, text # Adicionado para conexÃƒÂ£o local
+from sqlalchemy import or_, func, case, desc, and_ # Adicionado para conexÃƒÂ£o local
 from sqlalchemy.orm import load_only
 
 # ConfiguraÃƒÂ§ÃƒÂµes e Modelos
-from config import Config
-from services.config_manager import (
-    carregar_configuracoes,
-    carregar_regras_acao,
-    salvar_regras_acao,
-    salvar_configuracao,
-)
-from services.learning_service import ensinar_lote, carregar_aprendizado_mapa
+from services.config_manager import carregar_configuracoes
+from services.learning_service import carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
-from models.score_versioning import ScoreResultado, ScoreVersao
-from services.scoring_engine import ScoringEngine
-from models.formula import Formula, FormulaItem
+from models.score_versioning import ScoreResultado
+from models.formula import Formula
 from models.formulation_v2 import (
     Formulation as FormulationV2,
     FormulationIngredient as FormulationIngredientV2,
@@ -61,21 +53,7 @@ except Exception as e:
     MultiTargetSimulator = None
     KnowledgeService = None
     SearchService = None
-from services.kinetics_service import (
-    list_ensaios_for_fit,
-    run_fit,
-    load_fit_payload,
-    get_preview_curve,
-    build_alpha_time_comparison,
-    update_fit_parameters,
-)
-from services.vulcanization_service import run_simulation, load_simulation
 
-try:
-    from services.formulation_engine_service import FormulationEngineService
-except Exception as e:
-    print(f"Aviso: Motor de formulacao indisponivel: {e}")
-    FormulationEngineService = None
 
 # --- IMPORTAÃƒâ€¡ÃƒÆ’O: SERVIÃƒâ€¡O DE ETL ---
 from services.etl_service import (
@@ -94,8 +72,20 @@ except ImportError:
     baixar_excel_sharepoint = None
     print("[WARN] Aviso: 'sharepoint_loader.py' nao encontrado. O download automatico sera desativado.")
 
-# Caminho local padrÃƒÂ£o para o cache baixado do SharePoint
-CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
+from reoscore.use_cases.learning_corrections import (
+    apply_learning_overlay,
+    apply_lot_cleanup_to_consolidated,
+    apply_persisted_corrections_to_consolidated,
+)
+from reoscore.webapp import create_app
+from reoscore.webapp.extensions import cache_service, formulation_engine_service
+from reoscore.webapp.runtime import (
+    bootstrap_operacional,
+    preparar_planilha_sharepoint,
+    recarregar_cache_memoria as _recarregar_cache_memoria,
+)
+
+# ÃƒÂ£o para o cache baixado do SharePoint
 
 def _is_safe_redirect_url(target: str) -> bool:
     if not target:
@@ -151,185 +141,19 @@ def _parse_int_locale(value, default=None, min_value=None):
     return parsed_int
 
 def recarregar_cache_memoria():
-    """
-    FunÃƒÂ§ÃƒÂ£o auxiliar: Busca todos os dados do SQLite e atualiza o CacheManager.
-    Essencial para as telas de RelatÃƒÂ³rios e Auditoria funcionarem.
-    """
-    try:
-        print("[INFO] Recarregando cache em memoria a partir do banco...")
-        # Busca todos os dados ordenados
-        todos_ensaios = EnsaioConsolidado.query.order_by(EnsaioConsolidado.data_hora.desc()).all()
-        overlay_fn = globals().get('aplicar_sobreposicao_local')
-        if callable(overlay_fn):
-            todos_ensaios = overlay_fn(todos_ensaios)
-        
-        if not todos_ensaios:
-            print("[WARN] Banco de dados vazio. Cache nao atualizado.")
-            return 0
-
-        # Extrai lista de materiais para filtros (usado na config)
-        materiais_unicos = sorted(list(set(e.massa_descricao for e in todos_ensaios if e.massa_descricao)))
-        
-        # Monta o objeto que as telas esperam
-        dados_para_cache = {
-            'dados': todos_ensaios,
-            'materiais': materiais_unicos,
-            'ultimo_update': datetime.now()
-        }
-        
-        # Salva no Cache Service
-        cache_service.set(dados_para_cache)
-        print(f"[OK] Cache atualizado com {len(todos_ensaios)} registros.")
-        return len(todos_ensaios)
-        
-    except Exception as e:
-        print(f"[ERRO] Erro ao recarregar cache: {e}")
-        return 0
-
-def _normalizar_lista_materiais(itens):
-    """
-    Converte listas heterogeneas de materiais (str/dict/objeto) para
-    uma lista unica de descricoes.
-    """
-    nomes = []
-    vistos = set()
-
-    for item in (itens or []):
-        nome = None
-
-        if isinstance(item, str):
-            nome = item
-        elif isinstance(item, dict):
-            nome = item.get('descricao') or item.get('massa_descricao') or item.get('nome')
-        else:
-            nome = (
-                getattr(item, 'descricao', None)
-                or getattr(item, 'massa_descricao', None)
-                or getattr(item, 'nome', None)
-            )
-
-        nome = str(nome or '').strip()
-        if not nome:
-            continue
-
-        chave = nome.upper()
-        if chave in vistos:
-            continue
-
-        vistos.add(chave)
-        nomes.append(nome)
-
-    nomes.sort()
-    return nomes
-
-def preparar_planilha_sharepoint(forcar_download=False):
-    """
-    Garante que a planilha venha do SharePoint e define CAMINHO_REG403
-    apontando para o arquivo cacheado localmente.
-    """
-    if not baixar_excel_sharepoint:
-        return None
-
-    caminho_cache = os.path.abspath(CACHE_PLANILHA_SHAREPOINT)
-
-    # Se jÃƒÂ¡ temos um cache e nÃƒÂ£o foi solicitado forÃƒÂ§a de download, reutiliza.
-    if not forcar_download and os.path.exists(caminho_cache) and os.path.getsize(caminho_cache) > 0:
-        os.environ["CAMINHO_REG403"] = caminho_cache
-        return caminho_cache
-
-    try:
-        caminho_baixado = baixar_excel_sharepoint(nome_destino=CACHE_PLANILHA_SHAREPOINT)
-        if caminho_baixado:
-            caminho_abs = os.path.abspath(caminho_baixado)
-            os.environ["CAMINHO_REG403"] = caminho_abs
-            return caminho_abs
-    except Exception as e:
-        print(f"[WARN] Falha ao baixar planilha do SharePoint: {e}")
-
-    return None
+    return _recarregar_cache_memoria(overlay_fn=globals().get('aplicar_sobreposicao_local'))
 
 from connection import connect_to_database
 
-app = Flask(__name__)
-app.config.from_object(Config)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
-
-# --- CONFIGURAÃƒâ€¡ÃƒÆ’O DO BANCO DE USUÃƒÂRIOS (SQLite Local) ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_reoscore.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db.init_app(app)
-login_manager = LoginManager(app)
-login_manager.login_view = 'login'
-
-# Inicializa o cache cedo para ficar disponivel durante o bootstrap.
-cache_service = CacheManager(ttl_minutes=30, max_size_mb=500)
-formulation_engine_service = FormulationEngineService() if FormulationEngineService else None
-
-# Cria o banco de dados na primeira execuÃƒÂ§ÃƒÂ£o se nÃƒÂ£o existir
-with app.app_context():
-    db.create_all()
-
-    # MigraÃƒÂ§ÃƒÂ£o leve: adiciona colunas novas no consolidado sem precisar de Alembic.
-    try:
-        cols = [r[1] for r in db.session.execute(text("PRAGMA table_info(ensaio_consolidado)")).all()]
-        alter_needed = False
-
-        # MantÃƒÂ©m compatibilidade com bancos locais legados.
-        colunas_esperadas = {
-            "updated_at": "DATETIME",
-            "dureza": "REAL",
-            "densidade": "REAL",
-            "abrasao": "REAL",
-            "resiliencia": "REAL",
-            "tensao_ruptura": "REAL",
-            "alongamento": "REAL",
-            "rasgo": "REAL",
-            "modulo_100": "REAL",
-            "modulo_300": "REAL",
-            "origem_lab_file": "TEXT",
-            "ids_agrupados": "TEXT",
-            "temps_plato": "TEXT",
-            "temp_reo": "REAL",
-            "temp_visc": "REAL",
-            "ids_reo": "TEXT",
-            "ids_visc": "TEXT",
-            "origem_viscosidade": "TEXT",
-            "ts2_alta": "REAL",
-            "t90_alta": "REAL",
-            "ts2_baixa": "REAL",
-            "t90_baixa": "REAL",
-            "reometro_alta": "TEXT",
-            "reometro_baixa": "TEXT",
-            "metodo_identificacao": "TEXT",
-            "lote_original": "TEXT",
-            "material_original": "TEXT",
-        }
-
-        for nome_coluna, tipo_sql in colunas_esperadas.items():
-            if nome_coluna not in cols:
-                db.session.execute(text(f"ALTER TABLE ensaio_consolidado ADD COLUMN {nome_coluna} {tipo_sql}"))
-                alter_needed = True
-
-        if alter_needed:
-            db.session.commit()
-            print("Migracao aplicada: schema de ensaio_consolidado atualizado.")
-    except Exception as e:
-        db.session.rollback()
-        print(f"Aviso: falha na migracao de ensaio_consolidado: {e}")
-    if EnsaioConsolidado.query.first():
-        recarregar_cache_memoria()
-
-@login_manager.user_loader
-def load_user(user_id):
-    return Usuario.query.get(int(user_id))
-
+app = create_app()
 
 # ==========================================
-# 0. CONFIGURAÃƒâ€¡ÃƒÆ’O DE APRENDIZADO (SQLALCHEMY)
+# 0. CONFIGURACAO DE APRENDIZADO (SQLALCHEMY)
 # ==========================================
 
 def aplicar_sobreposicao_local(dados_brutos):
+    return apply_learning_overlay(dados_brutos)
+
     """
     LÃƒÂª as regras de aprendizado no SQLAlchemy e aplica em memÃƒÂ³ria sobre os ensaios.
     """
@@ -506,70 +330,14 @@ def aplicar_limpeza_lotes_no_consolidado():
 
 
 # ==========================================
-# 1. INICIALIZAÃƒâ€¡ÃƒÆ’O E CACHE
+# 1. INICIALIZACAO E CACHE
 # ==========================================
-print("\n=== REOSCORE V13 (MODULARIZED & SIDECAR) ===")
-
-# Certifica que o ETL vai usar somente a planilha baixada do SharePoint
-caminho_sharepoint_inicial = preparar_planilha_sharepoint(forcar_download=False)
-if caminho_sharepoint_inicial:
-    print(f"  > Planilha SharePoint configurada em: {caminho_sharepoint_inicial}")
-else:
-    print("[WARN] Aviso: Planilha do SharePoint nao configurada. Use 'Atualizar Dados' para sincronizar.")
-
-with app.app_context():
-    carregar_referencias_estaticas()
-
-
-
-# ==========================================
-# 2. ROTAS DE AUTENTICAÃƒâ€¡ÃƒÆ’O
-# ==========================================
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        user = Usuario.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            login_user(user)
-            return redirect(url_for('dashboard_home'))
-        else:
-            flash('Login ou senha invÃƒÂ¡lidos.', 'danger')
-            
-    return render_template('login.html')
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash('VocÃƒÂª saiu do sistema.', 'info')
-    return redirect(url_for('login'))
-
-@app.route('/criar_admin')
-def criar_admin():
-    if Usuario.query.filter_by(username='admin').first():
-        return "Admin jÃƒÂ¡ existe."
-    
-    novo_admin = Usuario(username='admin', role='admin')
-    novo_admin.set_password('senha123')
-    db.session.add(novo_admin)
-    db.session.commit()
-    return "Admin criado com sucesso! (User: admin / Pass: senha123)"
-
-@app.route('/criar_operador')
-def criar_operador():
-    if Usuario.query.filter_by(username='operador').first():
-        return "UsuÃƒÂ¡rio 'operador' jÃƒÂ¡ existe."
-    
-    novo_user = Usuario(username='operador', role='operador')
-    novo_user.set_password('vulca123')
-    db.session.add(novo_user)
-    db.session.commit()
-    return "UsuÃƒÂ¡rio 'operador' criado com sucesso! (User: operador / Pass: vulca123)"
+bootstrap_operacional(
+    app,
+    baixar_excel_sharepoint,
+    carregar_referencias_estaticas,
+    recarregar_cache_fn=recarregar_cache_memoria,
+)
 
 # ==========================================
 # 3. ROTAS PRINCIPAIS (DASHBOARD)
@@ -581,7 +349,7 @@ def rota_atualizar():
     try:
         # --- PASSO 1: DOWNLOAD SHAREPOINT ---
         if baixar_excel_sharepoint:
-            caminho_baixado = preparar_planilha_sharepoint(forcar_download=True)
+            caminho_baixado = preparar_planilha_sharepoint(baixar_excel_sharepoint, forcar_download=True)
             if caminho_baixado:
                 flash("Ã¢Å“â€¦ Planilha baixada do SharePoint com sucesso!", "success")
             else:
@@ -616,8 +384,8 @@ def rota_atualizar():
 def rota_aplicar_correcoes():
     try:
         recarregar_aprendizado_memoria()
-        total_ajustados = aplicar_correcoes_persistidas_no_consolidado()
-        total_lotes_limpos = aplicar_limpeza_lotes_no_consolidado()
+        total_ajustados = apply_persisted_corrections_to_consolidated()
+        total_lotes_limpos = apply_lot_cleanup_to_consolidated()
         qtd_cache = recarregar_cache_memoria()
 
         flash(
@@ -634,7 +402,7 @@ def rota_aplicar_correcoes():
     if next_url and _is_safe_redirect_url(next_url):
         return redirect(next_url)
 
-    return redirect(url_for('pagina_config', _anchor='ensinar'))
+    return redirect(url_for('admin.pagina_config', _anchor='ensinar'))
 
 @app.route('/')
 @login_required
@@ -1132,539 +900,6 @@ def api_estatisticas_massa(cod_sankhya, parametro):
         return jsonify({'error': str(exc)}), 500
 
 
-@app.route('/analise/<int:id_ensaio>')
-@login_required
-def analise_curva(id_ensaio):
-    """
-    Rota analitica: detalhes de um ensaio especifico.
-    """
-    ensaio = EnsaioConsolidado.query.get_or_404(id_ensaio)
-
-    # Detalhe persistido da ultima execucao da engine para este ensaio.
-    resultado = (
-        ScoreResultado.query
-        .filter_by(id_ensaio=id_ensaio)
-        .order_by(ScoreResultado.id.desc())
-        .first()
-    )
-    detalhes_score = resultado.detalhes_log if resultado else {}
-
-    if isinstance(detalhes_score, dict) and 'params' in detalhes_score:
-        detalhes_score = detalhes_score.get('params') or {}
-
-    def _tem_valor(v):
-        return v is not None
-
-    def _to_params_dict(log):
-        if not isinstance(log, dict):
-            return {}
-        if isinstance(log.get('params'), dict):
-            return log.get('params') or {}
-        return log
-
-    tem_alta = _tem_valor(getattr(ensaio, 'ts2_alta', None)) or _tem_valor(getattr(ensaio, 't90_alta', None))
-    tem_baixa = _tem_valor(getattr(ensaio, 'ts2_baixa', None)) or _tem_valor(getattr(ensaio, 't90_baixa', None))
-    detalhes_por_perfil = []
-
-    versao_engine = None
-    if resultado and getattr(resultado, 'id_versao', None):
-        versao_engine = ScoreVersao.query.get(resultado.id_versao)
-    if versao_engine is None:
-        versao_engine = ScoreVersao.query.filter_by(status='ACTIVE').order_by(ScoreVersao.id.desc()).first()
-
-    if versao_engine:
-        engine = ScoringEngine(versao_engine)
-        payload_base = {
-            'id_ensaio': ensaio.id_ensaio,
-            'cod_sankhya': ensaio.cod_sankhya,
-            'viscosidade': ensaio.viscosidade,
-            'origem_viscosidade': ensaio.origem_viscosidade,
-            'temp_plato': ensaio.temp_plato,
-            'ts2': ensaio.ts2,
-            't90': ensaio.t90,
-            'ts2_alta': getattr(ensaio, 'ts2_alta', None),
-            't90_alta': getattr(ensaio, 't90_alta', None),
-            'ts2_baixa': getattr(ensaio, 'ts2_baixa', None),
-            't90_baixa': getattr(ensaio, 't90_baixa', None),
-            'reometro_alta': getattr(ensaio, 'reometro_alta', None),
-            'reometro_baixa': getattr(ensaio, 'reometro_baixa', None),
-        }
-
-        perfis = []
-        if tem_alta:
-            perfis.append('alta')
-        if tem_baixa:
-            perfis.append('baixa')
-        if not perfis:
-            perfis.append('auto')
-
-        for perfil in perfis:
-            dados = dict(payload_base)
-            if perfil == 'alta':
-                dados['temp_plato'] = max(float(dados.get('temp_plato') or 0), 175.0)
-                titulo = 'Reometria Alta'
-            elif perfil == 'baixa':
-                dados['temp_plato'] = 120.0
-                titulo = 'Reometria Baixa'
-            else:
-                titulo = 'Reometria'
-
-            ensaio_tmp = type('EnsaioTmp', (), dados)()
-            res_tmp = engine.calcular(ensaio_tmp)
-            detalhes_por_perfil.append({
-                'perfil': perfil,
-                'titulo': titulo,
-                'score': float(res_tmp.score or 0),
-                'acao': res_tmp.acao,
-                'params': _to_params_dict(res_tmp.detalhes_log or {}),
-            })
-
-    if not detalhes_por_perfil and isinstance(detalhes_score, dict) and detalhes_score:
-        detalhes_por_perfil.append({
-            'perfil': 'auto',
-            'titulo': 'Reometria',
-            'score': float(getattr(ensaio, 'score_final', 0) or 0),
-            'acao': getattr(ensaio, 'acao_recomendada', ''),
-            'params': detalhes_score,
-        })
-
-    return render_template(
-        'detalhe_curva.html',
-        ensaio=ensaio,
-        detalhes=detalhes_score,
-        detalhes_por_perfil=detalhes_por_perfil,
-    )
-
-# ==========================================
-# 4. ROTAS DE CONFIGURAÃƒâ€¡ÃƒÆ’O (ADMIN)
-# ==========================================
-
-@app.route('/config')
-@login_required
-def pagina_config():
-    # OBS: Se o usuÃƒÂ¡rio NÃƒÆ’O for admin, ele ainda vai carregar os dados de materiais
-    # abaixo, mas o template nÃƒÂ£o vai mostrar. NÃƒÂ£o ÃƒÂ© crÃƒÂ­tico para performance.
-    
-    # === PARTE 1: CONFIGURAÃƒâ€¡ÃƒÆ’O DE MATERIAIS ===
-    regras_acao = carregar_regras_acao()
-    configs_massas = carregar_configuracoes()
-
-    query = request.args.get('q', '').strip().upper()
-    filtro_tipo = request.args.get('tipo', '')
-    filtro_status = request.args.get('status', '')
-    
-    # PaginaÃƒÂ§ÃƒÂ£o de Materiais
-    page_mat = request.args.get('page_mat', 1, type=int) 
-    
-    sort_by = request.args.get('sort', 'descricao') 
-    order = request.args.get('order', 'asc')
-    LIMIT = 20
-
-    CATALOGO_ATUAL = get_catalogo_codigo()
-    produtos_filtrados = []
-
-    for p in CATALOGO_ATUAL.values():
-        if query and (query not in str(p.cod_sankhya) and query not in p.descricao.upper()): continue
-        if filtro_tipo and p.tipo != filtro_tipo: continue
-        if filtro_status:
-            tem_conteudo = (
-                (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or 
-                (p.parametros and len(p.parametros) > 0)
-            )
-            if filtro_status == 'OK' and not tem_conteudo: continue
-            if filtro_status == 'PENDENTE' and tem_conteudo: continue
-        produtos_filtrados.append(p)
-    
-    reverse = (order == 'desc')
-    if sort_by == 'cod': produtos_filtrados.sort(key=lambda x: x.cod_sankhya, reverse=reverse)
-    elif sort_by == 'status':
-        def get_status_sort(p):
-            return (p.perfis and (p.perfis.get('alta') or p.perfis.get('baixa'))) or (p.parametros and len(p.parametros) > 0)
-        produtos_filtrados.sort(key=get_status_sort, reverse=reverse)
-    else: produtos_filtrados.sort(key=lambda x: x.descricao, reverse=reverse)
-
-    total_itens = len(produtos_filtrados)
-    total_paginas_mat = math.ceil(total_itens / LIMIT)
-    page_mat = max(1, min(page_mat, total_paginas_mat)) if total_paginas_mat > 0 else 1
-    
-    start = (page_mat - 1) * LIMIT
-    end = start + LIMIT
-    produtos_paginados = produtos_filtrados[start:end]
-
-    # === PARTE 2: DADOS DE AUDITORIA ===
-    # Recupera cache
-    dados_cache = cache_service.get()
-    ensaios_audit = []
-    materiais_audit = []
-    
-    if dados_cache:
-        ensaios_raw = dados_cache['dados']
-        materiais_audit = _normalizar_lista_materiais(dados_cache.get('materiais'))
-        
-        f_data = request.args.get('audit_data', '')
-        f_status = request.args.get('audit_status', '')
-        f_busca = request.args.get('audit_busca', '').upper().strip()
-        
-        page_audit = request.args.get('page_audit', 1, type=int)
-        per_page_audit = 50
-
-        # Filtragem em memÃƒÂ³ria
-        for e in ensaios_raw:
-            if f_data and e.data_hora.strftime('%Y-%m-%d') != f_data: continue
-            if f_status and e.metodo_identificacao != f_status: continue
-            if f_busca and f_busca not in str(e.lote).upper(): continue
-
-            # LÃƒÂ³gica PadrÃƒÂ£o: Esconde 'LOTE' se sem filtros
-            if not f_status and not f_busca and not f_data:
-                if e.metodo_identificacao == 'LOTE': continue
-
-            ensaios_audit.append(e)
-
-        # OrdenaÃƒÂ§ÃƒÂ£o Auditoria
-        peso = {'FANTASMA': 100, 'TEXTO': 90, 'MANUAL': 10, 'LOTE': 0}
-        def get_data_segura(x): return x.data_hora if x.data_hora else datetime.min
-        
-        ensaios_audit.sort(
-            key=lambda x: (peso.get(x.metodo_identificacao, 0), get_data_segura(x)), 
-            reverse=True
-        )
-
-        total_registros_audit = len(ensaios_audit)
-        total_paginas_audit = math.ceil(total_registros_audit / per_page_audit)
-        page_audit = max(1, min(page_audit, total_paginas_audit)) if total_paginas_audit > 0 else 1
-        
-        start_a = (page_audit - 1) * per_page_audit
-        end_a = start_a + per_page_audit
-        ensaios_audit_paginados = ensaios_audit[start_a:end_a]
-    else:
-        ensaios_audit_paginados = []
-        total_paginas_audit = 1
-        total_registros_audit = 0
-        page_audit = 1
-
-    # === PARTE 3: GESTÃƒÆ’O DE USUÃƒÂRIOS (Admin) ===
-    usuarios_lista = []
-    if current_user.role == 'admin':
-        usuarios_lista = Usuario.query.all()
-
-    return render_template(
-        'config.html', 
-        # Dados Materiais
-        produtos=produtos_paginados,
-        configs_massas=configs_massas,
-        regras_acao=regras_acao,
-        query=query, filtro_tipo=filtro_tipo, filtro_status=filtro_status,
-        pagina_atual_mat=page_mat, total_paginas_mat=total_paginas_mat, total_itens_mat=total_itens,
-        sort_by=sort_by, order=order,
-        
-        # Dados Auditoria
-        ensaios_audit=ensaios_audit_paginados,
-        materiais_audit=materiais_audit,
-        pagina_atual_audit=page_audit,
-        total_paginas_audit=total_paginas_audit,
-        total_registros_audit=total_registros_audit,
-        audit_busca=request.args.get('audit_busca', ''),
-        audit_status=request.args.get('audit_status', ''),
-        audit_data=request.args.get('audit_data', ''),
-
-        # Dados UsuÃƒÂ¡rios
-        usuarios=usuarios_lista
-    )
-
-@app.route('/adicionar_usuario', methods=['POST'])
-@login_required
-def adicionar_usuario():
-    if current_user.role != 'admin':
-        flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard_home'))
-        
-    username = request.form.get('username')
-    password = request.form.get('password')
-    role = request.form.get('role')
-
-    if not username or not password or not role:
-        flash("Preencha usuÃƒÂ¡rio, senha e perfil.", "warning")
-        return redirect(url_for('pagina_config', _anchor='usuarios'))
-
-    if Usuario.query.filter_by(username=username).first():
-        flash(f"UsuÃƒÂ¡rio '{username}' jÃƒÂ¡ existe.", "warning")
-    else:
-        novo_user = Usuario(username=username, role=role)
-        novo_user.set_password(password)
-        db.session.add(novo_user)
-        db.session.commit()
-        flash(f"UsuÃƒÂ¡rio '{username}' criado com sucesso!", "success")
-        
-    return redirect(url_for('pagina_config', _anchor='usuarios'))
-
-@app.route('/editar_usuario', methods=['POST'])
-@login_required
-def editar_usuario():
-    if current_user.role != 'admin':
-        flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard_home'))
-        
-    user_id = request.form.get('user_id')
-    novo_username = request.form.get('username')
-    nova_senha = request.form.get('password')
-    novo_role = request.form.get('role')
-    
-    user = Usuario.query.get(user_id)
-    if not user:
-        flash("UsuÃƒÂ¡rio nÃƒÂ£o encontrado.", "danger")
-        return redirect(url_for('pagina_config', _anchor='usuarios'))
-        
-    # Verifica se o novo username jÃƒÂ¡ existe (se for diferente do atual)
-    if novo_username != user.username:
-        existente = Usuario.query.filter_by(username=novo_username).first()
-        if existente:
-            flash(f"O nome de usuÃƒÂ¡rio '{novo_username}' jÃƒÂ¡ estÃƒÂ¡ em uso.", "warning")
-            return redirect(url_for('pagina_config', _anchor='usuarios'))
-    
-    # Atualiza dados
-    user.username = novo_username
-    user.role = novo_role
-    
-    # SÃƒÂ³ atualiza a senha se for fornecida
-    if nova_senha and nova_senha.strip():
-        user.set_password(nova_senha)
-        
-    try:
-        db.session.commit()
-        flash(f"UsuÃƒÂ¡rio '{user.username}' atualizado com sucesso!", "success")
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Erro ao atualizar usuÃƒÂ¡rio: {e}", "danger")
-        
-    return redirect(url_for('pagina_config', _anchor='usuarios'))
-
-@app.route('/remover_usuario/<int:user_id>')
-@login_required
-def remover_usuario(user_id):
-    if current_user.role != 'admin':
-        flash("Acesso negado.", "danger")
-        return redirect(url_for('dashboard_home'))
-        
-    user = Usuario.query.get(user_id)
-    if user:
-        if user.id == current_user.id:
-            flash("VocÃƒÂª nÃƒÂ£o pode remover a si mesmo.", "danger")
-        else:
-            db.session.delete(user)
-            db.session.commit()
-            flash(f"UsuÃƒÂ¡rio '{user.username}' removido.", "success")
-    
-    return redirect(url_for('pagina_config', _anchor='usuarios'))
-
-@app.route('/salvar_regras', methods=['POST'])
-@login_required
-def salvar_regras():
-    if current_user.role != 'admin': return redirect(url_for('dashboard_home'))
-
-    # Coleta dados das listas do formulÃƒÂ¡rio
-    nomes = request.form.getlist('nome[]')
-    scores = request.form.getlist('min_score[]')
-    acoes = request.form.getlist('acao[]')
-    cores = request.form.getlist('cor[]')
-    marcados = request.form.getlist('exige_visc_real') 
-    
-    novas_regras = []
-    for i in range(len(nomes)):
-        # Verifica se o ÃƒÂ­ndice atual estÃƒÂ¡ na lista de checkboxes marcados
-        eh_marcado = str(i) in marcados
-        novas_regras.append({
-            "id": i+1,
-            "nome": nomes[i],
-            "min_score": float(scores[i]) if scores[i] else 0,
-            "exige_visc_real": eh_marcado,
-            "acao": acoes[i],
-            "cor": cores[i]
-        })
-        
-    salvar_regras_acao(novas_regras)
-    flash("Regras de aÃƒÂ§ÃƒÂ£o globais atualizadas!", "success")
-    return redirect(url_for('pagina_config'))
-
-
-@app.route('/salvar_config', methods=['POST'])
-@login_required
-def salvar_config():
-    if current_user.role != 'admin':
-        return redirect(url_for('dashboard_home'))
-
-    cod = request.form.get('cod_sankhya')
-    
-    def f(val): return float(val.replace(',', '.')) if val and val.strip() else None
-    def i(val): return int(val) if val and val.strip() else 0
-    
-    specs = {}
-    cfg_atual_produto = (carregar_configuracoes().get(str(cod), {}) or {})
-    if isinstance(cfg_atual_produto, dict):
-        for chave_custom in (
-            'regra_abrasao_5n',
-            'abrasao_5n_dureza_min',
-            'abrasao_5n_dureza_max',
-            'abrasao_metodologia_5n_dureza_min',
-            'abrasao_metodologia_5n_dureza_max',
-        ):
-            if chave_custom in cfg_atual_produto:
-                specs[chave_custom] = cfg_atual_produto[chave_custom]
-    
-    # --- 1. CAPTURA DE CABEÃƒâ€¡ALHO (TEMP/TEMPO) ---
-    # Captura Cinza
-    t_cinza = f(request.form.get('alta_cinza_temp_padrao'))
-    tempo_cinza = f(request.form.get('alta_cinza_tempo_total'))
-    
-    # Captura Preto
-    t_preto = f(request.form.get('alta_preto_temp_padrao'))
-    tempo_preto = f(request.form.get('alta_preto_tempo_total'))
-    
-    # REGRA DE CÃƒâ€œPIA (CabeÃƒÂ§alho)
-    # Se Cinza tem e Preto nÃƒÂ£o -> Preto recebe Cinza
-    if t_cinza and not t_preto: t_preto = t_cinza
-    if tempo_cinza and not tempo_preto: tempo_preto = tempo_cinza
-    
-    # Se Preto tem e Cinza nÃƒÂ£o -> Cinza recebe Preto (vice-versa)
-    if t_preto and not t_cinza: t_cinza = t_preto
-    if tempo_preto and not tempo_cinza: tempo_cinza = tempo_preto
-
-    # Salva Alta
-    if t_cinza: specs['alta_cinza_temp_padrao'] = t_cinza
-    if tempo_cinza: specs['alta_cinza_tempo_total'] = tempo_cinza
-    if t_preto: specs['alta_preto_temp_padrao'] = t_preto
-    if tempo_preto: specs['alta_preto_tempo_total'] = tempo_preto
-
-    # Salva Baixa (Simples)
-    t_baixa = f(request.form.get('baixa_temp_padrao'))
-    tempo_baixa = f(request.form.get('baixa_tempo_total'))
-    if t_baixa: specs['baixa_temp_padrao'] = t_baixa
-    if tempo_baixa: specs['baixa_tempo_total'] = tempo_baixa
-
-    # Regra opcional da metodologia de abrasao 5 N (se vier da UI)
-    ab5n_min = f(request.form.get('abrasao_5n_dureza_min'))
-    ab5n_max = f(request.form.get('abrasao_5n_dureza_max'))
-    if ab5n_min is not None or ab5n_max is not None:
-        regra_existente = specs.get('regra_abrasao_5n', {}) if isinstance(specs.get('regra_abrasao_5n'), dict) else {}
-        specs['regra_abrasao_5n'] = {
-            'dureza_min': ab5n_min if ab5n_min is not None else regra_existente.get('dureza_min', 40.0),
-            'dureza_max': ab5n_max if ab5n_max is not None else regra_existente.get('dureza_max', 50.0),
-        }
-
-    # --- 2. CAPTURA DE PARÃƒâ€šMETROS (LIMITES) ---
-    params = ['Ts2', 'T90', 'Viscosidade']
-    
-    for p in params:
-        # Peso ÃƒÂ© compartilhado (vem de um input sÃƒÂ³)
-        peso_v = i(request.form.get(f"alta_{p}_peso"))
-        
-        # --- LÃƒâ€œGICA ALTA (CINZA vs PRETO) ---
-        # Leitura Cinza
-        min_c = f(request.form.get(f"alta_cinza_{p}_min"))
-        alvo_c = f(request.form.get(f"alta_cinza_{p}_alvo"))
-        max_c = f(request.form.get(f"alta_cinza_{p}_max"))
-        
-        # Leitura Preto
-        min_p = f(request.form.get(f"alta_preto_{p}_min"))
-        alvo_p = f(request.form.get(f"alta_preto_{p}_alvo"))
-        max_p = f(request.form.get(f"alta_preto_{p}_max"))
-        
-        # REGRA DE CÃƒâ€œPIA (Limites)
-        # Se configurou Cinza mas esqueceu Preto -> Copia
-        if (min_c or alvo_c or max_c) and not (min_p or alvo_p or max_p):
-            min_p, alvo_p, max_p = min_c, alvo_c, max_c
-            
-        # Se configurou Preto mas esqueceu Cinza -> Copia
-        elif (min_p or alvo_p or max_p) and not (min_c or alvo_c or max_c):
-            min_c, alvo_c, max_c = min_p, alvo_p, max_p
-
-        # GravaÃƒÂ§ÃƒÂ£o Cinza
-        if min_c is not None or alvo_c is not None or max_c is not None:
-            specs[f"alta_cinza_{p}"] = {
-                "min": min_c if min_c is not None else 0, 
-                "alvo": alvo_c if alvo_c is not None else 0, 
-                "max": max_c if max_c is not None else 0, 
-                "peso": peso_v
-            }
-            
-        # GravaÃƒÂ§ÃƒÂ£o Preto
-        if min_p is not None or alvo_p is not None or max_p is not None:
-            specs[f"alta_preto_{p}"] = {
-                "min": min_p if min_p is not None else 0, 
-                "alvo": alvo_p if alvo_p is not None else 0, 
-                "max": max_p if max_p is not None else 0, 
-                "peso": peso_v
-            }
-
-        # --- LÃƒâ€œGICA BAIXA (Mantida Simples) ---
-        min_b = f(request.form.get(f"baixa_{p}_min"))
-        alvo_b = f(request.form.get(f"baixa_{p}_alvo"))
-        max_b = f(request.form.get(f"baixa_{p}_max"))
-        peso_b = i(request.form.get(f"baixa_{p}_peso"))
-        
-        if min_b is not None or alvo_b is not None or max_b is not None:
-            specs[f"baixa_{p}"] = {
-                "min": min_b if min_b is not None else 0, "alvo": alvo_b if alvo_b is not None else 0,
-                "max": max_b if max_b is not None else 0, "peso": peso_b
-            }
-
-    # --- 3. ESPECIFICACOES DE PROPRIEDADES FISICAS ---
-    def add_spec_fisica(nome, min_v=None, max_v=None):
-        if min_v is None and max_v is None:
-            return
-        specs[f"baixa_{nome}"] = {
-            "min": min_v,
-            "alvo": None,
-            "max": max_v,
-            "peso": 0
-        }
-
-    # Min/Max
-    add_spec_fisica(
-        "Dureza",
-        f(request.form.get("fisica_Dureza_min")),
-        f(request.form.get("fisica_Dureza_max")),
-    )
-    add_spec_fisica(
-        "Densidade",
-        f(request.form.get("fisica_Densidade_min")),
-        f(request.form.get("fisica_Densidade_max")),
-    )
-    add_spec_fisica(
-        "Resiliencia",
-        f(request.form.get("fisica_Resiliencia_min")),
-        f(request.form.get("fisica_Resiliencia_max")),
-    )
-
-    # Apenas Max
-    add_spec_fisica(
-        "Abrasao",
-        None,
-        f(request.form.get("fisica_Abrasao_max")),
-    )
-
-    # Apenas Min
-    add_spec_fisica(
-        "TensaoRuptura",
-        f(request.form.get("fisica_TensaoRuptura_min")),
-        None,
-    )
-    add_spec_fisica(
-        "Alongamento",
-        f(request.form.get("fisica_Alongamento_min")),
-        None,
-    )
-    add_spec_fisica(
-        "Rasgo",
-        f(request.form.get("fisica_Rasgo_min")),
-        None,
-    )
-
-    salvar_configuracao(cod, specs)
-    carregar_referencias_estaticas()
-    
-    flash(f"ConfiguraÃƒÂ§ÃƒÂ£o do produto {cod} salva (Sincronizada Cinza/Preto)!", "success")
-    return redirect(url_for('pagina_config', q=cod))
-
 @app.route('/api/grafico')
 @login_required
 def api_grafico():
@@ -1857,81 +1092,6 @@ def api_grafico():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/auditoria')
-@login_required
-def pagina_auditoria():
-    # ... (seu cÃƒÂ³digo existente de filtro e ordenaÃƒÂ§ÃƒÂ£o) ...
-
-    # --- CORREÃƒâ€¡ÃƒÆ’O AQUI ---
-    # Cria um dicionÃƒÂ¡rio mutÃƒÂ¡vel a partir dos argumentos da URL
-    filtros_para_template = dict(request.args)
-    # Remove 'page' para evitar conflito no url_for do template
-    if 'page' in filtros_para_template:
-        del filtros_para_template['page']
-
-    # Recupera dados se for chamado diretamente (mantendo compatibilidade)
-    dados_cache = cache_service.get()
-    ensaios = dados_cache['dados'] if dados_cache else []
-    materiais = _normalizar_lista_materiais(dados_cache.get('materiais')) if dados_cache else []
-    
-    # PaginaÃƒÂ§ÃƒÂ£o simples para manter a rota funcionando
-    page = request.args.get('page', 1, type=int)
-    per_page = 50
-    total_registros = len(ensaios)
-    total_paginas = math.ceil(total_registros / per_page)
-    ensaios_paginados = ensaios[(page-1)*per_page : page*per_page]
-
-    return render_template(
-        'auditoria.html', 
-        ensaios=ensaios_paginados, 
-        materiais=materiais,
-        pagina_atual=page,
-        total_paginas=total_paginas,
-        total_registros=total_registros,
-        request_args=filtros_para_template 
-    )
-
-@app.route('/salvar_correcao', methods=['POST'])
-@login_required
-def salvar_correcao():
-    # 1. Coleta dados
-    texto_original = request.form.get('lote_original_key') or request.form.get('texto_original')
-    lote_correto = request.form.get('novo_lote') or request.form.get('lote_correto')
-    massa_correta = request.form.get('massa') or request.form.get('massa_correta')
-
-    if not texto_original or not lote_correto:
-        flash("Dados incompletos para salvar.", "warning")
-        return redirect(url_for('pagina_config', _anchor='ensinar'))
-
-    massa_raw = str(massa_correta or '').strip()
-    if not massa_raw or massa_raw.upper() in {'NONE', 'NULL', 'NULO', 'SELECIONE...', 'SELECIONE'}:
-        flash("Selecione uma massa valida antes de salvar.", "warning")
-        return redirect(url_for('pagina_config', _anchor='ensinar'))
-
-    key_original = str(texto_original).strip().upper()
-    lote_clean = str(lote_correto).strip().upper()
-    massa_clean = massa_raw.upper()
-
-    # --- NOVOS DADOS DE LOG ---
-    user_log = current_user.username
-    time_log = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    try:
-        ensinar_lote(key_original, lote_clean, massa_clean, usuario=user_log)
-        recarregar_aprendizado_memoria()
-        total_ajustados = aplicar_correcoes_persistidas_no_consolidado([key_original])
-        recarregar_cache_memoria()
-
-        flash(
-            f"Regra salva e aplicada! Ajustados: {total_ajustados} "
-            f"- {user_log} as {time_log}.",
-            "success",
-        )
-    except Exception as e:
-        db.session.rollback()
-        print(f"[ERRO] Erro ao salvar no SQLite: {e}")
-        flash("Erro ao salvar regra localmente.", "danger")
-
-    return redirect(url_for('pagina_config', _anchor='ensinar'))
 
 
 # ==========================================
@@ -3360,163 +2520,6 @@ def lista_formulas():
     formulas = Formula.query.order_by(Formula.cd_produto).all()
     # Passamos o catÃƒÂ¡logo tambÃƒÂ©m, caso precise corrigir nomes na listagem
     return render_template('lista_formulas.html', formulas=formulas, catalogo=get_catalogo_codigo())
-
-@app.route('/reometria/fit')
-@login_required
-def reometria_fit():
-    filters = {
-        'date_start': request.args.get('date_start', ''),
-        'date_end': request.args.get('date_end', ''),
-        'q': request.args.get('q', ''),
-    }
-    ensaios = list_ensaios_for_fit(filters['date_start'] or None, filters['date_end'] or None, filters['q'] or None)
-    return render_template('reometria/fit.html', ensaios=ensaios, filters=filters)
-
-
-@app.route('/reometria/fit/preview/<int:cod_ensaio>')
-@login_required
-def reometria_fit_preview(cod_ensaio):
-    curve = get_preview_curve(cod_ensaio)
-    if not curve:
-        flash('Curva não encontrada.', 'warning')
-        return redirect(url_for('reometria_fit'))
-    return render_template('reometria/preview.html', curve=curve)
-
-
-@app.route('/reometria/fit/run', methods=['POST'])
-@login_required
-def reometria_fit_run():
-    cod_ensaios = [int(x) for x in request.form.getlist('cod_ensaios') if str(x).strip()]
-    if len(cod_ensaios) < 2:
-        flash('Selecione pelo menos 2 curvas para o ajuste.', 'warning')
-        return redirect(url_for('reometria_fit'))
-
-    payload = run_fit(cod_ensaios)
-    if not payload.get('success'):
-        flash(payload.get('message', 'Ajuste falhou.'), 'danger')
-    else:
-        flash('Ajuste executado com sucesso.', 'success')
-    return redirect(url_for('reometria_fit_result', fit_id=payload['fit_id']))
-
-
-@app.route('/reometria/fit/result/<fit_id>')
-@login_required
-def reometria_fit_result(fit_id):
-    payload = load_fit_payload(fit_id)
-    if not payload:
-        flash('Resultado de fit não encontrado.', 'danger')
-        return redirect(url_for('reometria_fit'))
-    alpha_time_comparison = build_alpha_time_comparison(payload)
-    return render_template('reometria/fit_result.html', payload=payload, alpha_time_comparison=alpha_time_comparison)
-
-
-@app.route('/reometria/fit/update/<fit_id>', methods=['POST'])
-@login_required
-def reometria_fit_update(fit_id):
-    data = request.get_json(silent=True) or {}
-
-    k0 = _parse_float_locale(data.get('k0'), default=None)
-    ea = _parse_float_locale(data.get('Ea'), default=None)
-    n = _parse_float_locale(data.get('n'), default=None)
-
-    if k0 is None or ea is None or n is None:
-        return jsonify({"success": False, "message": "Parametros invalidos para atualizacao."}), 400
-    if k0 <= 0:
-        return jsonify({"success": False, "message": "k0 deve ser positivo."}), 400
-
-    payload = update_fit_parameters(fit_id, k0, ea, n)
-    if not payload:
-        return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
-
-    return jsonify(
-        {
-            "success": True,
-            "message": "Parametros atualizados com sucesso.",
-            "fit_id": payload.get("fit_id"),
-            "k0": float(payload.get("k0", 0.0)),
-            "Ea": float(payload.get("Ea", 0.0)),
-            "n": float(payload.get("n", 0.0)),
-        }
-    )
-
-
-@app.route('/reometria/simulate/<fit_id>')
-@login_required
-def reometria_simulate_form(fit_id):
-    mode = request.args.get('mode', 'prensa')
-    if mode not in ('prensa', 'autoclave'):
-        mode = 'prensa'
-    payload = load_fit_payload(fit_id)
-    if not payload:
-        flash('Fit não encontrado.', 'danger')
-        return redirect(url_for('reometria_fit'))
-    return render_template('reometria/sim_form.html', fit_id=fit_id, mode=mode)
-
-
-@app.route('/reometria/simulate/run/<fit_id>', methods=['POST'])
-@login_required
-def reometria_simulate_run(fit_id):
-    payload = load_fit_payload(fit_id)
-    if not payload:
-        flash('Fit não encontrado.', 'danger')
-        return redirect(url_for('reometria_fit'))
-
-    mode = request.form.get('mode', 'prensa')
-    if mode not in ('prensa', 'autoclave'):
-        mode = 'prensa'
-
-    dim = _parse_int_locale(request.form.get('dim', 1), default=1, min_value=1)
-    if dim not in (1, 2, 3):
-        dim = 1
-
-    shape = str(request.form.get('shape', '200') or '200').strip()
-    shape = shape.replace(';', ',').replace('x', ',').replace('X', ',')
-
-    dx = _parse_float_locale(request.form.get('dx', 0.001), default=0.001)
-    dt = _parse_float_locale(request.form.get('dt', 0.5), default=0.5)
-    t_end = _parse_float_locale(request.form.get('t_end', 600), default=600.0)
-    mold_temp_c = _parse_float_locale(request.form.get('mold_temp_c', 170), default=170.0)
-    init_temp_c = _parse_float_locale(request.form.get('init_temp_c', 25), default=25.0)
-    ramp_rate = _parse_float_locale(request.form.get('ramp_rate', 0), default=0.0)
-    snapshot_every = _parse_int_locale(request.form.get('snapshot_every', 20), default=20, min_value=1)
-
-    if dx is None or dx <= 0:
-        dx = 0.001
-    if dt is None or dt <= 0:
-        dt = 0.5
-    if t_end is None or t_end <= 0:
-        t_end = 600.0
-    if mold_temp_c is None:
-        mold_temp_c = 170.0
-    if init_temp_c is None:
-        init_temp_c = 25.0
-    if ramp_rate is None:
-        ramp_rate = 0.0
-
-    try:
-        sim_id, _ = run_simulation(payload, mode, dim, shape, dx, dt, t_end, mold_temp_c, init_temp_c, ramp_rate, snapshot_every)
-    except Exception as exc:
-        flash(f'Falha ao executar simulacao: {exc}', 'danger')
-        return redirect(url_for('reometria_simulate_form', fit_id=fit_id, mode=mode))
-    return redirect(url_for('reometria_simulate_view', sim_id=sim_id))
-
-
-@app.route('/reometria/simulate/view/<sim_id>')
-@login_required
-def reometria_simulate_view(sim_id):
-    sim = load_simulation(sim_id)
-    if not sim:
-        flash('Simulação não encontrada.', 'danger')
-        return redirect(url_for('reometria_fit'))
-
-    serializable = {
-        **sim,
-        'times': sim['times'].tolist(),
-        't_snaps': sim['t_snaps'].tolist(),
-        'alpha_snaps': sim['alpha_snaps'].tolist(),
-    }
-    return render_template('reometria/sim_view.html', sim=sim, sim_json=json.dumps(serializable))
-
 
 if __name__ == '__main__':
     app.run(debug=True)

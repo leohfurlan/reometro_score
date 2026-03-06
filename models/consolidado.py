@@ -1,27 +1,20 @@
 from datetime import datetime
 import json
-import os
+
 from models.usuario import db
 from models.massa import Parametro
+from services.score_configuration_service import get_score_specs
 
-CONFIG_MASSAS_FILE = "config_massas.json"
 _CONFIG_MASSAS_CACHE = None
-_CONFIG_MASSAS_MTIME = None
+
 
 def _get_config_massas():
-    global _CONFIG_MASSAS_CACHE, _CONFIG_MASSAS_MTIME
-    try:
-        mtime = os.path.getmtime(CONFIG_MASSAS_FILE)
-    except OSError:
-        return {}
+    global _CONFIG_MASSAS_CACHE
 
-    if _CONFIG_MASSAS_CACHE is None or _CONFIG_MASSAS_MTIME != mtime:
-        try:
-            with open(CONFIG_MASSAS_FILE, "r", encoding="utf-8") as f:
-                _CONFIG_MASSAS_CACHE = json.load(f) or {}
-        except Exception:
-            _CONFIG_MASSAS_CACHE = {}
-        _CONFIG_MASSAS_MTIME = mtime
+    try:
+        _CONFIG_MASSAS_CACHE = get_score_specs(create_from_legacy=True) or {}
+    except Exception:
+        _CONFIG_MASSAS_CACHE = {}
 
     return _CONFIG_MASSAS_CACHE or {}
 
