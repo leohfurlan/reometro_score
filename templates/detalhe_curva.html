@@ -18,6 +18,10 @@
                     <span class="mx-2">&bull;</span>
                     <i class="fas fa-calendar me-1"></i> {{ ensaio.data_hora.strftime('%d/%m/%Y %H:%M') }}
                 </div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="badge bg-light text-dark border">Reometro Alta: {{ reometro_alta_label or "-" }}</span>
+                    <span class="badge bg-light text-dark border">Reometro Baixa: {{ reometro_baixa_label or "-" }}</span>
+                </div>
             </div>
         </div>
         <div class="col-md-4 text-end">
@@ -47,20 +51,29 @@
                             <strong>Reometria Alta:</strong>
                             Ts2={{ "%.2f"|format(ensaio.ts2_alta) if ensaio.ts2_alta is not none else "--" }},
                             T90={{ "%.2f"|format(ensaio.t90_alta) if ensaio.t90_alta is not none else "--" }},
-                            Reometro={{ ensaio.reometro_alta or "-" }}
+                            Reometro=<span class="badge bg-light text-dark border">{{ reometro_alta_label or "-" }}</span>
                         </div>
                         <div>
                             <strong>Reometria Baixa:</strong>
                             Ts2={{ "%.2f"|format(ensaio.ts2_baixa) if ensaio.ts2_baixa is not none else "--" }},
                             T90={{ "%.2f"|format(ensaio.t90_baixa) if ensaio.t90_baixa is not none else "--" }},
-                            Reometro={{ ensaio.reometro_baixa or "-" }}
+                            Reometro=<span class="badge bg-light text-dark border">{{ reometro_baixa_label or "-" }}</span>
                         </div>
                     </div>
                     {% if detalhes_por_perfil and detalhes_por_perfil|length > 0 %}
                         {% for bloco in detalhes_por_perfil %}
                         <div class="mb-3 border rounded p-2">
                             <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="fw-bold">{{ bloco.titulo }}</span>
+                                <div>
+                                    <div class="fw-bold">{{ bloco.titulo }}</div>
+                                    <div class="small text-muted">
+                                        Perfil usado: {{ bloco.meta_perfil or bloco.titulo }}
+                                        {% if bloco.reometro_label %}
+                                            <span class="mx-2">&bull;</span>
+                                            Reometro: <strong>{{ bloco.reometro_label }}</strong>
+                                        {% endif %}
+                                    </div>
+                                </div>
                                 <span class="badge {% if bloco.score >= 85 %}bg-success{% elif bloco.score >= 70 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
                                     Score {{ "%.0f"|format(bloco.score) }}
                                 </span>
@@ -125,9 +138,9 @@
                         Viscosidade: <span id="idsEnsaiosVisc">-</span>
                     </div>
                     <div class="text-muted small mb-2">
-                        Reometro Alta: <span id="reometrosAlta">{{ ensaio.reometro_alta or '-' }}</span>
+                        Reometro Alta: <span id="reometrosAlta">{{ reometro_alta_label or '-' }}</span>
                         <span class="mx-2">&bull;</span>
-                        Reometro Baixa: <span id="reometrosBaixa">{{ ensaio.reometro_baixa or '-' }}</span>
+                        Reometro Baixa: <span id="reometrosBaixa">{{ reometro_baixa_label or '-' }}</span>
                     </div>
 
                     <div id="containerDetailReo" class="mb-4" style="height: 220px; display: none;">
@@ -163,6 +176,28 @@
 
         let chartReo = null;
         let chartVisc = null;
+
+        function formatReometroLabel(value) {
+            const txt = String(value || '').trim();
+            if (!txt) return '';
+
+            const txtUpper = txt.toUpperCase();
+            if (txtUpper.includes('PRETO')) return 'Preto';
+            if (txtUpper.includes('BRANCO') || txtUpper.includes('CINZA')) return 'Cinza';
+            return '';
+        }
+
+        function formatReometroList(values, fallbackValue) {
+            const labels = (Array.isArray(values) ? values : [])
+                .map(formatReometroLabel)
+                .filter(Boolean);
+
+            if (labels.length) {
+                return [...new Set(labels)].join(' / ');
+            }
+
+            return formatReometroLabel(fallbackValue) || '-';
+        }
 
         function renderChart(ctx, currentChart, datasets, yLabel) {
             if (currentChart) currentChart.destroy();
@@ -233,8 +268,8 @@
                 if (idsReoAltaSpan) idsReoAltaSpan.textContent = (data.ids_reometria_alta && data.ids_reometria_alta.length) ? data.ids_reometria_alta.join(', ') : '-';
                 if (idsReoBaixaSpan) idsReoBaixaSpan.textContent = (data.ids_reometria_baixa && data.ids_reometria_baixa.length) ? data.ids_reometria_baixa.join(', ') : '-';
                 if (idsViscSpan) idsViscSpan.textContent = (data.ids_viscosidade && data.ids_viscosidade.length) ? data.ids_viscosidade.join(', ') : '-';
-                if (reometrosAltaSpan) reometrosAltaSpan.textContent = (data.reometros_alta && data.reometros_alta.length) ? data.reometros_alta.join(' / ') : (reometrosAltaSpan.textContent || '-');
-                if (reometrosBaixaSpan) reometrosBaixaSpan.textContent = (data.reometros_baixa && data.reometros_baixa.length) ? data.reometros_baixa.join(' / ') : (reometrosBaixaSpan.textContent || '-');
+                if (reometrosAltaSpan) reometrosAltaSpan.textContent = formatReometroList(data.reometros_alta, reometrosAltaSpan.textContent);
+                if (reometrosBaixaSpan) reometrosBaixaSpan.textContent = formatReometroList(data.reometros_baixa, reometrosBaixaSpan.textContent);
 
                 const reo = (data.reometria || []);
                 const visc = (data.viscosidade || []);

@@ -61,10 +61,11 @@ def alpha_model(t: np.ndarray, t_kelvin: np.ndarray, k0: float, ea: float, n: fl
     n_safe = float(np.clip(n, 0.5, 12.0))
     k_t = k0 * np.exp(-ea / (R_GAS * temp_safe))
 
-    # x = (k*t)^n = exp(n * ln(k*t)); using logs avoids power overflow in wide ranges.
-    ln_kt = np.log(np.maximum(k_t, 1e-300)) + np.log(np.maximum(t, 1e-12))
-    exp_arg = np.clip(n_safe * ln_kt, -700.0, 700.0)
-    x = np.exp(exp_arg)
+    # x = k(T) * t^n = exp(ln(k) + n*ln(t)); using logs avoids overflow in wide ranges.
+    t_safe = np.maximum(np.asarray(t, dtype=float), 0.0)
+    ln_x = np.log(np.maximum(k_t, 1e-300)) + (n_safe * np.log(np.maximum(t_safe, 1e-300)))
+    x = np.exp(np.clip(ln_x, -700.0, 700.0))
+    x = np.where((t_safe <= 0.0) | (k_t <= 0.0), 0.0, x)
     return x / (1.0 + x)
 
 
@@ -109,10 +110,14 @@ def fit_kinetics(curves: List[Dict]):
 def alpha_from_timeline(time: np.ndarray, temp_k: np.ndarray, k0: float, ea: float, n: float):
     time = np.asarray(time, dtype=float)
     temp_k = np.asarray(temp_k, dtype=float)
-    dt = np.diff(time, prepend=time[0])
-    dt[0] = 0.0
+
     k_t = np.maximum(k0 * np.exp(-ea / (R_GAS * np.maximum(temp_k, 1.0))), 0.0)
     n_safe = float(np.clip(n, 0.5, 12.0))
-    z = np.cumsum(np.power(k_t, 1.0 / n_safe) * dt)
-    z_n = np.power(np.maximum(z, 0.0), n_safe)
-    return z_n / (1.0 + z_n)
+
+    t_pow_n = np.power(np.maximum(time, 0.0), n_safe)
+    dt_pow_n = np.diff(t_pow_n, prepend=t_pow_n[0])
+    dt_pow_n[0] = 0.0
+    dt_pow_n = np.maximum(dt_pow_n, 0.0)
+
+    x = np.cumsum(k_t * dt_pow_n)
+    return x / (1.0 + x)

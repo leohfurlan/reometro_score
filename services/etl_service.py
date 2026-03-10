@@ -53,8 +53,9 @@ def _rotulo_reometro_por_descricao(descricao_grupo):
     if "PRETO" in txt:
         return "PRETO"
     if "BRANCO" in txt or "CINZA" in txt:
-        return "BRANCO"
-    return txt
+        return "CINZA"
+    # Qualquer outro nome de grupo nao representa o tipo de reometro (Cinza/Preto).
+    return None
 
 
 def _faixa_reometria(v_temp, descricao_grupo):
@@ -215,11 +216,29 @@ def _lote_generico_valido(token):
 
 
 def _ordenar_candidatos_genericos(candidatos):
+    # Usa o comprimento mais comum da planilha como referencia (fallback 5 digitos).
+    contagem_tam = {}
+    for chave in _MAPA_LOTES_PLANILHA.keys():
+        token = str(chave or "").strip().upper()
+        if re.fullmatch(r"\d+\.0+", token):
+            token = token.split(".", 1)[0]
+        if not re.fullmatch(r"\d+", token):
+            continue
+        tam = len(token.lstrip("0") or "0")
+        if 4 <= tam <= 7:
+            contagem_tam[tam] = contagem_tam.get(tam, 0) + 1
+
+    if contagem_tam:
+        tam_ref = max(contagem_tam.items(), key=lambda item: (item[1], -abs(item[0] - 5), item[0]))[0]
+    else:
+        tam_ref = 5
+
     def _rank(c):
         tam = len(c)
         faixa = 0 if 4 <= tam <= 7 else (1 if tam <= 10 else 2)
-        zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
-        return (faixa, zeros_fim, tam)
+        dist_ref = abs(tam - tam_ref)
+        zeros_fim = 1 if re.search(r"0{3,}$", c) else 0
+        return (faixa, dist_ref, zeros_fim, -tam)
 
     uniq = []
     for c in candidatos:
@@ -247,9 +266,24 @@ def _score_lote_limpo(candidato, origem):
     if not c:
         return (99, 99, 99, 99)
     origem_rank = 0 if origem in {"Asterisco", "Exato", "Regex"} else 1
-    faixa = 0 if 4 <= len(c) <= 7 else (1 if len(c) <= 10 else 2)
-    zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
-    return (origem_rank, faixa, zeros_fim, len(c))
+
+    contagem_tam = {}
+    for chave in _MAPA_LOTES_PLANILHA.keys():
+        token = str(chave or "").strip().upper()
+        if re.fullmatch(r"\d+\.0+", token):
+            token = token.split(".", 1)[0]
+        if not re.fullmatch(r"\d+", token):
+            continue
+        tam = len(token.lstrip("0") or "0")
+        if 4 <= tam <= 7:
+            contagem_tam[tam] = contagem_tam.get(tam, 0) + 1
+    tam_ref = max(contagem_tam.items(), key=lambda item: (item[1], -abs(item[0] - 5), item[0]))[0] if contagem_tam else 5
+
+    tam_c = len(c)
+    faixa = 0 if 4 <= tam_c <= 7 else (1 if tam_c <= 10 else 2)
+    dist_ref = abs(tam_c - tam_ref)
+    zeros_fim = 1 if re.search(r"0{3,}$", c) else 0
+    return (origem_rank, faixa, dist_ref, zeros_fim, -tam_c)
 
 def carregar_referencias_estaticas():
     """

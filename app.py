@@ -284,9 +284,12 @@ def _score_lote_extraido(candidato, origem):
     if not c:
         return (99, 99, 99, 99)
     origem_rank = 0 if origem in {"Asterisco", "Exato", "Regex"} else 1
-    faixa = 0 if 4 <= len(c) <= 7 else (1 if len(c) <= 10 else 2)
+    tam_ref = 5
+    tam_c = len(c)
+    faixa = 0 if 4 <= tam_c <= 7 else (1 if tam_c <= 10 else 2)
+    dist_ref = abs(tam_c - tam_ref)
     zeros_fim = 1 if re.search(r'0{3,}$', c) else 0
-    return (origem_rank, faixa, zeros_fim, len(c))
+    return (origem_rank, faixa, dist_ref, zeros_fim, -tam_c)
 
 
 def aplicar_limpeza_lotes_no_consolidado():
@@ -971,8 +974,8 @@ def api_grafico():
             if 'PRETO' in txt:
                 return 'PRETO'
             if 'BRANCO' in txt or 'CINZA' in txt:
-                return 'BRANCO'
-            return txt
+                return 'CINZA'
+            return None
 
         rows = []
         try:

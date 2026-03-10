@@ -77,9 +77,20 @@
                         {% set reo_usado = ensaio.reometro_alta or ensaio.reometro_baixa %}
                     {% endif %}
                     {% set reo_norm = (reo_usado or '')|lower %}
+                    {% set reo_label = none %}
+                    {% set reo_badge_class = 'bg-light text-dark border' %}
+                    {% if reo_usado %}
+                        {% if 'preto' in reo_norm %}
+                            {% set reo_label = 'Preto' %}
+                            {% set reo_badge_class = 'bg-dark text-white' %}
+                        {% elif 'branco' in reo_norm or 'cinza' in reo_norm %}
+                            {% set reo_label = 'Cinza' %}
+                            {% set reo_badge_class = 'bg-secondary-subtle text-secondary-emphasis border' %}
+                        {% endif %}
+                    {% endif %}
                     <div class="fw-bold truncate-responsive" title="{{ ensaio.lote }}">
                         {{ ensaio.lote }}
-                        {% if reo_usado %}
+                        {% if reo_label %}
                             {% if 'preto' in reo_norm %}
                                 <span class="ms-1" title="Reômetro usado: {{ reo_usado }}">🤖⚫</span>
                             {% else %}
@@ -87,6 +98,11 @@
                             {% endif %}
                         {% endif %}
                     </div>
+                    {% if reo_label %}
+                        <div class="mt-1">
+                            <span class="badge {{ reo_badge_class }}" title="Reometro usado na analise">Reometro {{ reo_label }}</span>
+                        </div>
+                    {% endif %}
                     {% if ensaio.batch %} <div class="text-muted small">Batch: {{ ensaio.batch }}</div> {% endif %}
                 </td>
                 <td class="col-temp">

@@ -1,6 +1,158 @@
 {% extends 'base.html' %}
 {% block title %}Visualizacao da Simulacao{% endblock %}
 {% block content %}
+<style>
+  .sim2d-panel {
+    background: #f7f9fc;
+    border: 1px solid #dbe2ea;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+
+  .sim2d-mode-buttons .btn {
+    min-width: 132px;
+  }
+
+  .sim2d-legend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .sim2d-legend-card {
+    background: #ffffff;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+
+  .sim2d-legend-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+  }
+
+  .sim2d-legend-bar {
+    height: 12px;
+    border-radius: 999px;
+    margin-bottom: 6px;
+    border: 1px solid #c8d2de;
+  }
+
+  .sim2d-legend-bar-cure {
+    background: linear-gradient(90deg, #0b4fa2 0%, #c62828 100%);
+  }
+
+  .sim2d-legend-bar-temp {
+    background: linear-gradient(90deg, #22c55e 0%, #facc15 50%, #f97316 100%);
+  }
+
+  .sim2d-legend-range {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: #334155;
+  }
+
+  .step-slider-card {
+    background: #ffffff;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  .step-slider-track {
+    height: 8px;
+    width: 100%;
+    border-radius: 999px;
+    background: #e5edf6;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+
+  .step-slider-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2563eb 0%, #60a5fa 100%);
+    border-radius: 999px;
+    transition: width 0.12s ease-out;
+  }
+
+  #step_idx_2d {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    margin: 8px 0 2px 0;
+  }
+
+  #step_idx_2d::-webkit-slider-runnable-track {
+    height: 10px;
+    border-radius: 999px;
+    background: #e5edf6;
+  }
+
+  #step_idx_2d::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #1d4ed8;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    margin-top: -6px;
+    cursor: pointer;
+  }
+
+  #step_idx_2d::-moz-range-track {
+    height: 10px;
+    border-radius: 999px;
+    background: #e5edf6;
+  }
+
+  #step_idx_2d::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #1d4ed8;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+  }
+
+  .step-slider-range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 2px;
+  }
+
+  .sim3d-render-panel {
+    background: #f8fafc;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+
+  .sim3d-render-track {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+  }
+
+  .sim3d-render-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #0ea5e9 0%, #2563eb 100%);
+    transition: width 0.16s ease-out;
+  }
+</style>
 <h2>Visualizacao da Simulacao {{ sim.sim_id }}</h2>
 <p><b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
 
@@ -14,7 +166,74 @@
 <div id="main_plot" style="height:520px;"></div>
 {% endif %}
 
+{% if sim.dim == 2 %}
+<div class="sim2d-panel">
+  <div class="row g-2">
+    <div class="col-md-4">
+      <div class="step-slider-card">
+        <label for="step_idx_2d" class="form-label mb-1"><b>Step (snapshot)</b></label>
+        <input
+          id="step_idx_2d"
+          type="range"
+          min="0"
+          max="{{ (sim.times|length - 1) if (sim.times|length > 0) else 0 }}"
+          value="{{ (sim.times|length - 1) if (sim.times|length > 0) else 0 }}"
+        >
+        <div class="step-slider-track">
+          <div id="step_slider_fill_2d" class="step-slider-fill"></div>
+        </div>
+        <div class="step-slider-range-labels">
+          <span>Inicial</span>
+          <span>Final</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 d-flex align-items-center">
+      <div>
+        <div id="step_info_2d" class="small text-muted mb-2">Step: -</div>
+        <div id="point_info_2d" class="small text-muted">Clique no mapa para selecionar um ponto.</div>
+      </div>
+    </div>
+    <div class="col-md-4 d-flex align-items-start justify-content-md-end">
+      <div class="btn-group sim2d-mode-buttons" role="group" aria-label="Modo de visualizacao">
+        <button id="mode_btn_cure_2d" type="button" class="btn btn-sm btn-primary active">Cura</button>
+        <button id="mode_btn_temp_2d" type="button" class="btn btn-sm btn-outline-primary">Temperatura</button>
+      </div>
+    </div>
+  </div>
+  <div class="sim2d-legend-grid mt-2">
+    <div class="sim2d-legend-card">
+      <div class="sim2d-legend-title">Legenda de cura</div>
+      <div class="sim2d-legend-bar sim2d-legend-bar-cure"></div>
+      <div class="sim2d-legend-range">
+        <span>0%</span>
+        <span>100%</span>
+      </div>
+    </div>
+    <div class="sim2d-legend-card">
+      <div class="sim2d-legend-title">Legenda de temperatura</div>
+      <div class="sim2d-legend-bar sim2d-legend-bar-temp"></div>
+      <div class="sim2d-legend-range">
+        <span id="legend_temp_min_2d">Ambiente: -</span>
+        <span id="legend_temp_max_2d">Prensa: -</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="point_value_plot_2d" style="height:360px;"></div>
+{% endif %}
+
 {% if sim.dim == 3 %}
+<div id="sim3d_render_panel" class="sim3d-render-panel">
+  <div class="d-flex justify-content-between align-items-center mb-1">
+    <div id="sim3d_render_stage"><b>Preparando renderizacao 3D...</b></div>
+    <button id="sim3d_cancel_btn" type="button" class="btn btn-sm btn-outline-danger">Cancelar renderizacao</button>
+  </div>
+  <div id="sim3d_render_message" class="small text-muted mb-2">Montando volume e malha para o grafico.</div>
+  <div class="sim3d-render-track">
+    <div id="sim3d_render_fill" class="sim3d-render-fill"></div>
+  </div>
+</div>
 <div class="row g-2 mb-3">
   <div class="col-md-2">
     <select id="axis" class="form-select">
@@ -35,6 +254,60 @@
 const sim = {{ sim_json|safe }};
 const tLast = sim.t_snaps[sim.t_snaps.length - 1];
 const aLast = sim.alpha_snaps[sim.alpha_snaps.length - 1];
+const PCT_TICK_VALS = [0, 20, 40, 60, 80, 100];
+const PCT_TICK_TEXT = PCT_TICK_VALS.map((v) => `${v}%`);
+const CURE_BLUE_TO_RED = [
+  [0, '#0b4fa2'],
+  [1, '#c62828']
+];
+const TEMP_GREEN_YELLOW_ORANGE = [
+  [0, '#22c55e'],
+  [0.5, '#facc15'],
+  [1, '#f97316']
+];
+
+function hexToRgb(hex) {
+  const clean = String(hex || '').replace('#', '');
+  if (clean.length !== 6) return { r: 0, g: 0, b: 0 };
+  return {
+    r: parseInt(clean.slice(0, 2), 16),
+    g: parseInt(clean.slice(2, 4), 16),
+    b: parseInt(clean.slice(4, 6), 16)
+  };
+}
+
+function rgbToHex(r, g, b) {
+  const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  const toHex = (v) => clamp(v).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function interpolateColor(hexA, hexB, t) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const tt = Math.max(0, Math.min(1, Number(t) || 0));
+  return rgbToHex(
+    a.r + ((b.r - a.r) * tt),
+    a.g + ((b.g - a.g) * tt),
+    a.b + ((b.b - a.b) * tt)
+  );
+}
+
+function multiStopColor(stops, t) {
+  const tt = Math.max(0, Math.min(1, Number(t) || 0));
+  if (!Array.isArray(stops) || stops.length === 0) return '#000000';
+  if (stops.length === 1) return stops[0][1] || '#000000';
+
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const [t0, c0] = stops[i];
+    const [t1, c1] = stops[i + 1];
+    if (tt >= t0 && tt <= t1) {
+      const local = (tt - t0) / Math.max(t1 - t0, 1e-9);
+      return interpolateColor(c0, c1, local);
+    }
+  }
+  return tt <= stops[0][0] ? stops[0][1] : stops[stops.length - 1][1];
+}
 
 if (sim.dim === 1) {
   const n = Array.isArray(tLast) ? tLast.length : 0;
@@ -50,14 +323,17 @@ if (sim.dim === 1) {
     const label = `${tSec.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`;
     const tLineC = (sim.t_snaps[i] || []).map((v) => Number(v) - 273.15);
     const aLinePct = (sim.alpha_snaps[i] || []).map((v) => Number(v) * 100);
+    const tNorm = snapCount > 1 ? (i / (snapCount - 1)) : 1.0;
+    const tempColor = multiStopColor(TEMP_GREEN_YELLOW_ORANGE, tNorm);
+    const cureColor = multiStopColor(CURE_BLUE_TO_RED, tNorm);
 
     tempTraces.push({
       x,
       y: tLineC,
       mode: 'lines+markers',
       name: label,
-      marker: { size: 5 },
-      line: { width: 2 }
+      marker: { size: 5, color: tempColor },
+      line: { width: 2, color: tempColor }
     });
 
     alphaTraces.push({
@@ -65,8 +341,8 @@ if (sim.dim === 1) {
       y: aLinePct,
       mode: 'lines+markers',
       name: label,
-      marker: { size: 5 },
-      line: { width: 2 }
+      marker: { size: 5, color: cureColor },
+      line: { width: 2, color: cureColor }
     });
   }
 
@@ -79,40 +355,438 @@ if (sim.dim === 1) {
   Plotly.newPlot('alpha_1d_plot', alphaTraces, {
     title: 'Cura vs posicao ao longo do tempo',
     xaxis: { title: 'Posicao da borracha em relacao ao molde (mm)' },
-    yaxis: { title: 'Cura (%)', range: [0, 100], ticksuffix: '%' }
+    yaxis: { title: 'Cura (%)', range: [0, 100], tickmode: 'array', tickvals: PCT_TICK_VALS, ticktext: PCT_TICK_TEXT }
   });
 } else if (sim.dim === 2) {
-  Plotly.newPlot('main_plot', [{ z: aLast, type: 'heatmap', colorbar: { title: 'alpha' } }], { title: 'Mapa alpha final 2D' });
+  const snapCount = Math.min(sim.times.length, sim.alpha_snaps.length);
+  const rawRows = Array.isArray(aLast) ? aLast.length : 0;
+  const rawCols = rawRows > 0 && Array.isArray(aLast[0]) ? aLast[0].length : 0;
+  const stepSlider = document.getElementById('step_idx_2d');
+  const stepSliderFill = document.getElementById('step_slider_fill_2d');
+  const stepInfo = document.getElementById('step_info_2d');
+  const pointInfo = document.getElementById('point_info_2d');
+  const mainPlotEl = document.getElementById('main_plot');
+  const modeBtnCure = document.getElementById('mode_btn_cure_2d');
+  const modeBtnTemp = document.getElementById('mode_btn_temp_2d');
+  const legendTempMin = document.getElementById('legend_temp_min_2d');
+  const legendTempMax = document.getElementById('legend_temp_max_2d');
+
+  let stepIdx = Math.max(0, snapCount - 1);
+  let selectedRaw0 = Math.max(0, Math.floor((rawRows - 1) / 2));
+  let selectedRaw1 = Math.max(0, Math.floor((rawCols - 1) / 2));
+  let viewMode = 'cure';
+
+  const dimLabels2d = ['Espessura', 'Largura'];
+  const platenAxis = Math.max(0, Math.min(1, Number(sim.platen_axis || 0)));
+  const ordinateAxis = platenAxis;
+  const abscissaAxis = ordinateAxis === 0 ? 1 : 0;
+
+  function rawToPlot(raw0, raw1) {
+    if (ordinateAxis === 0) return { x: raw1, y: raw0 };
+    return { x: raw0, y: raw1 };
+  }
+
+  function plotToRaw(plotX, plotY) {
+    if (ordinateAxis === 0) return { raw0: plotY, raw1: plotX };
+    return { raw0: plotX, raw1: plotY };
+  }
+
+  function orientMatrix(rawMatrix) {
+    if (ordinateAxis === 0) return rawMatrix.map((row) => row.slice());
+
+    const transposed = Array.from({ length: rawCols }, () => Array(rawRows).fill(0));
+    for (let r = 0; r < rawRows; r += 1) {
+      const row = rawMatrix[r] || [];
+      for (let c = 0; c < rawCols; c += 1) {
+        transposed[c][r] = Number(row[c] || 0);
+      }
+    }
+    return transposed;
+  }
+
+  function computeTempBoundsC() {
+    let minK = Number.POSITIVE_INFINITY;
+    let maxK = Number.NEGATIVE_INFINITY;
+
+    for (let s = 0; s < sim.t_snaps.length; s += 1) {
+      const mat = sim.t_snaps[s] || [];
+      for (let y = 0; y < mat.length; y += 1) {
+        const row = mat[y] || [];
+        for (let x = 0; x < row.length; x += 1) {
+          const v = Number(row[x]);
+          if (!Number.isFinite(v)) continue;
+          if (v < minK) minK = v;
+          if (v > maxK) maxK = v;
+        }
+      }
+    }
+
+    if (!Number.isFinite(minK) || !Number.isFinite(maxK)) {
+      return { minC: 25, maxC: 170 };
+    }
+
+    let minC = minK - 273.15;
+    let maxC = maxK - 273.15;
+    if (maxC <= minC) maxC = minC + 1.0;
+    return { minC, maxC };
+  }
+
+  const tempBounds = computeTempBoundsC();
+  const tempMinLabel = `${tempBounds.minC.toFixed(1)} C`;
+  const tempMaxLabel = `${tempBounds.maxC.toFixed(1)} C`;
+
+  if (legendTempMin) legendTempMin.textContent = `Ambiente: ${tempMinLabel}`;
+  if (legendTempMax) legendTempMax.textContent = `Prensa: ${tempMaxLabel}`;
+
+  function updateModeButtons() {
+    if (!modeBtnCure || !modeBtnTemp) return;
+    if (viewMode === 'cure') {
+      modeBtnCure.classList.add('btn-primary', 'active');
+      modeBtnCure.classList.remove('btn-outline-primary');
+      modeBtnTemp.classList.add('btn-outline-primary');
+      modeBtnTemp.classList.remove('btn-primary', 'active');
+    } else {
+      modeBtnTemp.classList.add('btn-primary', 'active');
+      modeBtnTemp.classList.remove('btn-outline-primary');
+      modeBtnCure.classList.add('btn-outline-primary');
+      modeBtnCure.classList.remove('btn-primary', 'active');
+    }
+  }
+
+  function safeAlpha(step, raw0, raw1) {
+    if (step < 0 || step >= snapCount) return 0;
+    const mat = sim.alpha_snaps[step] || [];
+    const row = mat[raw0] || [];
+    const value = Number(row[raw1]);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function safeTempC(step, raw0, raw1) {
+    if (step < 0 || step >= snapCount) return tempBounds.minC;
+    const mat = sim.t_snaps[step] || [];
+    const row = mat[raw0] || [];
+    const value = Number(row[raw1]);
+    return Number.isFinite(value) ? (value - 273.15) : tempBounds.minC;
+  }
+
+  function getAlphaMatrixPct(step) {
+    const mat = sim.alpha_snaps[step] || [];
+    const pctRaw = mat.map((row) => (row || []).map((v) => Number(v) * 100));
+    return orientMatrix(pctRaw);
+  }
+
+  function getTempMatrixC(step) {
+    const mat = sim.t_snaps[step] || [];
+    const tempRaw = mat.map((row) => (row || []).map((v) => Number(v) - 273.15));
+    return orientMatrix(tempRaw);
+  }
+
+  function formatTimeLabel(timeSec) {
+    return Number(timeSec || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+  }
+
+  function updateStepSliderFill() {
+    if (!stepSlider || !stepSliderFill) return;
+    if (snapCount <= 1) {
+      stepSliderFill.style.width = '100%';
+      return;
+    }
+    const maxIdx = Math.max(snapCount - 1, 1);
+    const pct = (Math.max(0, Math.min(stepIdx, maxIdx)) / maxIdx) * 100;
+    stepSliderFill.style.width = `${pct.toFixed(2)}%`;
+  }
+
+  function updateInfoLabels() {
+    const tSec = Number(sim.times[stepIdx] || 0);
+    stepInfo.textContent = `Step ${stepIdx + 1}/${Math.max(snapCount, 1)} | t = ${formatTimeLabel(tSec)} s`;
+
+    const alphaPct = safeAlpha(stepIdx, selectedRaw0, selectedRaw1) * 100;
+    const tempC = safeTempC(stepIdx, selectedRaw0, selectedRaw1);
+    pointInfo.textContent = `${dimLabels2d[0]}=${selectedRaw0} | ${dimLabels2d[1]}=${selectedRaw1} | cura = ${alphaPct.toFixed(2)}% | temperatura = ${tempC.toFixed(2)} C`;
+    updateStepSliderFill();
+  }
+
+  function drawMainPlot2d() {
+    const isCure = viewMode === 'cure';
+    const zMatrix = isCure ? getAlphaMatrixPct(stepIdx) : getTempMatrixC(stepIdx);
+    const colorbar = isCure
+      ? {
+          title: 'Cura (%)',
+          tickmode: 'array',
+          tickvals: PCT_TICK_VALS,
+          ticktext: PCT_TICK_TEXT
+        }
+      : {
+          title: 'Temperatura (C)',
+          tickmode: 'array',
+          tickvals: [tempBounds.minC, tempBounds.maxC],
+          ticktext: [`Amb ${tempBounds.minC.toFixed(1)} C`, `Prensa ${tempBounds.maxC.toFixed(1)} C`]
+        };
+
+    Plotly.react('main_plot', [
+      {
+        z: zMatrix,
+        type: 'heatmap',
+        zmin: isCure ? 0 : tempBounds.minC,
+        zmax: isCure ? 100 : tempBounds.maxC,
+        colorscale: isCure ? CURE_BLUE_TO_RED : TEMP_GREEN_YELLOW_ORANGE,
+        colorbar,
+        hovertemplate: isCure
+          ? 'x=%{x}<br>y=%{y}<br>Cura=%{z:.2f}%<extra></extra>'
+          : 'x=%{x}<br>y=%{y}<br>Temperatura=%{z:.2f} C<extra></extra>'
+      },
+      {
+        x: [rawToPlot(selectedRaw0, selectedRaw1).x],
+        y: [rawToPlot(selectedRaw0, selectedRaw1).y],
+        type: 'scatter',
+        mode: 'markers',
+        marker: { symbol: 'x', size: 10, color: '#000000', line: { color: '#ffffff', width: 1 } },
+        showlegend: false,
+        hoverinfo: 'skip'
+      }
+    ], {
+      title: isCure ? 'Mapa de cura 2D por step' : 'Mapa de temperatura 2D por step',
+      xaxis: { title: `${dimLabels2d[abscissaAxis]} (indice)` },
+      yaxis: { title: `${dimLabels2d[ordinateAxis]} (indice - eixo dos platores)` }
+    });
+
+    updateInfoLabels();
+  }
+
+  function drawPointEvolutionPlot() {
+    const times = [];
+    const values = [];
+    const isCure = viewMode === 'cure';
+
+    for (let i = 0; i < snapCount; i += 1) {
+      times.push(Number(sim.times[i] || 0));
+      values.push(isCure ? safeAlpha(i, selectedRaw0, selectedRaw1) * 100 : safeTempC(i, selectedRaw0, selectedRaw1));
+    }
+
+    const tCurrent = Number(sim.times[stepIdx] || 0);
+    const currentVal = values[stepIdx] || 0;
+    const lineColor = isCure ? '#1d4ed8' : '#15803d';
+
+    const guideShapes = [
+      {
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: tCurrent,
+        x1: tCurrent,
+        y0: 0,
+        y1: 1,
+        line: { color: '#64748b', width: 1, dash: 'dot' }
+      }
+    ];
+
+    if (isCure) {
+      [10, 50, 90].forEach((yRef) => {
+        guideShapes.push({
+          type: 'line',
+          xref: 'paper',
+          yref: 'y',
+          x0: 0,
+          x1: 1,
+          y0: yRef,
+          y1: yRef,
+          line: { color: '#cbd5e1', width: 1, dash: 'dot' }
+        });
+      });
+    }
+
+    Plotly.react('point_value_plot_2d', [
+      {
+        x: times,
+        y: values,
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: isCure ? 'Cura acumulada no ponto' : 'Temperatura no ponto',
+        line: { width: 3, color: lineColor },
+        marker: { size: 6, color: lineColor },
+        fill: isCure ? 'tozeroy' : 'none',
+        fillcolor: isCure ? 'rgba(29,78,216,0.10)' : 'rgba(21,128,61,0.08)',
+        hovertemplate: isCure
+          ? 't=%{x:.1f} s<br>Cura=%{y:.2f}%<extra></extra>'
+          : 't=%{x:.1f} s<br>Temperatura=%{y:.2f} C<extra></extra>'
+      },
+      {
+        x: [tCurrent],
+        y: [currentVal],
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Step selecionado',
+        marker: { size: 10, color: '#c2410c' },
+        hovertemplate: isCure
+          ? 't=%{x:.1f} s<br>Cura=%{y:.2f}%<extra></extra>'
+          : 't=%{x:.1f} s<br>Temperatura=%{y:.2f} C<extra></extra>'
+      }
+    ], {
+      title: isCure
+        ? `Evolucao da cura acumulada no ponto (${dimLabels2d[0]}=${selectedRaw0}, ${dimLabels2d[1]}=${selectedRaw1})`
+        : `Evolucao da temperatura no ponto (${dimLabels2d[0]}=${selectedRaw0}, ${dimLabels2d[1]}=${selectedRaw1})`,
+      xaxis: { title: 'Tempo (s)' },
+      hovermode: 'x unified',
+      shapes: guideShapes,
+      yaxis: isCure
+        ? {
+            title: 'Cura (%)',
+            range: [0, 100],
+            tickmode: 'array',
+            tickvals: PCT_TICK_VALS,
+            ticktext: PCT_TICK_TEXT
+          }
+        : {
+            title: 'Temperatura (C)',
+            range: [tempBounds.minC, tempBounds.maxC]
+          }
+    });
+  }
+
+  if (stepSlider) {
+    stepSlider.max = String(Math.max(snapCount - 1, 0));
+    stepSlider.value = String(stepIdx);
+    stepSlider.addEventListener('input', () => {
+      stepIdx = parseInt(stepSlider.value, 10) || 0;
+      drawMainPlot2d();
+      drawPointEvolutionPlot();
+    });
+  }
+
+  if (modeBtnCure) {
+    modeBtnCure.addEventListener('click', () => {
+      viewMode = 'cure';
+      updateModeButtons();
+      drawMainPlot2d();
+      drawPointEvolutionPlot();
+    });
+  }
+
+  if (modeBtnTemp) {
+    modeBtnTemp.addEventListener('click', () => {
+      viewMode = 'temp';
+      updateModeButtons();
+      drawMainPlot2d();
+      drawPointEvolutionPlot();
+    });
+  }
+
+  updateModeButtons();
+  drawMainPlot2d();
+
+  if (typeof mainPlotEl.on === 'function') {
+    mainPlotEl.on('plotly_click', (eventData) => {
+      const points = eventData && Array.isArray(eventData.points) ? eventData.points : [];
+      const heatPoint = points.find((p) => p.curveNumber === 0) || points[0];
+      if (!heatPoint) return;
+
+      const clickX = Math.round(Number(heatPoint.x) || 0);
+      const clickY = Math.round(Number(heatPoint.y) || 0);
+      const rawPos = plotToRaw(clickX, clickY);
+
+      selectedRaw0 = Math.max(0, Math.min(rawRows - 1, rawPos.raw0));
+      selectedRaw1 = Math.max(0, Math.min(rawCols - 1, rawPos.raw1));
+      drawMainPlot2d();
+      drawPointEvolutionPlot();
+    });
+  }
+
+  drawPointEvolutionPlot();
 } else {
   const nx = aLast.length;
   const ny = aLast[0].length;
   const nz = aLast[0][0].length;
-  const x = [];
-  const y = [];
-  const z = [];
-  const val = [];
+  const renderPanel = document.getElementById('sim3d_render_panel');
+  const renderStage = document.getElementById('sim3d_render_stage');
+  const renderMessage = document.getElementById('sim3d_render_message');
+  const renderFill = document.getElementById('sim3d_render_fill');
+  const renderCancelBtn = document.getElementById('sim3d_cancel_btn');
 
-  for (let i = 0; i < nx; i += 1) {
-    for (let j = 0; j < ny; j += 1) {
-      for (let k = 0; k < nz; k += 1) {
-        x.push(i);
-        y.push(j);
-        z.push(k);
-        val.push(aLast[i][j][k]);
-      }
-    }
+  let renderCancelled = false;
+
+  function setRenderProgress(stage, pct, message) {
+    if (renderStage) renderStage.innerHTML = `<b>${stage}</b>`;
+    if (renderMessage) renderMessage.textContent = message || '';
+    if (renderFill) renderFill.style.width = `${Math.max(0, Math.min(100, Number(pct) || 0)).toFixed(1)}%`;
   }
 
-  Plotly.newPlot('main_plot', [{
-    type: 'volume',
-    x,
-    y,
-    z,
-    value: val,
-    opacity: 0.08,
-    surface: { count: 12 },
-    caps: { x: { show: false }, y: { show: false }, z: { show: false } }
-  }], { title: 'Volume 3D alpha final' });
+  function hideRenderPanel() {
+    if (renderPanel) renderPanel.style.display = 'none';
+  }
+
+  function yieldUi() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  async function buildVolumeData() {
+    const x = [];
+    const y = [];
+    const z = [];
+    const val = [];
+    const stride = Math.max(1, Math.floor(nx / 28));
+
+    for (let i = 0; i < nx; i += 1) {
+      if (renderCancelled) return null;
+      for (let j = 0; j < ny; j += 1) {
+        for (let k = 0; k < nz; k += 1) {
+          x.push(i);
+          y.push(j);
+          z.push(k);
+          val.push(aLast[i][j][k] * 100);
+        }
+      }
+
+      if (i === nx - 1 || (i % stride) === 0) {
+        const pct = 8 + Math.round(((i + 1) / Math.max(nx, 1)) * 72);
+        setRenderProgress('Montando volume 3D', pct, `Preparando camada ${i + 1} de ${nx}...`);
+        await yieldUi();
+      }
+    }
+    return { x, y, z, val };
+  }
+
+  async function renderVolume3d() {
+    setRenderProgress('Preparando renderizacao', 5, 'Coletando dados da malha...');
+    const volumeData = await buildVolumeData();
+
+    if (renderCancelled || !volumeData) {
+      setRenderProgress('Renderizacao cancelada', 0, 'A renderizacao 3D foi cancelada. O corte 2D continua disponivel.');
+      if (renderCancelBtn) renderCancelBtn.disabled = true;
+      return;
+    }
+
+    setRenderProgress('Renderizando grafico', 90, 'Desenhando volume 3D...');
+    await yieldUi();
+
+    if (renderCancelled) {
+      setRenderProgress('Renderizacao cancelada', 0, 'A renderizacao 3D foi cancelada. O corte 2D continua disponivel.');
+      if (renderCancelBtn) renderCancelBtn.disabled = true;
+      return;
+    }
+
+    await Plotly.newPlot('main_plot', [{
+      type: 'volume',
+      x: volumeData.x,
+      y: volumeData.y,
+      z: volumeData.z,
+      value: volumeData.val,
+      isomin: 0,
+      isomax: 100,
+      opacity: 0.08,
+      surface: { count: 12 },
+      caps: { x: { show: false }, y: { show: false }, z: { show: false } },
+      colorbar: {
+        title: 'Cura (%)',
+        tickmode: 'array',
+        tickvals: PCT_TICK_VALS,
+        ticktext: PCT_TICK_TEXT
+      }
+    }], { title: 'Volume 3D cura final' });
+
+    setRenderProgress('Concluido', 100, 'Volume 3D renderizado com sucesso.');
+    if (renderCancelBtn) renderCancelBtn.disabled = true;
+    setTimeout(hideRenderPanel, 900);
+  }
 
   function drawSlice() {
     const axis = parseInt(document.getElementById('axis').value, 10);
@@ -121,9 +795,30 @@ if (sim.dim === 1) {
     if (axis === 0) slice = aLast[idx];
     if (axis === 1) slice = aLast.map((r) => r[idx]);
     if (axis === 2) slice = aLast.map((r) => r.map((c) => c[idx]));
-    Plotly.newPlot('slice_plot', [{ z: slice, type: 'heatmap' }], { title: `Slice alpha eixo ${axis} idx ${idx}` });
+    const slicePct = (slice || []).map((row) => (row || []).map((v) => Number(v) * 100));
+    Plotly.newPlot('slice_plot', [{
+      z: slicePct,
+      type: 'heatmap',
+      zmin: 0,
+      zmax: 100,
+      colorbar: {
+        title: 'Cura (%)',
+        tickmode: 'array',
+        tickvals: PCT_TICK_VALS,
+        ticktext: PCT_TICK_TEXT
+      }
+    }], { title: `Slice cura eixo ${axis} idx ${idx}` });
   }
 
+  if (renderCancelBtn) {
+    renderCancelBtn.addEventListener('click', () => {
+      renderCancelled = true;
+      renderCancelBtn.disabled = true;
+      setRenderProgress('Cancelando...', 0, 'Tentando cancelar renderizacao 3D...');
+    });
+  }
+
+  renderVolume3d();
   drawSlice();
   document.getElementById('axis').addEventListener('change', drawSlice);
   document.getElementById('slice_idx').addEventListener('input', drawSlice);

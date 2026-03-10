@@ -1,0 +1,158 @@
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from services import vulcanization_service as vs
+
+
+def _fit_payload():
+    return {"fit_id": "fit_test", "k0": 1e6, "Ea": 80000.0, "n": 1.2}
+
+
+def test_simulation_initial_snapshot_is_not_advanced(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    sim_id, _ = vs.run_simulation(
+        fit_payload=_fit_payload(),
+        mode="prensa",
+        dim=1,
+        shape_raw="20",
+        dx=0.001,
+        dt=5.0,
+        t_end=20.0,
+        mold_temp_c=170.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=1,
+    )
+    sim = vs.load_simulation(sim_id)
+
+    assert np.isclose(float(sim["times"][0]), 0.0)
+    t0 = np.asarray(sim["t_snaps"][0], dtype=float)
+    a0 = np.asarray(sim["alpha_snaps"][0], dtype=float)
+
+    assert np.isclose(t0[0], 170.0 + 273.15)
+    assert np.isclose(t0[-1], 170.0 + 273.15)
+    assert np.allclose(t0[1:-1], 25.0 + 273.15)
+    assert np.allclose(a0, 0.0)
+
+
+def test_simulation_auto_substeps_prevent_temperature_blowup(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    sim_id, _ = vs.run_simulation(
+        fit_payload=_fit_payload(),
+        mode="prensa",
+        dim=1,
+        shape_raw="20",
+        dx=0.001,
+        dt=5.0,
+        t_end=300.0,
+        mold_temp_c=170.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=20,
+    )
+    sim = vs.load_simulation(sim_id)
+
+    t_snaps = np.asarray(sim["t_snaps"], dtype=float)
+    assert np.isclose(float(sim["times"][-1]), 300.0)
+    assert np.isfinite(t_snaps).all()
+    assert float(t_snaps.min()) > 250.0
+    assert float(t_snaps.max()) < 500.0
+
+
+def test_cure_profile_does_not_saturate_at_100s_for_reference_fit(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    fit_payload = {
+        "fit_id": "fit_reference",
+        "k0": 0.1,
+        "Ea": 67887.56366072825,
+        "n": 4.0,
+    }
+    sim_id, _ = vs.run_simulation(
+        fit_payload=fit_payload,
+        mode="prensa",
+        dim=1,
+        shape_raw="20",
+        dx=0.001,
+        dt=5.0,
+        t_end=100.0,
+        mold_temp_c=160.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=20,
+    )
+    sim = vs.load_simulation(sim_id)
+
+    alpha_100s = np.asarray(sim["alpha_snaps"][-1], dtype=float)
+    assert np.isclose(float(sim["times"][-1]), 100.0)
+    assert float(alpha_100s.max()) < 0.2
+    assert float(alpha_100s.mean()) < 0.05
+
+
+def test_press_2d_applies_heating_on_selected_platen_axis_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    sim_id, _ = vs.run_simulation(
+        fit_payload=_fit_payload(),
+        mode="prensa",
+        dim=2,
+        shape_raw="11,11",
+        dx=0.001,
+        dt=1.0,
+        t_end=1.0,
+        mold_temp_c=170.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=1,
+        platen_axis=1,
+    )
+    sim = vs.load_simulation(sim_id)
+    t0 = np.asarray(sim["t_snaps"][0], dtype=float)
+
+    hot_k = 170.0 + 273.15
+    cold_k = 25.0 + 273.15
+
+    assert sim["platen_axis"] == 1
+    assert np.allclose(t0[:, 0], hot_k)
+    assert np.allclose(t0[:, -1], hot_k)
+    assert np.allclose(t0[0, 1:-1], cold_k)
+    assert np.allclose(t0[-1, 1:-1], cold_k)
+
+
+def test_simulation_can_be_cancelled_via_checker(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+
+    progress_events = []
+    calls = {"count": 0}
+
+    def _progress_callback(event):
+        progress_events.append(dict(event))
+
+    def _cancel_checker():
+        calls["count"] += 1
+        return calls["count"] > 2
+
+    try:
+        vs.run_simulation(
+            fit_payload=_fit_payload(),
+            mode="prensa",
+            dim=3,
+            shape_raw="16,16,16",
+            dx=0.001,
+            dt=1.0,
+            t_end=200.0,
+            mold_temp_c=170.0,
+            init_temp_c=25.0,
+            ramp_rate=0.0,
+            snapshot_every=10,
+            platen_axis=0,
+            progress_callback=_progress_callback,
+            cancel_checker=_cancel_checker,
+        )
+        assert False, "Expected cancellation exception"
+    except RuntimeError as exc:
+        assert str(exc) == "SIMULATION_CANCELLED"
+
+    assert progress_events

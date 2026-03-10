@@ -4,6 +4,41 @@ from services.score_configuration_service import get_active_score_version
 from services.scoring_engine import ScoringEngine
 
 
+def _normalize_reometer_label(label):
+    txt = str(label or "").strip()
+    if not txt:
+        return None
+
+    txt_upper = txt.upper()
+    if "PRETO" in txt_upper:
+        return "Preto"
+    if "BRANCO" in txt_upper or "CINZA" in txt_upper:
+        return "Cinza"
+    return None
+
+
+def _normalize_profile_name(name):
+    txt = str(name or "").strip()
+    if not txt:
+        return None
+    return txt.replace("BRANCO", "CINZA").replace("Branco", "Cinza")
+
+
+def _resolve_profile_reometer_label(perfil, meta_perfil, ensaio):
+    label_from_profile = _normalize_reometer_label(meta_perfil)
+    if label_from_profile:
+        return label_from_profile
+
+    if perfil == "alta":
+        return _normalize_reometer_label(getattr(ensaio, "reometro_alta", None))
+    if perfil == "baixa":
+        return _normalize_reometer_label(getattr(ensaio, "reometro_baixa", None))
+
+    return _normalize_reometer_label(getattr(ensaio, "reometro_alta", None)) or _normalize_reometer_label(
+        getattr(ensaio, "reometro_baixa", None)
+    )
+
+
 def build_curve_analysis_context(id_ensaio):
     ensaio = EnsaioConsolidado.query.get_or_404(id_ensaio)
 
@@ -76,13 +111,19 @@ def build_curve_analysis_context(id_ensaio):
 
             ensaio_tmp = type("EnsaioTmp", (), dados)()
             res_tmp = engine.calcular(ensaio_tmp)
+            detalhes_log_tmp = res_tmp.detalhes_log or {}
+            meta_perfil = _normalize_profile_name(
+                detalhes_log_tmp.get("meta_perfil") if isinstance(detalhes_log_tmp, dict) else None
+            ) or titulo
             detalhes_por_perfil.append(
                 {
                     "perfil": perfil,
                     "titulo": titulo,
+                    "meta_perfil": meta_perfil,
+                    "reometro_label": _resolve_profile_reometer_label(perfil, meta_perfil, ensaio),
                     "score": float(res_tmp.score or 0),
                     "acao": res_tmp.acao,
-                    "params": _to_params_dict(res_tmp.detalhes_log or {}),
+                    "params": _to_params_dict(detalhes_log_tmp),
                 }
             )
 
@@ -91,6 +132,8 @@ def build_curve_analysis_context(id_ensaio):
             {
                 "perfil": "auto",
                 "titulo": "Reometria",
+                "meta_perfil": "Reometria",
+                "reometro_label": _resolve_profile_reometer_label("auto", None, ensaio),
                 "score": float(getattr(ensaio, "score_final", 0) or 0),
                 "acao": getattr(ensaio, "acao_recomendada", ""),
                 "params": detalhes_score,
@@ -101,4 +144,6 @@ def build_curve_analysis_context(id_ensaio):
         "ensaio": ensaio,
         "detalhes": detalhes_score,
         "detalhes_por_perfil": detalhes_por_perfil,
+        "reometro_alta_label": _normalize_reometer_label(getattr(ensaio, "reometro_alta", None)),
+        "reometro_baixa_label": _normalize_reometer_label(getattr(ensaio, "reometro_baixa", None)),
     }

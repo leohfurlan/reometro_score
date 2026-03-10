@@ -12,6 +12,8 @@ from services.kinetics_solver import fit_kinetics, parametrize_curve, alpha_mode
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 ALPHA_COMPARE_TARGETS_DEFAULT = [0.10, 0.20, 0.50, 0.90]
+KINETIC_MODEL_VERSION = 2
+KINETIC_MODEL_EXPRESSION = "alpha = k(T) * t^n / (1 + k(T) * t^n)"
 
 
 def _nearest_alpha_time(time_vec, alpha_vec, alpha_target):
@@ -30,6 +32,40 @@ def _crossing_or_nearest_time(time_vec, alpha_vec, alpha_target):
     if t_cross is not None:
         return float(t_cross)
     return _nearest_alpha_time(time_vec, alpha_vec, alpha_target)
+
+
+def _normalize_fit_payload_model(payload):
+    model_version = int(payload.get("kinetic_model_version") or 1)
+    if model_version >= KINETIC_MODEL_VERSION:
+        payload["kinetic_model_version"] = KINETIC_MODEL_VERSION
+        payload["kinetic_model_expression"] = KINETIC_MODEL_EXPRESSION
+        return payload, False
+
+    # Legacy model (v1): alpha = (k(T)*t)^n / (1 + (k(T)*t)^n)
+    # Current model (v2): alpha = k(T)*t^n / (1 + k(T)*t^n)
+    # Mapping that preserves isothermal behavior:
+    # k0_v2 = k0_v1^n ; Ea_v2 = Ea_v1 * n ; n_v2 = n_v1
+    n_safe = float(np.clip(float(payload.get("n", 1.0)), 0.5, 12.0))
+    k0_legacy = max(float(payload.get("k0", 1e-8)), 1e-300)
+    ea_legacy = float(payload.get("Ea", 80000.0))
+
+    ln_k0_new = np.clip(n_safe * np.log(k0_legacy), -700.0, 700.0)
+    payload["k0"] = float(np.exp(ln_k0_new))
+    payload["Ea"] = float(ea_legacy * n_safe)
+    payload["n"] = n_safe
+    payload["kinetic_model_version"] = KINETIC_MODEL_VERSION
+    payload["kinetic_model_expression"] = KINETIC_MODEL_EXPRESSION
+    payload["kinetic_model_migrated_from"] = model_version
+    return payload, True
+
+
+def _refresh_alpha_model_curves(payload):
+    curves = payload.get("curves") or []
+    for c in curves:
+        t = np.array(c.get("t_rel") or [], dtype=float)
+        tk = np.full_like(t, fill_value=float(c.get("T_C") or 0) + 273.15)
+        pred = alpha_model(t, tk, payload["k0"], payload["Ea"], payload["n"])
+        c["alpha_model"] = pred.tolist()
 
 
 def list_ensaios_for_fit(date_start=None, date_end=None, text_query=None, limit=300):
@@ -140,6 +176,8 @@ def run_fit(cod_ensaios):
         "fit_id": datetime.utcnow().strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:8],
         "created_at": datetime.utcnow().isoformat(),
         **result,
+        "kinetic_model_version": KINETIC_MODEL_VERSION,
+        "kinetic_model_expression": KINETIC_MODEL_EXPRESSION,
         "ensaios": [
             {"COD_ENSAIO": c["COD_ENSAIO"], "T_C": c["T_C"], "T_K": c["T_K"]}
             for c in curves
@@ -158,11 +196,7 @@ def run_fit(cod_ensaios):
     }
 
     if payload.get("success"):
-        for c in payload["curves"]:
-            t = np.array(c["t_rel"], dtype=float)
-            tk = np.full_like(t, fill_value=float(c["T_C"]) + 273.15)
-            pred = alpha_model(t, tk, payload["k0"], payload["Ea"], payload["n"])
-            c["alpha_model"] = pred.tolist()
+        _refresh_alpha_model_curves(payload)
 
     save_fit_payload(payload)
     return payload
@@ -180,7 +214,15 @@ def load_fit_payload(fit_id):
     if not file_path.exists():
         return None
     with file_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        payload = json.load(f)
+
+    payload, migrated = _normalize_fit_payload_model(payload)
+    if payload.get("success"):
+        _refresh_alpha_model_curves(payload)
+    if migrated:
+        save_fit_payload(payload)
+
+    return payload
 
 
 def update_fit_parameters(fit_id, k0, ea, n):
@@ -195,13 +237,10 @@ def update_fit_parameters(fit_id, k0, ea, n):
     payload["k0"] = k0_val
     payload["Ea"] = ea_val
     payload["n"] = n_val
+    payload["kinetic_model_version"] = KINETIC_MODEL_VERSION
+    payload["kinetic_model_expression"] = KINETIC_MODEL_EXPRESSION
 
-    curves = payload.get("curves") or []
-    for c in curves:
-        t = np.array(c.get("t_rel") or [], dtype=float)
-        tk = np.full_like(t, fill_value=float(c.get("T_C") or 0) + 273.15)
-        pred = alpha_model(t, tk, payload["k0"], payload["Ea"], payload["n"])
-        c["alpha_model"] = pred.tolist()
+    _refresh_alpha_model_curves(payload)
 
     save_fit_payload(payload)
     return payload

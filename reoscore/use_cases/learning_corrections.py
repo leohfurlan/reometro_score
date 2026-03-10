@@ -133,9 +133,12 @@ def _score_extracted_lot(candidate, source):
     if not text:
         return (99, 99, 99, 99)
     source_rank = 0 if source in {"Asterisco", "Exato", "Regex"} else 1
-    size_rank = 0 if 4 <= len(text) <= 7 else (1 if len(text) <= 10 else 2)
+    ref_len = 5
+    text_len = len(text)
+    size_rank = 0 if 4 <= text_len <= 7 else (1 if text_len <= 10 else 2)
+    dist_ref = abs(text_len - ref_len)
     trailing_zeros = 1 if re.search(r"0{3,}$", text) else 0
-    return (source_rank, size_rank, trailing_zeros, len(text))
+    return (source_rank, size_rank, dist_ref, trailing_zeros, -text_len)
 
 
 def apply_lot_cleanup_to_consolidated():
