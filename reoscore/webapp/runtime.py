@@ -8,12 +8,94 @@ from .extensions import cache_service
 CACHE_PLANILHA_SHAREPOINT = "cache_reg403_sharepoint.xlsx"
 
 
-def recarregar_cache_memoria(overlay_fn=None):
+def _normalizar_ids(ids_prioritarios):
+    if not ids_prioritarios:
+        return []
+
+    ids_norm = []
+    vistos = set()
+    for value in ids_prioritarios:
+        try:
+            i = int(value)
+        except Exception:
+            continue
+        if i <= 0 or i in vistos:
+            continue
+        vistos.add(i)
+        ids_norm.append(i)
+    return ids_norm
+
+
+def _merge_cache_por_id(base, delta):
+    mapa = {}
+    for ensaio in (base or []):
+        try:
+            chave = int(getattr(ensaio, "id_ensaio", 0) or 0)
+        except Exception:
+            continue
+        if chave > 0:
+            mapa[chave] = ensaio
+
+    for ensaio in (delta or []):
+        try:
+            chave = int(getattr(ensaio, "id_ensaio", 0) or 0)
+        except Exception:
+            continue
+        if chave > 0:
+            mapa[chave] = ensaio
+
+    return sorted(
+        mapa.values(),
+        key=lambda e: (getattr(e, "data_hora", None) or datetime.min),
+        reverse=True,
+    )
+
+
+def recarregar_cache_memoria(overlay_fn=None, ids_prioritarios=None, force_full=False):
     """
-    Recarrega o cache em memoria usado pelas telas operacionais.
+    Recarrega o cache operacional.
+    Se houver cache em memoria, tenta aplicar apenas os registros novos/alterados.
     """
     try:
-        print("[INFO] Recarregando cache em memoria a partir do banco...")
+        print("[INFO] Recarregando cache em memoria...")
+        ids_filtro = _normalizar_ids(ids_prioritarios)
+        snapshot = cache_service.peek()
+        usar_incremental = bool(not force_full and snapshot and snapshot.get("dados"))
+
+        if usar_incremental:
+            query = EnsaioConsolidado.query
+            delta = []
+
+            if ids_filtro:
+                delta = query.filter(EnsaioConsolidado.id_ensaio.in_(ids_filtro)).all()
+            else:
+                ultimo_cache = snapshot.get("ultimo_update")
+                if ultimo_cache:
+                    delta = query.filter(EnsaioConsolidado.updated_at >= ultimo_cache).all()
+
+            dados_cache = _merge_cache_por_id(snapshot.get("dados"), delta)
+            if callable(overlay_fn):
+                dados_cache = overlay_fn(dados_cache)
+
+            if not dados_cache:
+                print("[WARN] Cache incremental vazio. Mantendo cache atual.")
+                return len(snapshot.get("dados") or [])
+
+            materiais_unicos = sorted({e.massa_descricao for e in dados_cache if e.massa_descricao})
+            cache_service.set(
+                {
+                    "dados": dados_cache,
+                    "materiais": materiais_unicos,
+                    "ultimo_update": datetime.now(),
+                }
+            )
+            print(
+                f"[OK] Cache incremental: {len(delta)} alterados, "
+                f"total em memoria {len(dados_cache)}."
+            )
+            return len(dados_cache)
+
+        print("[INFO] Executando recarga completa do cache...")
         todos_ensaios = EnsaioConsolidado.query.order_by(EnsaioConsolidado.data_hora.desc()).all()
 
         if callable(overlay_fn):
@@ -31,7 +113,7 @@ def recarregar_cache_memoria(overlay_fn=None):
                 "ultimo_update": datetime.now(),
             }
         )
-        print(f"[OK] Cache atualizado com {len(todos_ensaios)} registros.")
+        print(f"[OK] Cache completo atualizado com {len(todos_ensaios)} registros.")
         return len(todos_ensaios)
     except Exception as exc:
         print(f"[ERRO] Erro ao recarregar cache: {exc}")

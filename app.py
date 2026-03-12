@@ -6,6 +6,7 @@ from models.consolidado import EnsaioConsolidado # Novo Modelo
 
 from collections import Counter
 from datetime import datetime, timedelta
+from time import perf_counter
 import math
 import os
 import statistics 
@@ -140,8 +141,12 @@ def _parse_int_locale(value, default=None, min_value=None):
         return min_value
     return parsed_int
 
-def recarregar_cache_memoria():
-    return _recarregar_cache_memoria(overlay_fn=globals().get('aplicar_sobreposicao_local'))
+def recarregar_cache_memoria(ids_prioritarios=None, force_full=False):
+    return _recarregar_cache_memoria(
+        overlay_fn=globals().get('aplicar_sobreposicao_local'),
+        ids_prioritarios=ids_prioritarios,
+        force_full=force_full,
+    )
 
 from connection import connect_to_database
 
@@ -349,31 +354,102 @@ bootstrap_operacional(
 @app.route('/atualizar_dados')
 @login_required
 def rota_atualizar():
+    t_total = perf_counter()
+    timings = {}
+    sharepoint_status = "nao_executado"
     try:
-        # --- PASSO 1: DOWNLOAD SHAREPOINT ---
-        if baixar_excel_sharepoint:
-            caminho_baixado = preparar_planilha_sharepoint(baixar_excel_sharepoint, forcar_download=True)
-            if caminho_baixado:
-                flash("Ã¢Å“â€¦ Planilha baixada do SharePoint com sucesso!", "success")
-            else:
-                flash("Ã¢Å¡Â Ã¯Â¸Â Falha no download do SharePoint. Usando cache.", "warning")
+        forcar_full = request.args.get('full', '').strip().lower() in {'1', 'true', 'yes', 'sim'}
+        forcar_download = request.args.get('download', '').strip().lower() in {'1', 'true', 'yes', 'sim'}
 
-        # --- PASSO 2: EXECUÃƒâ€¡ÃƒÆ’O DO ETL ---
-        stats = processar_carga_dados()
-        
-        if stats:
-            # --- PASSO 3 (FIX): RECARREGAR O CACHE DA APLICAÃƒâ€¡ÃƒÆ’O ---
-            qtd_cache = recarregar_cache_memoria() 
-            
-            total = stats.get('total', 0)
-            tempo = stats.get('tempo', 0)
-            flash(f"Base atualizada! {total} processados no ETL e {qtd_cache} carregados no Cache ({tempo:.1f}s).", "info")
+        # PASSO 1: SharePoint (reaproveita cache local por padrao)
+        t_download = perf_counter()
+        if baixar_excel_sharepoint:
+            caminho_baixado = preparar_planilha_sharepoint(
+                baixar_excel_sharepoint,
+                forcar_download=forcar_download,
+            )
+            if caminho_baixado:
+                sharepoint_status = "ok"
+                if forcar_download:
+                    flash("Planilha SharePoint atualizada com download forcado.", "success")
+                else:
+                    flash("Planilha SharePoint pronta (cache local reaproveitado quando disponivel).", "success")
+            else:
+                sharepoint_status = "fallback_cache"
+                flash("Falha na sincronizacao SharePoint. Mantendo cache local.", "warning")
         else:
+            sharepoint_status = "loader_indisponivel"
+        timings['download'] = perf_counter() - t_download
+
+        # PASSO 2: ETL incremental (somente novos ensaios por padrao)
+        t_etl = perf_counter()
+        stats = processar_carga_dados(apenas_novos=not forcar_full)
+        timings['etl_total'] = perf_counter() - t_etl
+
+        if stats is not None:
+            ids_processados = stats.get('ids_processados') or []
+
+            # PASSO 3: atualiza cache apenas com os itens novos/alterados
+            t_cache = perf_counter()
+            qtd_cache = recarregar_cache_memoria(
+                ids_prioritarios=ids_processados,
+                force_full=forcar_full,
+            )
+            timings['cache_reload'] = perf_counter() - t_cache
+
+            total = int(stats.get('total', 0) or 0)
+            total_bruto = int(stats.get('total_bruto', 0) or 0)
+            tempo = float(stats.get('tempo', 0) or 0)
+            incremental = bool(stats.get('incremental', False))
+            etl_timings = stats.get('timings') or {}
+
+            timings['etl_sql'] = float(etl_timings.get('sql', 0) or 0)
+            timings['etl_agrupamento'] = float(etl_timings.get('agrupamento', 0) or 0)
+            timings['etl_consolidacao'] = float(etl_timings.get('consolidacao', 0) or 0)
+            timings['etl_persistencia'] = float(etl_timings.get('persistencia', 0) or 0)
+
+            if total == 0:
+                flash(
+                    f"Atualizacao concluida sem novos ensaios. Cache com {qtd_cache} registros ({tempo:.1f}s).",
+                    "info",
+                )
+            else:
+                modo = "incremental" if incremental else "completa"
+                flash(
+                    f"Base atualizada ({modo}): {total_bruto} leituras novas no SQL, "
+                    f"{total} consolidados e cache com {qtd_cache} registros ({tempo:.1f}s).",
+                    "info",
+                )
+        else:
+            timings['cache_reload'] = 0.0
             flash("Erro ao processar carga de dados (ETL retornou vazio).", "danger")
-            
+
+        timings['total_rota'] = perf_counter() - t_total
+        print(
+            "[PERF][atualizar_dados] "
+            f"download={timings.get('download', 0.0):.2f}s "
+            f"sql={timings.get('etl_sql', 0.0):.2f}s "
+            f"agrupamento={timings.get('etl_agrupamento', 0.0):.2f}s "
+            f"consolidacao={timings.get('etl_consolidacao', 0.0):.2f}s "
+            f"persistencia={timings.get('etl_persistencia', 0.0):.2f}s "
+            f"etl_total={timings.get('etl_total', 0.0):.2f}s "
+            f"cache={timings.get('cache_reload', 0.0):.2f}s "
+            f"total={timings.get('total_rota', 0.0):.2f}s "
+            f"sharepoint={sharepoint_status}"
+        )
+
     except Exception as e:
+        timings['total_rota'] = perf_counter() - t_total
+        print(
+            "[PERF][atualizar_dados][erro] "
+            f"download={timings.get('download', 0.0):.2f}s "
+            f"etl_total={timings.get('etl_total', 0.0):.2f}s "
+            f"cache={timings.get('cache_reload', 0.0):.2f}s "
+            f"total={timings.get('total_rota', 0.0):.2f}s "
+            f"sharepoint={sharepoint_status}"
+        )
         print(f"[ERRO] Erro critico na rota Atualizar: {e}")
-        flash(f"Erro crÃƒÂ­tico: {str(e)}", "danger")
+        flash(f"Erro critico: {str(e)}", "danger")
 
     next_url = request.args.get('next') or request.referrer
     if next_url and _is_safe_redirect_url(next_url):

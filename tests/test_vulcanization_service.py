@@ -156,3 +156,42 @@ def test_simulation_can_be_cancelled_via_checker(tmp_path, monkeypatch):
         assert str(exc) == "SIMULATION_CANCELLED"
 
     assert progress_events
+
+
+def test_snapshot_plan_limits_memory_for_large_3d_case():
+    shape = (16, 501, 1501)
+    steps = 1500
+    plan = vs._snapshot_plan(shape=shape, dim=3, steps=steps, snapshot_every=20)
+
+    assert plan["downsampled"] is True
+    assert plan["spatial_stride"] >= 2
+    assert int(plan["estimated_bytes"]) <= int(vs.MAX_SNAPSHOT_BYTES)
+    assert int(np.prod(plan["stored_shape"])) < int(np.prod(shape))
+    assert plan["store_indices"][0] == 0
+    assert plan["store_indices"][-1] == steps
+
+
+def test_load_simulation_exposes_stride_scaled_dx(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(vs, "MAX_SNAPSHOT_CELLS", 20)
+    monkeypatch.setattr(vs, "MAX_SNAPSHOT_BYTES", 512 * 1024 * 1024)
+
+    sim_id, _ = vs.run_simulation(
+        fit_payload=_fit_payload(),
+        mode="prensa",
+        dim=2,
+        shape_raw="11,11",
+        dx=0.001,
+        dt=1.0,
+        t_end=10.0,
+        mold_temp_c=170.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=1,
+        platen_axis=0,
+    )
+    sim = vs.load_simulation(sim_id)
+
+    assert sim["store_stride"] > 1
+    assert np.isclose(sim["dx"], sim["dx_compute"] * sim["store_stride"])
+    assert int(np.prod(sim["shape"])) < int(np.prod(sim["full_shape"]))

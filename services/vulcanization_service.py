@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import math
 
@@ -8,6 +8,8 @@ import numpy as np
 R_GAS = 8.314462618
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+MAX_SNAPSHOT_BYTES = 768 * 1024 * 1024  # 768 MB for persisted snapshots (T + alpha)
+MAX_SNAPSHOT_CELLS = 1_500_000  # target upper bound for cells per saved snapshot
 
 
 def _parse_shape(dim, shape_raw):
@@ -52,6 +54,63 @@ def _substep_config(dt, alpha_diff, dx, dim, safety=0.95):
         return 1, dt
     substeps = max(1, int(math.ceil(dt / dt_limit)))
     return substeps, dt / substeps
+
+
+def _snapshot_plan(shape, dim, steps, snapshot_every):
+    base_every = max(int(snapshot_every), 1)
+    total_cells = int(np.prod(shape, dtype=np.int64))
+
+    if total_cells <= 0:
+        return {
+            "snapshot_every_store": base_every,
+            "spatial_stride": 1,
+            "stored_shape": tuple(shape),
+            "store_indices": [0, steps],
+            "estimated_bytes": 0,
+            "downsampled": False,
+        }
+
+    stride = 1
+    if total_cells > MAX_SNAPSHOT_CELLS:
+        stride = max(1, int(math.ceil((total_cells / MAX_SNAPSHOT_CELLS) ** (1.0 / max(dim, 1)))))
+
+    def _stored_shape_for_stride(current_stride):
+        return tuple(((int(n) - 1) // current_stride) + 1 for n in shape)
+
+    def _store_indices_for_every(current_every):
+        indices = list(range(0, steps + 1, current_every))
+        if not indices or indices[-1] != steps:
+            indices.append(steps)
+        return indices
+
+    def _estimated_bytes(current_shape, index_count):
+        cells = int(np.prod(current_shape, dtype=np.int64))
+        return cells * index_count * 2 * np.dtype(np.float32).itemsize
+
+    stored_shape = _stored_shape_for_stride(stride)
+    snapshot_every_store = base_every
+    store_indices = _store_indices_for_every(snapshot_every_store)
+    est_bytes = _estimated_bytes(stored_shape, len(store_indices))
+
+    if est_bytes > MAX_SNAPSHOT_BYTES:
+        time_stride = int(math.ceil(est_bytes / MAX_SNAPSHOT_BYTES))
+        snapshot_every_store = max(base_every, base_every * max(time_stride, 1))
+        store_indices = _store_indices_for_every(snapshot_every_store)
+        est_bytes = _estimated_bytes(stored_shape, len(store_indices))
+
+    while est_bytes > MAX_SNAPSHOT_BYTES and stride < max(shape):
+        stride += 1
+        stored_shape = _stored_shape_for_stride(stride)
+        est_bytes = _estimated_bytes(stored_shape, len(store_indices))
+
+    return {
+        "snapshot_every_store": snapshot_every_store,
+        "spatial_stride": int(stride),
+        "stored_shape": tuple(int(x) for x in stored_shape),
+        "store_indices": store_indices,
+        "estimated_bytes": int(est_bytes),
+        "downsampled": bool(int(stride) > 1 or snapshot_every_store > base_every),
+    }
 
 
 def _laplacian_with_mixed_boundaries(field, dx, dirichlet_axes, dirichlet_value):
@@ -114,11 +173,29 @@ def run_simulation(
 
     _emit_progress("validando", 1, "Validando parametros e malha...")
     shape = _parse_shape(dim, shape_raw)
+    plan = _snapshot_plan(shape, dim, int(max(math.ceil(t_end / dt), 1)), snapshot_every)
+    store_stride = int(plan["spatial_stride"])
+    store_slices = tuple(slice(None, None, store_stride) for _ in range(dim))
+    store_indices = plan["store_indices"]
+    store_count = len(store_indices)
+
+    if plan["downsampled"]:
+        approx_mb = plan["estimated_bytes"] / (1024.0 * 1024.0)
+        _emit_progress(
+            "otimizando_memoria",
+            2,
+            (
+                f"Aplicando otimizacao de memoria: stride espacial={store_stride}, "
+                f"snapshot a cada {plan['snapshot_every_store']} steps, "
+                f"armazenamento estimado ~{approx_mb:.0f} MB."
+            ),
+        )
+
     alpha_diff = 1.2e-7
 
     steps = int(max(math.ceil(t_end / dt), 1))
-    t_field = np.full(shape, init_temp_c + 273.15, dtype=float)
-    cure_drive_field = np.zeros(shape, dtype=float)
+    t_field = np.full(shape, init_temp_c + 273.15, dtype=np.float32)
+    cure_drive_field = np.zeros(shape, dtype=np.float32)
 
     k0 = float(fit_payload["k0"])
     ea = float(fit_payload["Ea"])
@@ -133,13 +210,16 @@ def run_simulation(
         heated_axes = tuple(range(dim))
 
     _emit_progress("inicializando", 3, "Inicializando campos de temperatura e cura...")
-    times, t_snaps, alpha_snaps = [], [], []
+    times = np.empty((store_count,), dtype=np.float64)
+    t_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
+    alpha_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
 
     prev_t = 0.0
     t_bc0 = _temperature_profile(mode, 0.0, mold_temp_c, ramp_rate) + 273.15
     _apply_dirichlet_boundaries(t_field, t_bc0, axes=heated_axes)
 
     progress_stride = max(1, steps // 120)
+    store_pos = 0
     _emit_progress("calculando", 5, "Executando passos de simulacao...")
 
     for step in range(steps + 1):
@@ -166,10 +246,11 @@ def run_simulation(
 
         alpha_field = cure_drive_field / (1.0 + cure_drive_field)
 
-        if step % max(int(snapshot_every), 1) == 0 or step == steps:
-            times.append(t_now)
-            t_snaps.append(t_field.copy())
-            alpha_snaps.append(alpha_field.copy())
+        if store_pos < store_count and step == int(store_indices[store_pos]):
+            times[store_pos] = t_now
+            t_snaps[store_pos] = t_field[store_slices].astype(np.float32, copy=False)
+            alpha_snaps[store_pos] = alpha_field[store_slices].astype(np.float32, copy=False)
+            store_pos += 1
 
         if step == 0 or step == steps or (step % progress_stride == 0):
             progress = 5 + int((float(step) / max(float(steps), 1.0)) * 90.0)
@@ -179,7 +260,7 @@ def run_simulation(
 
     _check_cancel()
     _emit_progress("salvando", 97, "Salvando resultados da simulacao...")
-    sim_id = datetime.utcnow().strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:8]
+    sim_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:8]
     out_path = OUT_DIR / f"sim_{sim_id}.npz"
 
     np.savez_compressed(
@@ -188,15 +269,19 @@ def run_simulation(
         fit_id=fit_payload["fit_id"],
         mode=mode,
         dim=dim,
-        shape=np.array(shape),
+        shape=np.array(plan["stored_shape"]),
+        full_shape=np.array(shape),
         platen_axis=np.array(selected_platen_axis, dtype=int),
         heated_axes=np.array(heated_axes, dtype=int),
+        store_stride=np.array(store_stride, dtype=int),
+        snapshot_every_source=np.array(max(int(snapshot_every), 1), dtype=int),
+        snapshot_every_store=np.array(int(plan["snapshot_every_store"]), dtype=int),
         dx=dx,
         dt=dt,
         t_end=t_end,
-        times=np.array(times),
-        t_snaps=np.array(t_snaps),
-        alpha_snaps=np.array(alpha_snaps),
+        times=times,
+        t_snaps=t_snaps,
+        alpha_snaps=alpha_snaps,
     )
     _emit_progress("concluido", 100, "Simulacao concluida.")
     return sim_id, str(out_path)
@@ -210,6 +295,10 @@ def load_simulation(sim_id):
     files = set(d.files)
     platen_axis = int(d["platen_axis"]) if "platen_axis" in files else 0
     heated_axes = tuple(int(x) for x in d["heated_axes"]) if "heated_axes" in files else tuple(range(int(d["dim"])))
+    full_shape = tuple(int(x) for x in d["full_shape"]) if "full_shape" in files else tuple(int(x) for x in d["shape"])
+    store_stride = int(d["store_stride"]) if "store_stride" in files else 1
+    snapshot_every_source = int(d["snapshot_every_source"]) if "snapshot_every_source" in files else 20
+    snapshot_every_store = int(d["snapshot_every_store"]) if "snapshot_every_store" in files else snapshot_every_source
 
     return {
         "sim_id": str(d["sim_id"]),
@@ -217,9 +306,14 @@ def load_simulation(sim_id):
         "mode": str(d["mode"]),
         "dim": int(d["dim"]),
         "shape": tuple(int(x) for x in d["shape"]),
+        "full_shape": full_shape,
         "platen_axis": platen_axis,
         "heated_axes": heated_axes,
-        "dx": float(d["dx"]),
+        "store_stride": store_stride,
+        "snapshot_every_source": snapshot_every_source,
+        "snapshot_every_store": snapshot_every_store,
+        "dx": float(d["dx"]) * float(store_stride),
+        "dx_compute": float(d["dx"]),
         "dt": float(d["dt"]),
         "t_end": float(d["t_end"]),
         "times": d["times"],

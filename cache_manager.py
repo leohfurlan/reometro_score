@@ -31,6 +31,16 @@ class CacheManager:
                 return None
             
             return self.cache.copy()
+
+    def peek(self):
+        """
+        Retorna snapshot do cache ignorando TTL.
+        Util para atualizacoes incrementais sem recarregar tudo.
+        """
+        with self.lock:
+            if not self.cache.get('dados'):
+                return None
+            return self.cache.copy()
     
     def set(self, dados):
         """Atualiza cache com verificação de tamanho."""

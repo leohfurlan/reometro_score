@@ -5,6 +5,7 @@ import os
 import pandas as pd
 from datetime import datetime
 from difflib import get_close_matches
+from time import perf_counter
 
 # --- NOVAS IMPORTAÃƒâ€¡Ãƒâ€¢ES (ARQUITETURA V13) ---
 from models.usuario import db
@@ -387,66 +388,191 @@ def match_nome_inteligente(texto_bruto):
     if matches: return _CATALOGO_NOME[matches[0]]
     return None
 
-# --- LÃƒâ€œGICA PRINCIPAL (ETL V2) ---
+# --- LOGICA PRINCIPAL (ETL V2) ---
 
-def processar_carga_dados(data_corte='2025-07-01'):
+_ETL_STATE_FILE = os.path.abspath(os.getenv("ETL_STATE_FILE", os.path.join("instance", "etl_state.json")))
+
+
+def _normalizar_batch(valor):
+    try:
+        return str(int(valor))
+    except Exception:
+        txt = str(valor or "").strip()
+        return txt if txt else "0"
+
+
+def _ranking_metodo_identificacao(metodo):
+    ranking = {"MANUAL": 0, "LOTE": 1, "TEXTO": 2, "FANTASMA": 3}
+    return ranking.get(str(metodo or "FANTASMA").strip().upper(), 99)
+
+
+def _melhor_metodo_identificacao(atual, novo):
+    return atual if _ranking_metodo_identificacao(atual) <= _ranking_metodo_identificacao(novo) else novo
+
+
+def _carregar_estado_etl():
+    if not os.path.exists(_ETL_STATE_FILE):
+        return {}
+
+    try:
+        with open(_ETL_STATE_FILE, "r", encoding="utf-8") as fp:
+            dados = json.load(fp)
+        return dados if isinstance(dados, dict) else {}
+    except Exception as exc:
+        print(f"[WARN] Falha ao ler estado incremental do ETL: {exc}")
+        return {}
+
+
+def _salvar_estado_etl(max_cod_ensaio):
+    try:
+        pasta = os.path.dirname(_ETL_STATE_FILE)
+        if pasta:
+            os.makedirs(pasta, exist_ok=True)
+
+        payload = {
+            "max_cod_ensaio": int(max_cod_ensaio or 0),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        with open(_ETL_STATE_FILE, "w", encoding="utf-8") as fp:
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"[WARN] Falha ao salvar estado incremental do ETL: {exc}")
+
+
+def _obter_ultimo_cod_ensaio_processado():
+    estado = _carregar_estado_etl()
+    try:
+        valor = int(estado.get("max_cod_ensaio") or 0)
+        if valor > 0:
+            return valor
+    except Exception:
+        pass
+
+    # Bootstrap: quando nao houver estado salvo, usa o maior id local como ponto de partida.
+    try:
+        local_max = db.session.query(db.func.max(EnsaioConsolidado.id_ensaio)).scalar() or 0
+        return int(local_max or 0)
+    except Exception:
+        return 0
+
+
+def processar_carga_dados(data_corte='2025-07-01', apenas_novos=True):
     if not _CATALOGO_CODIGO:
         carregar_referencias_estaticas()
     else:
         qtd = recarregar_aprendizado_memoria()
         print(f"Memoria de aprendizado atualizada para ETL: {qtd} correcoes.")
 
-    print(f"---  ETL V2: Iniciando carga e cÃƒÂ¡lculo de score... ---")
+    print("--- ETL V2: Iniciando carga e calculo de score... ---")
     start_time = datetime.now()
-    
+    t_total = perf_counter()
+    stage_timings = {
+        'sql': 0.0,
+        'agrupamento': 0.0,
+        'consolidacao': 0.0,
+        'persistencia': 0.0,
+        'total': 0.0,
+    }
+
     engine = _obter_engine_ativa()
     if engine is None:
         print("   Nenhuma versao de score disponivel. Scores serao 0.")
 
+    ultimo_cod = _obter_ultimo_cod_ensaio_processado() if apenas_novos else 0
+    if apenas_novos and ultimo_cod > 0:
+        print(f"   Modo incremental ativo (COD_ENSAIO > {ultimo_cod}).")
+    elif apenas_novos:
+        print("   Modo incremental ativo (sem estado salvo, ponto de corte local = 0).")
+    else:
+        print("   Modo completo forcado.")
+
     conn = None
     resultados_brutos = []
+    t_sql = perf_counter()
     try:
         conn = connect_to_database()
         cursor = conn.cursor()
         query = '''
-        SELECT 
-            COD_ENSAIO, NUMERO_LOTE, BATCH, DATA, 
-            T2TEMPO as Ts2, T90TEMPO as T90, VISCOSIDADEFINALTORQUE as Viscosidade, 
+        SELECT
+            COD_ENSAIO, NUMERO_LOTE, BATCH, DATA,
+            T2TEMPO as Ts2, T90TEMPO as T90, VISCOSIDADEFINALTORQUE as Viscosidade,
             TEMP_PLATO_INF, COD_GRUPO, MAXIMO_TEMPO,
             CODIGO as CODIGO_REO, AMOSTRA
-        FROM dbo.ENSAIO 
+        FROM dbo.ENSAIO
         WHERE DATA >= ?
-        ORDER BY DATA DESC
         '''
-        cursor.execute(query, (data_corte,))
+        params = [data_corte]
+
+        if apenas_novos and ultimo_cod > 0:
+            query += " AND COD_ENSAIO > ?"
+            params.append(ultimo_cod)
+
+        query += " ORDER BY COD_ENSAIO ASC"
+
+        cursor.execute(query, params)
         colunas = [c[0] for c in cursor.description]
         resultados_brutos = [dict(zip(colunas, row)) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"Erro CrÃƒÂ­tico no SQL: {e}")
+        print(f"Erro Critico no SQL: {e}")
         return None
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
+    stage_timings['sql'] = perf_counter() - t_sql
 
-    dados_agrupados = {} 
-    
+    if not resultados_brutos:
+        total_time = (datetime.now() - start_time).total_seconds()
+        stage_timings['total'] = perf_counter() - t_total
+        print("   Nenhum novo ensaio para processar.")
+        print(
+            "[PERF][ETL] "
+            f"sql={stage_timings['sql']:.2f}s "
+            f"agrupamento={stage_timings['agrupamento']:.2f}s "
+            f"consolidacao={stage_timings['consolidacao']:.2f}s "
+            f"persistencia={stage_timings['persistencia']:.2f}s "
+            f"total={stage_timings['total']:.2f}s "
+            "brutos=0 consolidados=0"
+        )
+        return {
+            'total': 0,
+            'total_bruto': 0,
+            'tempo': total_time,
+            'incremental': bool(apenas_novos),
+            'ids_processados': [],
+            'timings': stage_timings,
+        }
+
+    dados_agrupados = {}
+    novo_max_cod = int(ultimo_cod or 0)
+    t_agrupamento = perf_counter()
+
     for row in resultados_brutos:
+        try:
+            cod_ensaio = int(row['COD_ENSAIO'])
+        except Exception:
+            continue
+
+        if cod_ensaio > novo_max_cod:
+            novo_max_cod = cod_ensaio
+
         lote_orig = row['NUMERO_LOTE']
         amostra = row['AMOSTRA']
         grupo = row['COD_GRUPO']
         key_lote_orig = str(lote_orig).strip().upper()
         key_lote_compacto = _compact_lote_key(key_lote_orig)
-        
+
         lote_final = key_lote_orig
         produto = None
         metodo_id = "FANTASMA"
         equip_planilha = None
-        
+
         match_aprendido = _MAPA_APRENDIZADO.get(key_lote_orig) or _MAPA_APRENDIZADO.get(key_lote_compacto)
         if match_aprendido:
             lote_final = match_aprendido.get('lote_real')
             produto = match_nome_inteligente(match_aprendido.get('massa'))
-            if produto: metodo_id = "MANUAL"
-        
+            if produto:
+                metodo_id = "MANUAL"
+
         if metodo_id == "FANTASMA":
             lote_cand_orig, origem_orig = extrair_lote_da_string(lote_orig)
             lote_cand_amostra, origem_amostra = extrair_lote_da_string(amostra)
@@ -468,21 +594,21 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 if isinstance(dados_planilha, dict):
                     produto = match_nome_inteligente(dados_planilha.get('massa'))
                     equip_planilha = dados_planilha.get('equipamento')
-                    if produto: metodo_id = "LOTE"
+                    if produto:
+                        metodo_id = "LOTE"
 
         if metodo_id == "FANTASMA":
             produto = match_nome_inteligente(amostra) or match_nome_inteligente(row['CODIGO_REO'])
-            if produto: metodo_id = "TEXTO"
+            if produto:
+                metodo_id = "TEXTO"
 
-        try: chave_batch = str(int(row['BATCH']))
-        except: chave_batch = "0"
-        
-        chave_unica = (lote_final, chave_batch)
-        
+        chave_batch = _normalizar_batch(row.get('BATCH'))
+        chave_unica = (str(lote_final or '').strip().upper(), chave_batch)
+
         if chave_unica not in dados_agrupados:
             dados_agrupados[chave_unica] = {
                 'ids_ensaio': [], 'massa': produto,
-                'lote_visivel': lote_final, 'batch': chave_batch,
+                'lote_visivel': chave_unica[0], 'batch': chave_batch,
                 'lote_original': key_lote_orig,
                 'material_original': str(amostra).strip(),
                 'data': row['DATA'],
@@ -494,33 +620,36 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 'temps_reo': [], 'temps_visc': [],
                 'temps_reo_alta': [], 'temps_reo_baixa': [],
                 'metodo_id': metodo_id,
-                'equip_planilha': equip_planilha
+                'equip_planilha': equip_planilha,
             }
-        
+
         reg = dados_agrupados[chave_unica]
-        if equip_planilha and not reg['equip_planilha']: reg['equip_planilha'] = equip_planilha
-        if reg['metodo_id'] == "FANTASMA" and metodo_id != "FANTASMA": reg['metodo_id'] = metodo_id
-        if not reg['massa'] and produto: reg['massa'] = produto
-        
-        cod_ensaio = row['COD_ENSAIO']
+
+        if row['DATA'] and (not reg['data'] or row['DATA'] > reg['data']):
+            reg['data'] = row['DATA']
+        if equip_planilha and not reg['equip_planilha']:
+            reg['equip_planilha'] = equip_planilha
+        reg['metodo_id'] = _melhor_metodo_identificacao(reg.get('metodo_id'), metodo_id)
+        if not reg['massa'] and produto:
+            reg['massa'] = produto
+
         reg['ids_ensaio'].append(cod_ensaio)
-        
+
         v_ts2 = safe_float(row['Ts2'])
         v_t90 = safe_float(row['T90'])
         v_visc = safe_float(row['Viscosidade'])
         v_temp = safe_float(row['TEMP_PLATO_INF'])
 
-        # Classifica o tipo do ensaio (Reometria vs Viscosidade) para persistir temps/ids corretamente.
         dados_grupo = _MAPA_GRUPOS.get(grupo, {})
         tipo_maquina = dados_grupo.get('tipo', 'INDEFINIDO')
         desc_grupo = dados_grupo.get('descricao')
+
         is_visc = False
         if tipo_maquina == 'VISCOSIMETRO':
             is_visc = True
         elif tipo_maquina == 'REOMETRO':
             is_visc = False
         else:
-            # Fallbacks
             if v_temp and 90 <= v_temp <= 115:
                 is_visc = True
             elif v_temp and v_temp >= 120:
@@ -575,85 +704,161 @@ def processar_carga_dados(data_corte='2025-07-01'):
                 reg['ids_reo_alta'].append(cod_ensaio)
             else:
                 reg['ids_reo_baixa'].append(cod_ensaio)
+    stage_timings['agrupamento'] = perf_counter() - t_agrupamento
 
+    t_consolidacao = perf_counter()
     acumuladores_visc = {}
     for dados in dados_agrupados.values():
         if dados['visc']:
-            l = dados['lote_visivel']
-            if l not in acumuladores_visc: acumuladores_visc[l] = []
-            acumuladores_visc[l].append(dados['visc'])
-    
-    medias_visc = {k: sum(v)/len(v) for k, v in acumuladores_visc.items()}
+            lote_visivel = dados['lote_visivel']
+            if lote_visivel not in acumuladores_visc:
+                acumuladores_visc[lote_visivel] = []
+            acumuladores_visc[lote_visivel].append(dados['visc'])
+
+    medias_visc = {k: sum(v) / len(v) for k, v in acumuladores_visc.items()}
+
+    chaves_processadas = {
+        (str(d.get('lote_visivel') or '').strip().upper(), _normalizar_batch(d.get('batch')))
+        for d in dados_agrupados.values()
+        if str(d.get('lote_visivel') or '').strip()
+    }
+
+    mapa_existentes = {}
+    if chaves_processadas:
+        lotes_alvo = sorted({chave[0] for chave in chaves_processadas})
+        candidatos = EnsaioConsolidado.query.filter(EnsaioConsolidado.lote.in_(lotes_alvo)).all()
+
+        for existente in candidatos:
+            chave = (str(existente.lote or '').strip().upper(), _normalizar_batch(existente.batch))
+            if chave not in chaves_processadas:
+                continue
+
+            atual = mapa_existentes.get(chave)
+            if atual is None:
+                mapa_existentes[chave] = existente
+                continue
+
+            ref_atual = atual.updated_at or atual.data_hora or datetime.min
+            ref_existente = existente.updated_at or existente.data_hora or datetime.min
+            if ref_existente > ref_atual:
+                mapa_existentes[chave] = existente
 
     lista_consolidada = []
     lista_historico = []
     ids_ensaios_processados = []
 
-    for _, dados in dados_agrupados.items():
-        if not dados['massa']: continue
-        
-        valor_visc = dados['visc']
-        origem_visc = "Real" if valor_visc else "N/A"
-        if not valor_visc and dados['lote_visivel'] in medias_visc:
-            valor_visc = medias_visc[dados['lote_visivel']]
-            origem_visc = "Media"
+    for dados in dados_agrupados.values():
+        chave = (str(dados['lote_visivel'] or '').strip().upper(), _normalizar_batch(dados.get('batch')))
+        existente = mapa_existentes.get(chave)
 
-        ids_merge = sorted({int(i) for i in (dados['ids_ensaio'] or []) if i is not None})
-        temps_merge = sorted({float(t) for t in (dados['temps'] or []) if t}, reverse=True)
+        massa = dados.get('massa')
+        if not massa and existente and existente.cod_sankhya:
+            massa = type(
+                'MassaTmp',
+                (),
+                {'cod_sankhya': existente.cod_sankhya, 'descricao': existente.massa_descricao},
+            )()
 
-        ids_reo = sorted({int(i) for i in (dados.get('ids_reo') or []) if i is not None})
-        ids_visc = sorted({int(i) for i in (dados.get('ids_visc') or []) if i is not None})
-        ids_reo_alta = sorted({int(i) for i in (dados.get('ids_reo_alta') or []) if i is not None})
-        ids_reo_baixa = sorted({int(i) for i in (dados.get('ids_reo_baixa') or []) if i is not None})
+        if not massa:
+            continue
 
-        temps_reo = sorted({float(t) for t in (dados.get('temps_reo') or []) if t}, reverse=True)
-        temps_visc = sorted({float(t) for t in (dados.get('temps_visc') or []) if t}, reverse=True)
-        temps_reo_alta = sorted({float(t) for t in (dados.get('temps_reo_alta') or []) if t}, reverse=True)
-        temps_reo_baixa = sorted({float(t) for t in (dados.get('temps_reo_baixa') or []) if t}, reverse=True)
+        ids_novos = {int(i) for i in (dados.get('ids_ensaio') or []) if i is not None}
+        ids_antigos = set(existente.ids_agrupados_list) if existente else set()
+        ids_merge = sorted(ids_novos | ids_antigos)
 
-        temp_plato = (temps_reo[0] if temps_reo else (temps_visc[0] if temps_visc else (temps_merge[0] if temps_merge else 0)))
+        if existente and existente.id_ensaio:
+            id_destino = int(existente.id_ensaio)
+            ids_merge = sorted(set(ids_merge) | {id_destino})
+        elif ids_merge:
+            id_destino = max(ids_merge)
+        else:
+            continue
+
+        temps_antigos = existente.temps_plato_list if existente else []
+        temps_merge = sorted({float(t) for t in (dados.get('temps') or []) + temps_antigos if t}, reverse=True)
+
+        ids_reo_antigos = set(existente.ids_reo_list) if existente else set()
+        ids_visc_antigos = set(existente.ids_visc_list) if existente else set()
+
+        ids_reo = sorted({int(i) for i in (dados.get('ids_reo') or []) if i is not None} | ids_reo_antigos)
+        ids_visc = sorted({int(i) for i in (dados.get('ids_visc') or []) if i is not None} | ids_visc_antigos)
+
+        temps_reo_base = [float(t) for t in (dados.get('temps_reo') or []) if t]
+        temps_visc_base = [float(t) for t in (dados.get('temps_visc') or []) if t]
+
+        if existente and existente.temp_reo:
+            temps_reo_base.append(float(existente.temp_reo))
+        if existente and existente.temp_visc:
+            temps_visc_base.append(float(existente.temp_visc))
+
+        temps_reo = sorted(set(temps_reo_base), reverse=True)
+        temps_visc = sorted(set(temps_visc_base), reverse=True)
+
+        ts2_alta = dados['ts2_alta'] if dados['ts2_alta'] is not None else (existente.ts2_alta if existente else None)
+        t90_alta = dados['t90_alta'] if dados['t90_alta'] is not None else (existente.t90_alta if existente else None)
+        ts2_baixa = dados['ts2_baixa'] if dados['ts2_baixa'] is not None else (existente.ts2_baixa if existente else None)
+        t90_baixa = dados['t90_baixa'] if dados['t90_baixa'] is not None else (existente.t90_baixa if existente else None)
+        ts2_base = dados['ts2'] if dados['ts2'] is not None else (existente.ts2 if existente else None)
+        t90_base = dados['t90'] if dados['t90'] is not None else (existente.t90 if existente else None)
+
+        temp_plato = (
+            temps_reo[0]
+            if temps_reo
+            else (temps_visc[0] if temps_visc else (temps_merge[0] if temps_merge else (existente.temp_plato if existente else 0)))
+        )
+
         usar_alta = bool(temp_plato and temp_plato >= 175)
-        ts2_final = (
-            dados['ts2_alta'] if usar_alta else dados['ts2_baixa']
-        ) or (
-            dados['ts2_baixa'] if usar_alta else dados['ts2_alta']
-        ) or dados['ts2']
-        t90_final = (
-            dados['t90_alta'] if usar_alta else dados['t90_baixa']
-        ) or (
-            dados['t90_baixa'] if usar_alta else dados['t90_alta']
-        ) or dados['t90']
+        ts2_final = (ts2_alta if usar_alta else ts2_baixa) or (ts2_baixa if usar_alta else ts2_alta) or ts2_base
+        t90_final = (t90_alta if usar_alta else t90_baixa) or (t90_baixa if usar_alta else t90_alta) or t90_base
+
+        valor_visc = dados['visc']
+        origem_visc = 'Real' if valor_visc is not None else 'N/A'
+        if valor_visc is None and existente and existente.viscosidade is not None:
+            valor_visc = existente.viscosidade
+            origem_visc = existente.origem_viscosidade or 'Real'
+        if valor_visc is None and dados['lote_visivel'] in medias_visc:
+            valor_visc = medias_visc[dados['lote_visivel']]
+            origem_visc = 'Media'
+
+        data_hora = dados.get('data')
+        if existente and existente.data_hora and (not data_hora or existente.data_hora > data_hora):
+            data_hora = existente.data_hora
+
+        metodo_id = _melhor_metodo_identificacao(
+            existente.metodo_identificacao if existente else dados.get('metodo_id'),
+            dados.get('metodo_id'),
+        )
 
         novo_ensaio = EnsaioConsolidado(
-            id_ensaio=dados['ids_ensaio'][0],
-            data_hora=dados['data'],
+            id_ensaio=id_destino,
+            data_hora=data_hora,
             lote=dados['lote_visivel'],
             batch=dados['batch'],
-            cod_sankhya=dados['massa'].cod_sankhya,
-            massa_descricao=dados['massa'].descricao,
+            cod_sankhya=massa.cod_sankhya,
+            massa_descricao=massa.descricao,
             temp_plato=temp_plato,
             ts2=ts2_final,
             t90=t90_final,
-            ts2_alta=dados['ts2_alta'],
-            t90_alta=dados['t90_alta'],
-            ts2_baixa=dados['ts2_baixa'],
-            t90_baixa=dados['t90_baixa'],
-            reometro_alta=dados.get('reometro_alta'),
-            reometro_baixa=dados.get('reometro_baixa'),
+            ts2_alta=ts2_alta,
+            t90_alta=t90_alta,
+            ts2_baixa=ts2_baixa,
+            t90_baixa=t90_baixa,
+            reometro_alta=dados.get('reometro_alta') or (existente.reometro_alta if existente else None),
+            reometro_baixa=dados.get('reometro_baixa') or (existente.reometro_baixa if existente else None),
             viscosidade=valor_visc,
             origem_viscosidade=origem_visc,
             ids_agrupados=json.dumps(ids_merge),
             temps_plato=json.dumps(temps_merge),
-            temp_reo=(temps_reo[0] if temps_reo else None),
-            temp_visc=(temps_visc[0] if temps_visc else None),
+            temp_reo=(temps_reo[0] if temps_reo else (existente.temp_reo if existente else None)),
+            temp_visc=(temps_visc[0] if temps_visc else (existente.temp_visc if existente else None)),
             ids_reo=json.dumps(ids_reo),
             ids_visc=json.dumps(ids_visc),
-            metodo_identificacao=dados['metodo_id'],
-            lote_original=dados['lote_original'],
-            material_original=dados['material_original'],
-            updated_at=datetime.now()
+            metodo_identificacao=metodo_id,
+            lote_original=dados.get('lote_original') or (existente.lote_original if existente else None),
+            material_original=dados.get('material_original') or (existente.material_original if existente else None),
+            updated_at=datetime.now(),
         )
-        
+
         if engine:
             resultado = engine.calcular(novo_ensaio)
             novo_ensaio.score_final = resultado.score
@@ -662,55 +867,72 @@ def processar_carga_dados(data_corte='2025-07-01'):
             ids_ensaios_processados.append(novo_ensaio.id_ensaio)
         else:
             novo_ensaio.score_final = 0
-            novo_ensaio.acao_recomendada = "SEM ENGINE"
+            novo_ensaio.acao_recomendada = 'SEM ENGINE'
 
         lista_consolidada.append(novo_ensaio)
 
-    # 6. PersistÃƒÂªncia com Chunking (CorreÃƒÂ§ÃƒÂ£o do Erro)
+    stage_timings['consolidacao'] = perf_counter() - t_consolidacao
+    t_persistencia = perf_counter()
     try:
         print(f"   Salvando {len(lista_consolidada)} registros consolidados...")
-        
-        # A. Upsert do Dataset Mestre
+
         count = 0
-        for e in lista_consolidada:
-            db.session.merge(e)
+        for ensaio in lista_consolidada:
+            db.session.merge(ensaio)
             count += 1
-            # Commit parcial para aliviar memÃƒÂ³ria
             if count % 1000 == 0:
                 db.session.commit()
-        db.session.commit() # Commit final do merge
-        
-        # B. HistÃƒÂ³rico de Score (Com Chunking no Delete)
+        db.session.commit()
+
+        ids_ensaios_processados = sorted({int(i) for i in ids_ensaios_processados if i is not None})
+
         if engine and ids_ensaios_processados:
-            print(f"   Limpando histÃƒÂ³rico anterior...")
-            
-            # Limite seguro para SQLite (999 ÃƒÂ© o padrÃƒÂ£o antigo, 900 ÃƒÂ© seguro)
-            BATCH_SIZE = 900 
-            
-            # Deleta em lotes
-            for lote_ids in chunk_list(ids_ensaios_processados, BATCH_SIZE):
+            print("   Limpando historico anterior...")
+            batch_size = 900
+
+            for lote_ids in chunk_list(ids_ensaios_processados, batch_size):
                 db.session.query(ScoreResultado).filter(
                     ScoreResultado.id_versao == engine.versao.id,
-                    ScoreResultado.id_ensaio.in_(lote_ids)
+                    ScoreResultado.id_ensaio.in_(lote_ids),
                 ).delete(synchronize_session=False)
-            
-            db.session.commit() # Confirma deleÃƒÂ§ÃƒÂµes
-            
-            print(f"   Inserindo novos resultados...")
-            # Insere em lotes
-            for lote_res in chunk_list(lista_historico, BATCH_SIZE):
+
+            db.session.commit()
+
+            print("   Inserindo novos resultados...")
+            for lote_res in chunk_list(lista_historico, batch_size):
                 db.session.add_all(lote_res)
                 db.session.commit()
 
+        _salvar_estado_etl(novo_max_cod)
+        stage_timings['persistencia'] = perf_counter() - t_persistencia
         print("Dados persistidos com sucesso!")
-        
+
     except Exception as e:
+        stage_timings['persistencia'] = perf_counter() - t_persistencia
         db.session.rollback()
         print(f"Erro ao salvar no banco: {e}")
         return None
 
     total_time = (datetime.now() - start_time).total_seconds()
-    return {'total': len(lista_consolidada), 'tempo': total_time}
+    stage_timings['total'] = perf_counter() - t_total
+    print(
+        "[PERF][ETL] "
+        f"sql={stage_timings['sql']:.2f}s "
+        f"agrupamento={stage_timings['agrupamento']:.2f}s "
+        f"consolidacao={stage_timings['consolidacao']:.2f}s "
+        f"persistencia={stage_timings['persistencia']:.2f}s "
+        f"total={stage_timings['total']:.2f}s "
+        f"brutos={len(resultados_brutos)} consolidados={len(lista_consolidada)}"
+    )
+    return {
+        'total': len(lista_consolidada),
+        'total_bruto': len(resultados_brutos),
+        'tempo': total_time,
+        'incremental': bool(apenas_novos),
+        'ids_processados': ids_ensaios_processados,
+        'timings': stage_timings,
+    }
+
 
 def get_catalogo_codigo():
     return _CATALOGO_CODIGO
