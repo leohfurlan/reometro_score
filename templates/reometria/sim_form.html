@@ -88,6 +88,15 @@
   <input type="hidden" name="mode" value="{{ mode }}">
   <input type="hidden" id="shape_hidden" name="shape" value="200">
 
+  <div class="col-md-4">
+    <label class="form-label">Motor de simulacao</label>
+    <select class="form-select" id="engine_select" name="engine">
+      <option value="empirical_v1" {% if engine == 'empirical_v1' %}selected{% endif %}>Atual (empirical_v1)</option>
+      <option value="thermo_kinetic_v2" {% if engine == 'thermo_kinetic_v2' %}selected{% endif %}>Novo (thermo_kinetic_v2)</option>
+    </select>
+    <div class="small text-muted mt-1">Padrao: motor atual. Use v2 para o fluxo termo-cinetico novo.</div>
+  </div>
+
   <div class="col-md-2">
     <label class="form-label">Dimensao</label>
     <select class="form-select" id="dim_select" name="dim">

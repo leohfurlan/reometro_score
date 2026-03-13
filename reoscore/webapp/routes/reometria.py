@@ -15,7 +15,8 @@ from services.kinetics_service import (
     run_fit,
     update_fit_parameters,
 )
-from services.vulcanization_service import load_simulation, run_simulation
+from services.vulcanization_service import load_simulation as load_simulation_v1, run_simulation as run_simulation_v1
+from services.vulcanization_service_v2 import load_simulation_v2, run_simulation_v2
 
 from reoscore.webapp.utils import parse_float_locale, parse_int_locale
 
@@ -23,6 +24,9 @@ reometria_bp = Blueprint("reometria", __name__)
 _SIM_JOBS = {}
 _SIM_JOBS_LOCK = threading.Lock()
 _SIM_JOB_TTL_SEC = 6 * 3600
+ENGINE_EMPIRICAL_V1 = "empirical_v1"
+ENGINE_THERMO_KINETIC_V2 = "thermo_kinetic_v2"
+ENGINE_OPTIONS = (ENGINE_EMPIRICAL_V1, ENGINE_THERMO_KINETIC_V2)
 
 
 def _mm_to_cells(length_mm, dx):
@@ -81,7 +85,65 @@ def _get_sim_job(job_id):
         return dict(job) if job else None
 
 
+def _normalize_engine(value):
+    engine = str(value or ENGINE_EMPIRICAL_V1).strip().lower()
+    if engine not in ENGINE_OPTIONS:
+        return ENGINE_EMPIRICAL_V1
+    return engine
+
+
+def _run_simulation_with_engine(fit_payload, sim_params, progress_callback=None, cancel_checker=None):
+    common_args = (
+        fit_payload,
+        sim_params["mode"],
+        sim_params["dim"],
+        sim_params["shape_raw"],
+        sim_params["dx"],
+        sim_params["dt"],
+        sim_params["t_end"],
+        sim_params["mold_temp_c"],
+        sim_params["init_temp_c"],
+        sim_params["ramp_rate"],
+        sim_params["snapshot_every"],
+        sim_params["platen_axis"],
+    )
+    engine = _normalize_engine(sim_params.get("engine"))
+    if engine == ENGINE_THERMO_KINETIC_V2:
+        return run_simulation_v2(
+            *common_args,
+            progress_callback=progress_callback,
+            cancel_checker=cancel_checker,
+        )
+    return run_simulation_v1(
+        *common_args,
+        progress_callback=progress_callback,
+        cancel_checker=cancel_checker,
+    )
+
+
+def _load_simulation_with_engine(sim_id, engine_hint=None):
+    engine_hint = _normalize_engine(engine_hint)
+
+    if engine_hint == ENGINE_THERMO_KINETIC_V2:
+        sim = load_simulation_v2(sim_id)
+        if sim:
+            return sim, ENGINE_THERMO_KINETIC_V2
+        sim = load_simulation_v1(sim_id)
+        if sim:
+            return sim, ENGINE_EMPIRICAL_V1
+        return None, None
+
+    sim = load_simulation_v1(sim_id)
+    if sim:
+        return sim, ENGINE_EMPIRICAL_V1
+    sim = load_simulation_v2(sim_id)
+    if sim:
+        return sim, ENGINE_THERMO_KINETIC_V2
+    return None, None
+
+
 def _parse_simulation_request(form_data):
+    engine = _normalize_engine(form_data.get("engine"))
     mode = str(form_data.get("mode", "prensa") or "prensa").strip().lower()
     if mode not in ("prensa", "autoclave"):
         mode = "prensa"
@@ -130,6 +192,7 @@ def _parse_simulation_request(form_data):
         platen_axis = int(np.clip(axis_map.get(platen_axis_raw, 0), 0, dim - 1))
 
     return {
+        "engine": engine,
         "mode": mode,
         "dim": int(dim),
         "shape_raw": shape,
@@ -165,20 +228,11 @@ def _run_simulation_job(job_id, fit_payload, sim_params):
             progress=1,
             stage="iniciando",
             message="Iniciando simulacao...",
+            engine=_normalize_engine(sim_params.get("engine")),
         )
-        sim_id, _ = run_simulation(
+        sim_id, _ = _run_simulation_with_engine(
             fit_payload,
-            sim_params["mode"],
-            sim_params["dim"],
-            sim_params["shape_raw"],
-            sim_params["dx"],
-            sim_params["dt"],
-            sim_params["t_end"],
-            sim_params["mold_temp_c"],
-            sim_params["init_temp_c"],
-            sim_params["ramp_rate"],
-            sim_params["snapshot_every"],
-            sim_params["platen_axis"],
+            sim_params,
             progress_callback=_progress_callback,
             cancel_checker=_cancel_checker,
         )
@@ -189,6 +243,7 @@ def _run_simulation_job(job_id, fit_payload, sim_params):
             stage="concluido",
             message="Simulacao concluida com sucesso.",
             sim_id=sim_id,
+            engine=_normalize_engine(sim_params.get("engine")),
             finished_at=time.time(),
         )
     except RuntimeError as exc:
@@ -304,11 +359,18 @@ def reometria_simulate_form(fit_id):
     mode = request.args.get("mode", "prensa")
     if mode not in ("prensa", "autoclave"):
         mode = "prensa"
+    engine = _normalize_engine(request.args.get("engine", ENGINE_EMPIRICAL_V1))
     payload = load_fit_payload(fit_id)
     if not payload:
         flash("Fit nao encontrado.", "danger")
         return redirect(url_for("reometria.reometria_fit"))
-    return render_template("reometria/sim_form.html", fit_id=fit_id, mode=mode)
+    return render_template(
+        "reometria/sim_form.html",
+        fit_id=fit_id,
+        mode=mode,
+        engine=engine,
+        engine_options=ENGINE_OPTIONS,
+    )
 
 
 @reometria_bp.route("/reometria/simulate/run/<fit_id>", methods=["POST"])
@@ -322,24 +384,18 @@ def reometria_simulate_run(fit_id):
     sim_params = _parse_simulation_request(request.form)
 
     try:
-        sim_id, _ = run_simulation(
-            payload,
-            sim_params["mode"],
-            sim_params["dim"],
-            sim_params["shape_raw"],
-            sim_params["dx"],
-            sim_params["dt"],
-            sim_params["t_end"],
-            sim_params["mold_temp_c"],
-            sim_params["init_temp_c"],
-            sim_params["ramp_rate"],
-            sim_params["snapshot_every"],
-            sim_params["platen_axis"],
-        )
+        sim_id, _ = _run_simulation_with_engine(payload, sim_params)
     except Exception as exc:
         flash(f"Falha ao executar simulacao: {exc}", "danger")
-        return redirect(url_for("reometria.reometria_simulate_form", fit_id=fit_id, mode=sim_params["mode"]))
-    return redirect(url_for("reometria.reometria_simulate_view", sim_id=sim_id))
+        return redirect(
+            url_for(
+                "reometria.reometria_simulate_form",
+                fit_id=fit_id,
+                mode=sim_params["mode"],
+                engine=sim_params["engine"],
+            )
+        )
+    return redirect(url_for("reometria.reometria_simulate_view", sim_id=sim_id, engine=sim_params["engine"]))
 
 
 @reometria_bp.route("/reometria/simulate/start/<fit_id>", methods=["POST"])
@@ -351,6 +407,7 @@ def reometria_simulate_start(fit_id):
 
     sim_params = _parse_simulation_request(request.form)
     job_id = _create_sim_job()
+    _update_sim_job(job_id, engine=sim_params["engine"])
 
     worker = threading.Thread(
         target=_run_simulation_job,
@@ -400,11 +457,13 @@ def reometria_simulate_job_cancel(job_id):
 @reometria_bp.route("/reometria/simulate/view/<sim_id>")
 @login_required
 def reometria_simulate_view(sim_id):
-    sim = load_simulation(sim_id)
+    engine_hint = request.args.get("engine", ENGINE_EMPIRICAL_V1)
+    sim, engine_used = _load_simulation_with_engine(sim_id, engine_hint=engine_hint)
     if not sim:
         flash("Simulacao nao encontrada.", "danger")
         return redirect(url_for("reometria.reometria_fit"))
 
+    sim["engine"] = engine_used or ENGINE_EMPIRICAL_V1
     serializable = {
         **sim,
         "times": sim["times"].tolist(),
