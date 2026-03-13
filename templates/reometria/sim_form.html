@@ -1,0 +1,441 @@
+{% extends 'base.html' %}
+{% block title %}Simulacao de Vulcanizacao{% endblock %}
+{% block content %}
+<style>
+  .sim-config-card {
+    background: #f8fafc;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .sim-progress-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1080;
+    padding: 16px;
+  }
+
+  .sim-progress-dialog {
+    width: min(560px, 100%);
+    background: #ffffff;
+    border-radius: 12px;
+    border: 1px solid #dbe2ea;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+    padding: 16px;
+  }
+
+  .sim-progress-stage {
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .sim-progress-message {
+    color: #475569;
+    margin-bottom: 12px;
+  }
+
+  .sim-progress-track {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+    margin-bottom: 8px;
+  }
+
+  .sim-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #0ea5e9 0%, #2563eb 100%);
+    transition: width 0.25s ease-out;
+  }
+
+  .sim-progress-pct {
+    text-align: right;
+    color: #334155;
+    font-size: 0.88rem;
+    margin-bottom: 14px;
+  }
+</style>
+<h2>Simular {{ mode|capitalize }} (fit {{ fit_id }})</h2>
+
+<div class="alert alert-info mb-4">
+  <b>Ajuda rapida dos parametros</b>
+  <ul class="mb-0 mt-2">
+    <li><b>Dimensao:</b> quantidade de eixos da malha numerica (1D, 2D ou 3D).</li>
+    <li><b>Geometria (mm):</b> informe espessura/largura/comprimento conforme a dimensao selecionada.</li>
+    <li><b>Shape (automatico):</b> o sistema converte a geometria em mm para celulas com base no <code>dx</code>.</li>
+    <li><b>dx:</b> espacamento entre celulas (metros). Define a resolucao espacial.</li>
+    <li><b>dt:</b> passo de tempo da simulacao (segundos).</li>
+    <li><b>t_end:</b> tempo total da simulacao (segundos).</li>
+    <li><b>Temp molde/ar:</b> temperatura de contorno aplicada nas bordas (graus C).</li>
+    <li><b>Temp inicial:</b> temperatura inicial de toda a peca (graus C).</li>
+    <li><b>Prensa (2D/3D):</b> selecione o eixo dos platores para definir a origem do calor.</li>
+    <li><b>Rampa autoclave:</b> taxa de aquecimento no modo autoclave (graus C por segundo).</li>
+    <li><b>Snapshot a cada N steps:</b> intervalo de salvamento dos instantes para visualizacao.</li>
+  </ul>
+  <div class="mt-2">
+    Aceita decimal com <b>virgula</b> ou <b>ponto</b>. Ex.: <code>0,5</code> e <code>0.5</code> sao validos.
+  </div>
+</div>
+
+<form method="POST" action="{{ url_for('reometria.reometria_simulate_run', fit_id=fit_id) }}" class="row g-3">
+  <input type="hidden" name="mode" value="{{ mode }}">
+  <input type="hidden" id="shape_hidden" name="shape" value="200">
+
+  <div class="col-md-2">
+    <label class="form-label">Dimensao</label>
+    <select class="form-select" id="dim_select" name="dim">
+      <option value="1">1D</option>
+      <option value="2">2D</option>
+      <option value="3">3D</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">dx (m)</label>
+    <input class="form-control" id="dx_input" name="dx" value="0,001">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">dt (s)</label>
+    <input class="form-control" id="dt_input" name="dt" value="0,5">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">t_end (s)</label>
+    <input class="form-control" name="t_end" value="600">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Espessura (mm)</label>
+    <input class="form-control" id="thickness_mm" name="thickness_mm" value="20">
+  </div>
+  <div class="col-md-3" id="width_group">
+    <label class="form-label">Largura (mm)</label>
+    <input class="form-control" id="width_mm" name="width_mm" value="500">
+  </div>
+  <div class="col-md-3" id="length_group">
+    <label class="form-label">Comprimento (mm)</label>
+    <input class="form-control" id="length_mm" name="length_mm" value="200">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Shape gerado</label>
+    <input class="form-control" id="shape_preview" value="200" readonly>
+  </div>
+  <div class="col-12 d-none" id="platen_card">
+    <div class="sim-config-card">
+      <label class="form-label"><b>Posicao dos platores (origem de calor - prensa)</b></label>
+      <select class="form-select" id="platen_axis" name="platen_axis"></select>
+      <div class="small text-muted mt-2">
+        O eixo selecionado sera usado como origem de calor na simulacao e como eixo das ordenadas na visualizacao.
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Temp molde/ar (C)</label>
+    <input class="form-control" name="mold_temp_c" value="170">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Temp inicial (C)</label>
+    <input class="form-control" name="init_temp_c" value="25">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Rampa autoclave (C/s)</label>
+    <input class="form-control" name="ramp_rate" value="0,05">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Snapshot a cada N steps</label>
+    <input class="form-control" name="snapshot_every" value="20">
+  </div>
+  <div class="col-12">
+    <button class="btn btn-success" type="submit">Rodar simulacao</button>
+  </div>
+</form>
+
+<div id="sim_progress_modal" class="sim-progress-backdrop" role="dialog" aria-modal="true" aria-live="polite">
+  <div class="sim-progress-dialog">
+    <h5 class="mb-2">Simulacao em andamento</h5>
+    <div id="sim_progress_stage" class="sim-progress-stage">Preparando...</div>
+    <div id="sim_progress_message" class="sim-progress-message">Configurando parametros da simulacao.</div>
+    <div class="sim-progress-track">
+      <div id="sim_progress_fill" class="sim-progress-fill"></div>
+    </div>
+    <div id="sim_progress_pct" class="sim-progress-pct">0%</div>
+    <div class="d-flex justify-content-end gap-2">
+      <button type="button" id="sim_progress_close" class="btn btn-outline-secondary btn-sm d-none">Fechar</button>
+      <button type="button" id="sim_progress_cancel" class="btn btn-danger btn-sm">Cancelar operacao</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const mode = "{{ mode }}";
+  const simForm = document.querySelector('form');
+  const dimSelect = document.getElementById('dim_select');
+  const dxInput = document.getElementById('dx_input');
+  const thicknessInput = document.getElementById('thickness_mm');
+  const widthInput = document.getElementById('width_mm');
+  const lengthInput = document.getElementById('length_mm');
+  const widthGroup = document.getElementById('width_group');
+  const lengthGroup = document.getElementById('length_group');
+  const shapeHidden = document.getElementById('shape_hidden');
+  const shapePreview = document.getElementById('shape_preview');
+  const platenCard = document.getElementById('platen_card');
+  const platenAxisSelect = document.getElementById('platen_axis');
+  const progressModal = document.getElementById('sim_progress_modal');
+  const progressStage = document.getElementById('sim_progress_stage');
+  const progressMessage = document.getElementById('sim_progress_message');
+  const progressFill = document.getElementById('sim_progress_fill');
+  const progressPct = document.getElementById('sim_progress_pct');
+  const progressCancelBtn = document.getElementById('sim_progress_cancel');
+  const progressCloseBtn = document.getElementById('sim_progress_close');
+
+  const startSimulationUrl = "{{ url_for('reometria.reometria_simulate_start', fit_id=fit_id) }}";
+  const jobStatusUrlTemplate = "{{ url_for('reometria.reometria_simulate_job_status', job_id='__JOB_ID__') }}";
+  const jobCancelUrlTemplate = "{{ url_for('reometria.reometria_simulate_job_cancel', job_id='__JOB_ID__') }}";
+  const simViewUrlTemplate = "{{ url_for('reometria.reometria_simulate_view', sim_id='__SIM_ID__') }}";
+
+  let currentJobId = null;
+  let pollTimer = null;
+  let isCancelling = false;
+
+  function prettyStage(stage) {
+    const txt = String(stage || 'processando').replace(/_/g, ' ');
+    if (!txt) return 'Processando';
+    return txt.charAt(0).toUpperCase() + txt.slice(1);
+  }
+
+  function setProgress(stage, message, progress) {
+    const pct = Math.max(0, Math.min(100, Number(progress) || 0));
+    progressStage.textContent = prettyStage(stage);
+    progressMessage.textContent = message || 'Processando simulacao...';
+    progressFill.style.width = `${pct.toFixed(1)}%`;
+    progressPct.textContent = `${Math.round(pct)}%`;
+  }
+
+  function showProgressModal() {
+    progressModal.style.display = 'flex';
+    progressCancelBtn.classList.remove('d-none');
+    progressCancelBtn.disabled = false;
+    progressCloseBtn.classList.add('d-none');
+    progressCloseBtn.disabled = true;
+  }
+
+  function allowProgressClose() {
+    progressCancelBtn.classList.add('d-none');
+    progressCloseBtn.classList.remove('d-none');
+    progressCloseBtn.disabled = false;
+  }
+
+  function hideProgressModal() {
+    progressModal.style.display = 'none';
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function buildJobUrl(template, jobId) {
+    return template.replace('__JOB_ID__', encodeURIComponent(jobId));
+  }
+
+  function buildSimViewUrl(simId) {
+    return simViewUrlTemplate.replace('__SIM_ID__', encodeURIComponent(simId));
+  }
+
+  async function pollJobStatus() {
+    if (!currentJobId) return;
+    try {
+      const response = await fetch(buildJobUrl(jobStatusUrlTemplate, currentJobId), {
+        method: 'GET',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Falha ao consultar progresso.');
+      }
+
+      setProgress(payload.stage, payload.message, payload.progress);
+
+      if (payload.status === 'completed' && payload.sim_id) {
+        stopPolling();
+        window.location.href = buildSimViewUrl(payload.sim_id);
+        return;
+      }
+
+      if (payload.status === 'cancelled' || payload.status === 'failed') {
+        stopPolling();
+        allowProgressClose();
+        progressCancelBtn.disabled = true;
+        isCancelling = false;
+      }
+    } catch (error) {
+      stopPolling();
+      allowProgressClose();
+      setProgress('falha', error.message || 'Falha ao monitorar simulacao.', 0);
+      progressCancelBtn.disabled = true;
+      isCancelling = false;
+    }
+  }
+
+  function parseLocaleFloat(value, fallback) {
+    const normalized = String(value || '').trim().replace(',', '.');
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function mmToCells(lengthMm, dx) {
+    if (!Number.isFinite(lengthMm) || lengthMm <= 0 || !Number.isFinite(dx) || dx <= 0) return null;
+    const lengthM = lengthMm / 1000.0;
+    const cells = Math.round(lengthM / dx) + 1;
+    return Math.max(2, Math.min(cells, 2000));
+  }
+
+  function buildPlatenOptions(dim) {
+    const options = [
+      { value: 'thickness', label: 'Espessura (topo/base)' }
+    ];
+    if (dim >= 2) options.push({ value: 'width', label: 'Largura (esquerda/direita)' });
+    if (dim >= 3) options.push({ value: 'length', label: 'Comprimento (frente/tras)' });
+    return options;
+  }
+
+  function refreshPlatenSelector(dim) {
+    const shouldShow = mode === 'prensa' && dim > 1;
+    platenCard.classList.toggle('d-none', !shouldShow);
+    platenAxisSelect.disabled = !shouldShow;
+    if (!shouldShow) return;
+
+    const current = platenAxisSelect.value || 'thickness';
+    const options = buildPlatenOptions(dim);
+    platenAxisSelect.innerHTML = '';
+    options.forEach((opt) => {
+      const optionEl = document.createElement('option');
+      optionEl.value = opt.value;
+      optionEl.textContent = opt.label;
+      platenAxisSelect.appendChild(optionEl);
+    });
+
+    const hasCurrent = options.some((opt) => opt.value === current);
+    platenAxisSelect.value = hasCurrent ? current : options[0].value;
+  }
+
+  function refreshGeometryFields() {
+    const dim = Number.parseInt(dimSelect.value, 10) || 1;
+    widthGroup.classList.toggle('d-none', dim < 2);
+    lengthGroup.classList.toggle('d-none', dim < 3);
+    refreshPlatenSelector(dim);
+  }
+
+  function refreshGeneratedShape() {
+    const dim = Number.parseInt(dimSelect.value, 10) || 1;
+    const dx = parseLocaleFloat(dxInput.value, 0.001);
+    const thicknessMm = parseLocaleFloat(thicknessInput.value, NaN);
+    const widthMm = parseLocaleFloat(widthInput.value, NaN);
+    const lengthMm = parseLocaleFloat(lengthInput.value, NaN);
+
+    const lengthsMm = [thicknessMm];
+    if (dim >= 2) lengthsMm.push(widthMm);
+    if (dim >= 3) lengthsMm.push(lengthMm);
+
+    const shapeParts = lengthsMm.map((val) => mmToCells(val, dx));
+    if (shapeParts.some((val) => val === null)) {
+      shapeHidden.value = '';
+      shapePreview.value = 'Preencha mm e dx validos';
+      return;
+    }
+
+    const shapeValue = shapeParts.join(',');
+    shapeHidden.value = shapeValue;
+    shapePreview.value = `${shapeValue} celulas`;
+  }
+
+  function refreshAll() {
+    refreshGeometryFields();
+    refreshGeneratedShape();
+  }
+
+  [dimSelect, dxInput, thicknessInput, widthInput, lengthInput].forEach((el) => {
+    if (!el) return;
+    el.addEventListener('input', refreshAll);
+    el.addEventListener('change', refreshAll);
+  });
+
+  simForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    refreshGeneratedShape();
+    if (!shapeHidden.value) {
+      alert('Preencha geometria e dx com valores validos antes de rodar a simulacao.');
+      return;
+    }
+
+    if (!window.fetch) {
+      simForm.submit();
+      return;
+    }
+
+    showProgressModal();
+    setProgress('iniciando', 'Enviando simulacao para processamento...', 1);
+    isCancelling = false;
+    currentJobId = null;
+
+    try {
+      const formData = new FormData(simForm);
+      const startResponse = await fetch(startSimulationUrl, {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      const startPayload = await startResponse.json();
+      if (!startResponse.ok || !startPayload.success || !startPayload.job_id) {
+        throw new Error(startPayload.message || 'Nao foi possivel iniciar a simulacao.');
+      }
+
+      currentJobId = startPayload.job_id;
+      setProgress('na fila', 'Simulacao iniciada. Aguardando processamento...', 2);
+      stopPolling();
+      pollTimer = setInterval(pollJobStatus, 1200);
+      await pollJobStatus();
+    } catch (error) {
+      stopPolling();
+      allowProgressClose();
+      progressCancelBtn.disabled = true;
+      setProgress('falha', error.message || 'Falha ao iniciar simulacao.', 0);
+    }
+  });
+
+  progressCancelBtn.addEventListener('click', async () => {
+    if (!currentJobId || isCancelling) return;
+    isCancelling = true;
+    progressCancelBtn.disabled = true;
+    setProgress('cancelando', 'Solicitando cancelamento da simulacao...', Number(progressPct.textContent.replace('%', '')) || 0);
+
+    try {
+      const response = await fetch(buildJobUrl(jobCancelUrlTemplate, currentJobId), {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Falha ao cancelar operacao.');
+      }
+      await pollJobStatus();
+    } catch (error) {
+      allowProgressClose();
+      setProgress('falha', error.message || 'Falha ao cancelar simulacao.', 0);
+      isCancelling = false;
+    }
+  });
+
+  progressCloseBtn.addEventListener('click', () => {
+    hideProgressModal();
+  });
+
+  refreshAll();
+</script>
+{% endblock %}

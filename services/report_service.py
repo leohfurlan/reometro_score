@@ -33,7 +33,7 @@ def gerar_estrutura_relatorio(lista_ensaios, busca='', ordenar_por='nome', ordem
             massa_node['lotes'][lote_key] = {
                 'numero': lote_key,
                 'batches': [],
-                'medias': ensaio.medias_lote,
+                'medias': ensaio.valores_medidos,
                 'data_recente': ensaio.data_hora,
                 # NOVOS CAMPOS PARA O LOTE
                 'kpi_lote': {'total': 0, 'aprovados': 0, 'score_soma': 0, 'reprovados': 0, 'ressalvas': 0}

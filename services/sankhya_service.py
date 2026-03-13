@@ -37,7 +37,7 @@ def importar_catalogo_sankhya():
     WHERE PRO.ATIVO = 'S'
       AND (PRO.CODGRUPOPROD BETWEEN 10000000 AND 18999999)
       AND (
-            PRO.CODGRUPOPROD BETWEEN 16010100 AND 16011200
+            PRO.CODGRUPOPROD BETWEEN 16010100 AND 16011400
          OR PRO.CODGRUPOPROD BETWEEN 18010100 AND 18010700
          OR PRO.CODGRUPOPROD = 18010900
          OR PRO.CODGRUPOPROD = 18010800
@@ -64,7 +64,7 @@ def importar_catalogo_sankhya():
                 obj = Dissolucao(cod, desc)
             elif 18010100 <= grupo <= 18010700 or grupo == 18010900:
                 obj = Massa(cod, desc)
-            elif 16010100 <= grupo <= 16011200:
+            elif 16010100 <= grupo <= 16011400:
                 obj = MateriaPrima(cod, desc)
             
             if obj:

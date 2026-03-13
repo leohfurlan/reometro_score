@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import warnings
+import re
 from dotenv import load_dotenv
 
 # Carrega as variáveis do arquivo .env
@@ -28,21 +29,38 @@ def _resolver_caminho_planilha():
 
     return None
 
+def normalizar_lote_planilha(lote_raw):
+    """
+    Normaliza o lote vindo do Excel.
+    Remove artefato comum de célula numérica (ex: '10091.0' -> '10091').
+    """
+    if pd.isna(lote_raw):
+        return ""
+
+    lote = str(lote_raw).strip().upper()
+    if not lote or lote == "NAN":
+        return ""
+
+    if re.fullmatch(r"\d+\.0+", lote):
+        lote = lote.split(".", 1)[0]
+
+    return lote
+
 def carregar_dicionario_lotes():
     caminho_arquivo = _resolver_caminho_planilha()
     
-    print(f"--- 📂 ETL: Carregando Planilha de Lotes ---")
+    print(f"---  ETL: Carregando Planilha de Lotes ---")
     
     if not caminho_arquivo:
-        print("❌ ERRO: Caminho do arquivo do SharePoint não definido. Execute a sincronização primeiro.")
+        print("ERRO: Caminho do arquivo do SharePoint não definido. Execute a sincronização primeiro.")
         return {}
 
     if not os.path.exists(caminho_arquivo):
-        print("❌ ERRO: Arquivo de lote não encontrado.")
-        print(f"   -> Caminho buscado: {caminho_arquivo}")
+        print("ERRO: Arquivo de lote não encontrado.")
+        print(f"  -> Caminho buscado: {caminho_arquivo}")
         return {}
 
-    # print(f"   > Lendo arquivo: ...{str(caminho_arquivo)[-40:]}")
+    # print(f"  > Lendo arquivo: ...{str(caminho_arquivo)[-40:]}")
 
     # 2. Clone Temporário 
     # (Mantemos essa prática para evitar travar o arquivo se ele estiver aberto no Excel localmente)
@@ -52,7 +70,7 @@ def carregar_dicionario_lotes():
     try:
         shutil.copy2(caminho_arquivo, caminho_clone)
     except Exception as e:
-        print(f"⚠️ Aviso: Não foi possível criar cópia temporária. Tentando ler direto. Erro: {e}")
+        print(f"Aviso: Não foi possível criar cópia temporária. Tentando ler direto. Erro: {e}")
         caminho_clone = caminho_arquivo
 
     mapa_lote_massa = {}
@@ -97,15 +115,16 @@ def carregar_dicionario_lotes():
 
                 # Limpeza dos dados
                 df = df.dropna(subset=['LOTE', 'MASSA'])
-                df['LOTE'] = df['LOTE'].astype(str).str.strip().str.upper()
+                df['LOTE'] = df['LOTE'].apply(normalizar_lote_planilha)
                 df['MASSA'] = df['MASSA'].astype(str).str.strip()
+                df = df[df['LOTE'] != '']
                 
                 # Filtra lixo (lotes com menos de 3 caracteres)
                 df = df[df['LOTE'].str.len() > 2] 
                 
                 # Itera para montar o dicionário rico
                 for _, row in df.iterrows():
-                    lote = str(row['LOTE']).strip().upper()
+                    lote = row['LOTE']
                     if len(lote) < 3: continue
                     
                     massa = str(row['MASSA']).strip()
@@ -123,19 +142,19 @@ def carregar_dicionario_lotes():
                     }
                 
             except Exception as e:
-                print(f"⚠️ Aviso na aba '{aba}': {e}")
+                print(f"Aviso na aba '{aba}': {e}")
         
         xls.close()
                 
     except Exception as e:
-        print(f"❌ Erro crítico ao ler planilha Excel: {e}")
+        print(f"Erro crítico ao ler planilha Excel: {e}")
     finally:
         # Remove o arquivo temporário se ele foi criado
         if caminho_clone != caminho_arquivo and os.path.exists(caminho_clone):
             try: os.remove(caminho_clone)
             except: pass
 
-    print(f"✅ SUCESSO: {len(mapa_lote_massa)} lotes carregados da planilha.")
+    print(f"SUCESSO: {len(mapa_lote_massa)} lotes carregados da planilha.")
     return mapa_lote_massa
 
 if __name__ == "__main__":

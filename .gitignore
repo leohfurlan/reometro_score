@@ -21,5 +21,11 @@ de_para_massas.json
 *.xls
 *.db
 users_reoscore.db
-instance/users_reoscore.db
 *.sqlite3
+instance/*.db
+*.db
+instance/users_reoscore.db
+*.csv
+scripts/
+data/
+users_reoscore.db

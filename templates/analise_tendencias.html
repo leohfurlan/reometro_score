@@ -1,0 +1,591 @@
+{% extends "base.html" %}
+
+{% block title %}Analise de Tendencias - ReoScore{% endblock %}
+
+{% block content %}
+<style>
+    .plotly-card .card-body {
+        min-height: 380px;
+    }
+    .plotly-chart {
+        width: 100%;
+        height: 100%;
+        min-height: 340px;
+    }
+    .kpi-mini {
+        border-left: 4px solid #adb5bd;
+        border-radius: 0.5rem;
+    }
+    .kpi-mini.aprovados {
+        border-left-color: #198754;
+    }
+    .kpi-mini.reprovados {
+        border-left-color: #dc3545;
+    }
+    .kpi-mini.total {
+        border-left-color: #0d6efd;
+    }
+    .cap-kpi {
+        border-left: 4px solid #0d6efd;
+        border-radius: 0.5rem;
+    }
+    .cap-kpi .value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #0d6efd;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h2 class="fs-4 mb-1 text-secondary">
+                <i class="fas fa-chart-line me-2"></i>Analise de Tendencias (CEP)
+            </h2>
+            <p class="text-muted mb-0 small">
+                Monitoramento temporal de parametros para deteccao antecipada de desvios.
+            </p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <form id="filtrosTendencia" class="row g-3 align-items-end">
+                <div class="col-12 col-lg-3">
+                    <label for="massaSelect" class="form-label small fw-bold text-muted">Massa</label>
+                    <select id="massaSelect" class="form-select" required>
+                        {% for massa in massas %}
+                            <option value="{{ massa.cod_sankhya }}" {% if cod_sankhya_default == massa.cod_sankhya %}selected{% endif %}>
+                                {{ massa.cod_sankhya }} - {{ massa.descricao }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <label for="parametroSelect" class="form-label small fw-bold text-muted">Parametro</label>
+                    <select id="parametroSelect" class="form-select" required>
+                        {% for parametro in parametros %}
+                            <option value="{{ parametro.key }}" {% if parametro_default == parametro.key %}selected{% endif %}>
+                                {{ parametro.label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-2">
+                    <label for="periodoSelect" class="form-label small fw-bold text-muted">Periodo</label>
+                    <select id="periodoSelect" class="form-select">
+                        <option value="30d" {% if periodo_default == '30d' %}selected{% endif %}>Ultimos 30 dias</option>
+                        <option value="3m" {% if periodo_default == '3m' %}selected{% endif %}>Ultimos 3 meses</option>
+                        <option value="6m" {% if periodo_default == '6m' %}selected{% endif %}>Ultimos 6 meses</option>
+                        <option value="12m" {% if periodo_default == '12m' %}selected{% endif %}>Ultimos 12 meses</option>
+                        <option value="all" {% if periodo_default == 'all' %}selected{% endif %}>Historico completo</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-2">
+                    <label for="temperaturaSelect" class="form-label small fw-bold text-muted">Temperatura do Ensaio</label>
+                    <select id="temperaturaSelect" class="form-select">
+                        <option value="auto">Auto (mais frequente)</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-2 d-grid">
+                    <button type="submit" class="btn btn-dark">
+                        <i class="fas fa-sync-alt me-1"></i> Atualizar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="mensagemDados" class="alert alert-info d-none mb-3" role="alert"></div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-4">
+            <div class="card kpi-mini total border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">TOTAL DE ENSAIOS (COM VALOR)</div>
+                    <div class="fs-4 fw-bold text-primary" id="kpiTotal">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card kpi-mini aprovados border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">APROVADOS</div>
+                    <div class="fs-4 fw-bold text-success" id="kpiAprovados">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card kpi-mini reprovados border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">REPROVADOS</div>
+                    <div class="fs-4 fw-bold text-danger" id="kpiReprovados">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card plotly-card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white">
+            <strong class="text-secondary">Dispersao no Tempo</strong>
+            <span class="small text-muted ms-2" id="tituloScatter"></span>
+        </div>
+        <div class="card-body">
+            <div id="chartScatter" class="plotly-chart"></div>
+        </div>
+    </div>
+
+    <div class="card plotly-card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white">
+            <strong class="text-secondary">Boxplot de Variabilidade</strong>
+            <span class="small text-muted ms-2" id="tituloBoxplot"></span>
+        </div>
+        <div class="card-body">
+            <div id="chartBoxplot" class="plotly-chart"></div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-3">
+            <div class="card cap-kpi border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">CP</div>
+                    <div class="value" id="cpValue">--</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card cap-kpi border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">CPK</div>
+                    <div class="value" id="cpkValue">--</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card cap-kpi border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">MEDIA</div>
+                    <div class="value" id="mediaValue">--</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card cap-kpi border-0 shadow-sm">
+                <div class="card-body py-3">
+                    <div class="small text-muted fw-bold">DESVIO PADRAO</div>
+                    <div class="value" id="desvioValue">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card plotly-card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white">
+            <strong class="text-secondary">Analise Discreta (Distribuicao)</strong>
+            <span class="small text-muted ms-2" id="tituloDistribuicao"></span>
+        </div>
+        <div class="card-body">
+            <div id="chartDistribuicao" class="plotly-chart"></div>
+        </div>
+    </div>
+
+    <div class="card plotly-card border-0 shadow-sm">
+        <div class="card-header bg-white">
+            <strong class="text-secondary">Pareto de Motivos de Reprovacao</strong>
+        </div>
+        <div class="card-body">
+            <div id="chartPareto" class="plotly-chart"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(() => {
+    const form = document.getElementById('filtrosTendencia');
+    const massaSelect = document.getElementById('massaSelect');
+    const parametroSelect = document.getElementById('parametroSelect');
+    const periodoSelect = document.getElementById('periodoSelect');
+    const temperaturaSelect = document.getElementById('temperaturaSelect');
+    const mensagemDados = document.getElementById('mensagemDados');
+
+    const kpiTotal = document.getElementById('kpiTotal');
+    const kpiAprovados = document.getElementById('kpiAprovados');
+    const kpiReprovados = document.getElementById('kpiReprovados');
+    const tituloScatter = document.getElementById('tituloScatter');
+    const tituloBoxplot = document.getElementById('tituloBoxplot');
+    const tituloDistribuicao = document.getElementById('tituloDistribuicao');
+    const cpValue = document.getElementById('cpValue');
+    const cpkValue = document.getElementById('cpkValue');
+    const mediaValue = document.getElementById('mediaValue');
+    const desvioValue = document.getElementById('desvioValue');
+
+    const plotlyConfig = {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d']
+    };
+
+    const layoutBase = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        margin: { t: 30, r: 20, l: 55, b: 50 },
+        legend: { orientation: 'h', y: 1.15, x: 0 }
+    };
+
+    function mostrarMensagem(texto, tipo = 'info') {
+        mensagemDados.className = `alert alert-${tipo} mb-3`;
+        mensagemDados.textContent = texto;
+        mensagemDados.classList.remove('d-none');
+    }
+
+    function esconderMensagem() {
+        mensagemDados.classList.add('d-none');
+        mensagemDados.textContent = '';
+    }
+
+    function desenharSemDados(elementId, texto) {
+        Plotly.react(elementId, [], {
+            ...layoutBase,
+            xaxis: { visible: false },
+            yaxis: { visible: false },
+            annotations: [{
+                text: texto,
+                xref: 'paper',
+                yref: 'paper',
+                x: 0.5,
+                y: 0.5,
+                showarrow: false,
+                font: { size: 14, color: '#6c757d' }
+            }]
+        }, plotlyConfig);
+    }
+
+    function atualizarKpis(resumo) {
+        kpiTotal.textContent = resumo?.total ?? 0;
+        kpiAprovados.textContent = resumo?.aprovados ?? 0;
+        kpiReprovados.textContent = resumo?.reprovados ?? 0;
+    }
+
+    function formatNumber(value, digits = 3) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '--';
+        }
+        return Number(value).toFixed(digits);
+    }
+
+    function atualizarCapabilidade(payload) {
+        const cap = payload?.capabilidade || {};
+        cpValue.textContent = formatNumber(cap.cp, 3);
+        cpkValue.textContent = formatNumber(cap.cpk, 3);
+        mediaValue.textContent = formatNumber(cap.media, 2);
+        desvioValue.textContent = formatNumber(cap.desvio_padrao, 2);
+    }
+
+    function atualizarFiltroTemperatura(payload) {
+        const info = payload?.temperatura || {};
+        const disponiveis = Array.isArray(info.disponiveis) ? info.disponiveis : [];
+        const disponiveisStr = disponiveis.map(t => String(t));
+        const atual = String(temperaturaSelect.value || 'auto').trim().toLowerCase();
+        const atualEhAuto = !atual || atual === 'auto' || atual === 'mais_frequente';
+
+        temperaturaSelect.innerHTML = '<option value="auto">Auto (mais frequente)</option>';
+        disponiveis.forEach(temp => {
+            const opt = document.createElement('option');
+            opt.value = String(temp);
+            opt.textContent = `${temp} C`;
+            temperaturaSelect.appendChild(opt);
+        });
+
+        let novoValor = 'auto';
+        if (!atualEhAuto && disponiveisStr.includes(atual)) {
+            novoValor = atual;
+        } else if (!atualEhAuto && info.aplicada !== null && info.aplicada !== undefined) {
+            novoValor = String(info.aplicada);
+        } else if (!atualEhAuto) {
+            novoValor = 'auto';
+        }
+        temperaturaSelect.value = novoValor;
+    }
+
+    function renderScatter(payload) {
+        const pontos = payload?.pontos || [];
+        const labelParametro = payload?.parametro?.label || parametroSelect.value;
+        const limites = payload?.limites || {};
+        const tempAplicada = payload?.temperatura?.aplicada;
+        const tempTexto = tempAplicada !== null && tempAplicada !== undefined ? ` | Temp: ${tempAplicada} C` : '';
+
+        tituloScatter.textContent = `${payload?.massa?.descricao || ''} | Parametro: ${labelParametro}${tempTexto}`;
+
+        if (!pontos.length) {
+            desenharSemDados('chartScatter', 'Sem pontos para o filtro selecionado.');
+            return;
+        }
+
+        const aprovados = pontos.filter(p => p.aprovado);
+        const reprovados = pontos.filter(p => !p.aprovado);
+
+        const traceAprovado = {
+            type: 'scatter',
+            mode: 'markers',
+            name: 'Aprovado',
+            x: aprovados.map(p => p.data_hora),
+            y: aprovados.map(p => p.valor),
+            text: aprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Batch: ${p.batch || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
+            hovertemplate: '%{text}<extra></extra>',
+            marker: { color: '#198754', size: 8, line: { width: 0.5, color: '#0f5132' } }
+        };
+
+        const traceReprovado = {
+            type: 'scatter',
+            mode: 'markers',
+            name: 'Reprovado',
+            x: reprovados.map(p => p.data_hora),
+            y: reprovados.map(p => p.valor),
+            text: reprovados.map(p => `${p.data_hora}<br>Lote: ${p.lote || '-'}<br>Batch: ${p.batch || '-'}<br>Faixa: ${p.faixa_temperatura || '-'}<br>Valor: ${p.valor}`),
+            hovertemplate: '%{text}<extra></extra>',
+            marker: { color: '#dc3545', size: 9, line: { width: 0.6, color: '#842029' } }
+        };
+
+        const shapes = [];
+        const annotations = [];
+        const linhas = [
+            { valor: limites.lie, nome: 'LIE', cor: '#fd7e14' },
+            { valor: limites.lse, nome: 'LSE', cor: '#fd7e14' },
+            { valor: limites.alvo, nome: 'Alvo', cor: '#0d6efd' }
+        ].filter(l => l.valor !== null && l.valor !== undefined);
+
+        linhas.forEach(linha => {
+            shapes.push({
+                type: 'line',
+                xref: 'paper',
+                yref: 'y',
+                x0: 0,
+                x1: 1,
+                y0: linha.valor,
+                y1: linha.valor,
+                line: { color: linha.cor, width: 1.5, dash: 'dash' }
+            });
+            annotations.push({
+                xref: 'paper',
+                yref: 'y',
+                x: 1,
+                y: linha.valor,
+                xanchor: 'left',
+                yanchor: 'middle',
+                showarrow: false,
+                text: linha.nome,
+                font: { size: 11, color: linha.cor }
+            });
+        });
+
+        Plotly.react('chartScatter', [traceAprovado, traceReprovado], {
+            ...layoutBase,
+            xaxis: { title: 'Data/Hora', type: 'date' },
+            yaxis: { title: labelParametro },
+            shapes,
+            annotations
+        }, plotlyConfig);
+    }
+
+    function renderBoxplot(payload) {
+        const grupos = payload?.boxplot || [];
+        const agrupamento = payload?.agrupamento === 'mes' ? 'mes' : 'semana';
+        const tempAplicada = payload?.temperatura?.aplicada;
+        const tempTexto = tempAplicada !== null && tempAplicada !== undefined ? ` | Temp: ${tempAplicada} C` : '';
+        tituloBoxplot.textContent = `(Agrupado por ${agrupamento})${tempTexto}`;
+
+        if (!grupos.length) {
+            desenharSemDados('chartBoxplot', 'Sem dados para calcular variabilidade.');
+            return;
+        }
+
+        const traces = grupos.map(item => ({
+            type: 'box',
+            name: item.grupo,
+            y: item.valores,
+            boxpoints: 'suspectedoutliers',
+            marker: { color: '#0d6efd' },
+            line: { color: '#0d6efd', width: 1.1 },
+            hovertemplate: `Grupo: ${item.grupo}<br>Valor: %{y}<extra></extra>`
+        }));
+
+        Plotly.react('chartBoxplot', traces, {
+            ...layoutBase,
+            xaxis: { title: agrupamento === 'mes' ? 'Mes' : 'Semana ISO' },
+            yaxis: { title: payload?.parametro?.label || 'Valor medido' },
+            showlegend: false
+        }, plotlyConfig);
+    }
+
+    function renderDistribuicao(payload) {
+        const valores = payload?.distribuicao?.valores || [];
+        const limites = payload?.limites || {};
+        const labelParametro = payload?.parametro?.label || parametroSelect.value;
+        const tempAplicada = payload?.temperatura?.aplicada;
+        const tempTexto = tempAplicada !== null && tempAplicada !== undefined ? ` | Temp: ${tempAplicada} C` : '';
+        tituloDistribuicao.textContent = `${payload?.massa?.descricao || ''} | Parametro: ${labelParametro}${tempTexto}`;
+
+        if (!valores.length) {
+            desenharSemDados('chartDistribuicao', 'Sem dados para distribuicao e capabilidade.');
+            return;
+        }
+
+        const media = payload?.capabilidade?.media;
+        const shapes = [];
+        const annotations = [];
+
+        const linhas = [
+            { valor: limites.lie, nome: 'LIE', cor: '#fd7e14' },
+            { valor: limites.lse, nome: 'LSE', cor: '#fd7e14' },
+            { valor: limites.alvo, nome: 'Alvo', cor: '#198754' },
+            { valor: media, nome: 'Media', cor: '#0d6efd' }
+        ].filter(l => l.valor !== null && l.valor !== undefined && !Number.isNaN(Number(l.valor)));
+
+        linhas.forEach(linha => {
+            shapes.push({
+                type: 'line',
+                xref: 'x',
+                yref: 'paper',
+                x0: linha.valor,
+                x1: linha.valor,
+                y0: 0,
+                y1: 1,
+                line: { color: linha.cor, width: 1.4, dash: 'dash' }
+            });
+            annotations.push({
+                xref: 'x',
+                yref: 'paper',
+                x: linha.valor,
+                y: 1,
+                yshift: 8,
+                showarrow: false,
+                text: linha.nome,
+                font: { size: 11, color: linha.cor }
+            });
+        });
+
+        Plotly.react('chartDistribuicao', [{
+            type: 'histogram',
+            x: valores,
+            nbinsx: Math.max(8, Math.round(Math.sqrt(valores.length))),
+            marker: { color: '#6c757d', line: { color: '#495057', width: 0.5 } },
+            opacity: 0.85,
+            hovertemplate: 'Valor: %{x}<br>Frequencia: %{y}<extra></extra>'
+        }], {
+            ...layoutBase,
+            xaxis: { title: labelParametro },
+            yaxis: { title: 'Frequencia' },
+            bargap: 0.06,
+            shapes,
+            annotations,
+            showlegend: false
+        }, plotlyConfig);
+    }
+
+    function renderPareto(payload) {
+        const pareto = payload?.pareto_reprovacoes || [];
+        if (!pareto.length) {
+            desenharSemDados('chartPareto', 'Sem reprovacoes no periodo para montar Pareto.');
+            return;
+        }
+
+        Plotly.react('chartPareto', [{
+            type: 'bar',
+            x: pareto.map(p => p.motivo),
+            y: pareto.map(p => p.quantidade),
+            marker: {
+                color: '#dc3545',
+                line: { color: '#842029', width: 0.5 }
+            },
+            hovertemplate: '%{x}<br>Ocorrencias: %{y}<extra></extra>'
+        }], {
+            ...layoutBase,
+            xaxis: { title: 'Motivo', tickangle: -20 },
+            yaxis: { title: 'Quantidade de reprovacoes' },
+            showlegend: false
+        }, plotlyConfig);
+    }
+
+    function getAgrupamentoPeriodo(periodo) {
+        return ['6m', '12m', 'all'].includes(periodo) ? 'mes' : 'semana';
+    }
+
+    async function carregarDados(event) {
+        if (event) event.preventDefault();
+
+        const cod = (massaSelect.value || '').trim();
+        const parametro = (parametroSelect.value || '').trim();
+        const periodo = (periodoSelect.value || '3m').trim();
+        const temperatura = (temperaturaSelect.value || 'auto').trim();
+
+        if (!cod || !parametro) {
+            mostrarMensagem('Selecione massa e parametro para carregar os graficos.', 'warning');
+            return;
+        }
+
+        esconderMensagem();
+        mostrarMensagem('Consultando dados...', 'secondary');
+
+        try {
+            const agrupamento = getAgrupamentoPeriodo(periodo);
+            const endpoint = `/api/estatisticas/massa/${encodeURIComponent(cod)}/${encodeURIComponent(parametro)}?periodo=${encodeURIComponent(periodo)}&agrupar=${encodeURIComponent(agrupamento)}&temperatura=${encodeURIComponent(temperatura)}`;
+            const response = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+            const payload = await response.json();
+
+            if (!response.ok) {
+                throw new Error(payload?.error || 'Falha ao consultar API de tendencias.');
+            }
+
+            atualizarFiltroTemperatura(payload);
+            atualizarKpis(payload?.resumo || {});
+            atualizarCapabilidade(payload);
+            renderScatter(payload);
+            renderBoxplot(payload);
+            renderDistribuicao(payload);
+            renderPareto(payload);
+
+            if (payload?.mensagem) {
+                mostrarMensagem(payload.mensagem, 'warning');
+            } else {
+                esconderMensagem();
+            }
+        } catch (err) {
+            atualizarKpis({ total: 0, aprovados: 0, reprovados: 0 });
+            atualizarCapabilidade({ capabilidade: {} });
+            desenharSemDados('chartScatter', 'Erro ao carregar dados.');
+            desenharSemDados('chartBoxplot', 'Erro ao carregar dados.');
+            desenharSemDados('chartDistribuicao', 'Erro ao carregar dados.');
+            desenharSemDados('chartPareto', 'Erro ao carregar dados.');
+            mostrarMensagem(`Erro: ${err.message}`, 'danger');
+        }
+    }
+
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            ['chartScatter', 'chartBoxplot', 'chartDistribuicao', 'chartPareto'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.data) {
+                    Plotly.Plots.resize(el);
+                }
+            });
+        }, 120);
+    });
+
+    form.addEventListener('submit', carregarDados);
+    massaSelect.addEventListener('change', () => form.requestSubmit());
+    parametroSelect.addEventListener('change', () => form.requestSubmit());
+    periodoSelect.addEventListener('change', () => form.requestSubmit());
+    temperaturaSelect.addEventListener('change', () => form.requestSubmit());
+
+    carregarDados();
+})();
+</script>
+{% endblock %}

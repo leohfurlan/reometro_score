@@ -27,9 +27,19 @@ class CacheManager:
             
             idade = datetime.now() - self.cache['ultimo_update']
             if idade > self.ttl:
-                print(f"⏰ Cache expirado ({idade.seconds//60}min > {self.ttl.seconds//60}min)")
+                print(f"Cache expirado ({idade.seconds//60}min > {self.ttl.seconds//60}min)")
                 return None
             
+            return self.cache.copy()
+
+    def peek(self):
+        """
+        Retorna snapshot do cache ignorando TTL.
+        Util para atualizacoes incrementais sem recarregar tudo.
+        """
+        with self.lock:
+            if not self.cache.get('dados'):
+                return None
             return self.cache.copy()
     
     def set(self, dados):
@@ -39,7 +49,7 @@ class CacheManager:
             size_mb = sys.getsizeof(dados) / (1024 * 1024)
             
             if size_mb > self.max_size_mb:
-                print(f"⚠️ Cache grande demais ({size_mb:.1f}MB). Limpando registros antigos...")
+                print(f"Cache grande demais ({size_mb:.1f}MB). Limpando registros antigos...")
                 # Mantém apenas últimos 30 dias
                 cutoff = datetime.now() - timedelta(days=30)
                 dados['dados'] = [
@@ -47,16 +57,16 @@ class CacheManager:
                     if e.data_hora and e.data_hora >= cutoff
                 ]
                 size_mb = sys.getsizeof(dados) / (1024 * 1024)
-                print(f"   Reduzido para {size_mb:.1f}MB")
+                print(f"  Reduzido para {size_mb:.1f}MB")
             
             self.cache = dados
-            print(f"💾 Cache atualizado: {len(dados['dados'])} registros ({size_mb:.1f}MB)")
+            print(f"Cache atualizado: {len(dados['dados'])} registros ({size_mb:.1f}MB)")
     
     def invalidate(self):
         """Força recarga no próximo acesso."""
         with self.lock:
             self.cache['ultimo_update'] = None
-            print("🗑️ Cache invalidado")
+            print("Cache invalidado")
     
     def get_stats(self):
         """Retorna estatísticas do cache."""

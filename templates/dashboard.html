@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Dashboard Gerencial{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="text-secondary fw-bold">Visão Geral da Qualidade</h2>
+        <form class="d-flex gap-2">
+            <input type="date" name="date_start" class="form-control form-control-sm" value="{{ date_start }}">
+            <input type="date" name="date_end" class="form-control form-control-sm" value="{{ date_end }}">
+            <button class="btn btn-dark btn-sm">Filtrar</button>
+        </form>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-success shadow-sm">
+                <div class="text-muted x-small fw-bold">ÍNDICE DE APROVAÇÃO (ICG)</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <h2 class="mb-0 fw-bold">{{ "%.1f"|format(kpi.icg) }}%</h2>
+                    <i class="fas fa-check-circle fa-2x text-success opacity-25"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-primary shadow-sm">
+                <div class="text-muted x-small fw-bold">SCORE MÉDIO (QSM)</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <h2 class="mb-0 fw-bold">{{ "%.1f"|format(kpi.qsm) }}</h2>
+                    <i class="fas fa-chart-line fa-2x text-primary opacity-25"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 border-start border-4 border-danger shadow-sm">
+                <div class="text-muted x-small fw-bold">TOTAL REPROVADOS</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <h2 class="mb-0 fw-bold">{{ kpi.reprovados }}</h2>
+                    <i class="fas fa-times-circle fa-2x text-danger opacity-25"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 bg-light shadow-sm">
+                <div class="text-muted x-small fw-bold">TOTAL ENSAIOS</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <h2 class="mb-0 fw-bold text-secondary">{{ kpi.total }}</h2>
+                    <i class="fas fa-flask fa-2x text-secondary opacity-25"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white fw-bold text-secondary">
+                    <i class="fas fa-history me-2"></i>Evolução do Score Médio (30 Dias)
+                </div>
+                <div class="card-body">
+                    <canvas id="chartTrend" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white fw-bold text-secondary">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Top 5 Motivos de Falha
+                </div>
+                <div class="card-body">
+                    <canvas id="chartPareto" height="220"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Inicialização dos Gráficos (similar ao anterior, mas adaptado ao novo layout)
+    const ctxTrend = document.getElementById('chartTrend');
+    new Chart(ctxTrend, {
+        type: 'line',
+        data: {
+            labels: {{ chart_trend.labels | safe }},
+            datasets: [{
+                label: 'Score Médio',
+                data: {{ chart_trend.data | safe }},
+                borderColor: '#0d6efd',
+                tension: 0.3,
+                fill: true,
+                backgroundColor: 'rgba(13, 110, 253, 0.05)'
+            }]
+        },
+        options: { plugins: { legend: { display: false } } }
+    });
+
+    const ctxPareto = document.getElementById('chartPareto');
+    new Chart(ctxPareto, {
+        type: 'doughnut',
+        data: {
+            labels: {{ chart_pareto.labels | safe }},
+            datasets: [{
+                data: {{ chart_pareto.data | safe }},
+                backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#6c757d', '#20c997']
+            }]
+        }
+    });
+</script>
+{% endblock %}

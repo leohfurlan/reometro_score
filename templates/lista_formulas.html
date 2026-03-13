@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>📂 Catálogo de Formulações</h2>
+        <span class="badge bg-primary">{{ formulas|length }} Fórmulas</span>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Cód. Produto</th>
+                            <th>Descrição do Composto</th>
+                            <th>Status</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for f in formulas %}
+                        {% set composto_catalogo = catalogo.get(f.cd_produto) %}
+                        {% set nome_composto = (f.ds_composto or '').strip() %}
+                        {% if (not nome_composto or nome_composto.startswith('Fórmula ') or nome_composto.startswith('Formula ')) and composto_catalogo and composto_catalogo.descricao %}
+                            {% set nome_composto = composto_catalogo.descricao %}
+                        {% endif %}
+                        {% if not nome_composto %}
+                            {% set nome_composto = 'Fórmula ' ~ f.cd_produto %}
+                        {% endif %}
+
+                        <tr>
+                            <td class="fw-bold">{{ f.cd_produto }}</td>
+                            <td>{{ nome_composto }}</td>
+                            <td>
+                                {% if f.ativo %}
+                                    <span class="badge bg-success">Ativo</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inativo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <a href="{{ url_for('detalhe_formula', cd_produto=f.cd_produto) }}" class="btn btn-sm btn-outline-primary">
+                                    Ver Composição
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center py-4">Nenhuma fórmula encontrada.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

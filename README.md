@@ -149,3 +149,32 @@ static/: CSS e JavaScript.
 tools/: Scripts auxiliares de manutenção e ETL.
 
 Desenvolvido para uso interno no Laboratório de Qualidade.
+
+## Documentacao adicional
+
+- Motor XAI (treinamento, simulacao e explicabilidade): `docs/motor_xai.md`
+## 🔥 Nova feature: Reometria & Vulcanização
+
+Fluxo completo disponível no menu lateral **Reometria & Vulcanização**:
+
+1. **Ajuste Cinético (SOLVER)**: acesse `/reometria/fit`, filtre por data/texto, selecione no mínimo 2 curvas e rode o ajuste.
+2. **Resultado do Fit**: em `/reometria/fit/result/<fit_id>` são exibidos parâmetros (`k0`, `Ea`, `n`), RMSE, ensaios usados e gráficos (torque e alpha real vs modelado).
+3. **Simulação**: botões para simular em prensa/autoclave levam para `/reometria/simulate/<fit_id>`.
+4. **Visualização**: `/reometria/simulate/view/<sim_id>` mostra resultados 1D/2D/3D interativos com Plotly, incluindo volume 3D e corte por eixo.
+
+### Persistência
+- Fits são salvos em `data/out/fit_<fit_id>.json`.
+- Simulações são salvas em `data/out/sim_<sim_id>.npz`.
+
+### Variáveis de ambiente necessárias
+A nova feature usa a mesma conexão SQL Server já existente em `connection.py`:
+
+- `SERVER`
+- `DATABASE`
+- `USERNAME_DB`
+- `PASSWORD_DB`
+- `DSN`
+
+### Dependências novas
+- `scipy` (ajuste não linear com `least_squares`)
+- `plotly` (gráficos web interativos)

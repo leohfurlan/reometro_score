@@ -10,8 +10,12 @@
         <p class="text-muted small">Gerencie especificações, regras e usuários do sistema.</p>
     </div>
     
-    <a href="{{ url_for('dashboard') }}" class="btn btn-success shadow-sm">
-        <i class="fas fa-check-circle me-2"></i>Salvar e Sair
+    <a href="{{ url_for('rota_aplicar_correcoes', next=request.full_path.rstrip('?')) }}"
+       class="btn btn-success shadow-sm"
+       data-loading="true"
+       data-loading-text="Aplicando correcoes..."
+       onclick="if(confirm('Aplicar correcoes salvas agora?')){ativarModalCarregamento('Aplicando correcoes...', 'Atualizando os lotes corrigidos sem recarregar o ETL completo.'); return true;} return false;">
+        <i class="fas fa-check-circle me-2"></i>Salvar e Aplicar
     </a>
 </div>
 
@@ -50,7 +54,7 @@
     {% if current_user.is_admin %}
     <div class="tab-pane fade show active" id="materiais" role="tabpanel">
         <div class="card p-4 mb-4 shadow-sm border-0">
-            <form method="GET" action="/config">
+            <form method="GET" action="{{ url_for('admin.pagina_config') }}">
                 <input type="hidden" name="sort" value="{{ sort_by }}">
                 <input type="hidden" name="order" value="{{ order }}">
                 
@@ -85,7 +89,7 @@
                 </div>
                 {% if query or filtro_tipo or filtro_status %}
                 <div class="mt-2 text-end">
-                    <a href="{{ url_for('pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
+                    <a href="{{ url_for('admin.pagina_config') }}" class="text-decoration-none small text-muted"><i class="fas fa-times me-1"></i>Limpar Filtros</a>
                 </div>
                 {% endif %}
             </form>
@@ -97,17 +101,18 @@
                     <tr>
                         {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status} %}
                         <th class="resizable-col" style="width: 80px;">
-                            <a href="{{ url_for('pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                            <a href="{{ url_for('admin.pagina_config', sort='cod', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
                                 Cód. <i class="fas fa-sort small ms-1"></i>
                             </a>
                         </th>
                         <th class="resizable-col">
-                            <a href="{{ url_for('pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
+                            <a href="{{ url_for('admin.pagina_config', sort='descricao', order='asc' if order=='desc' else 'desc', **args) }}" class="text-decoration-none text-secondary d-block">
                                 Descrição do Material <i class="fas fa-sort small ms-1"></i>
                             </a>
                         </th>
                         <th class="resizable-col">Perfis Ativos</th>
                         <th class="resizable-col">Status</th>
+                        <th class="resizable-col">Specs Físicas</th>
                         <th class="text-end pe-4">Ação</th>
                     </tr>
                 </thead>
@@ -143,6 +148,41 @@
                                 <span class="badge bg-light text-secondary border">Pendente</span>
                             {% endif %}
                         </td>
+                        <td>
+                            {% set perfis_fis_tbl = prod.perfis.get('baixa', {}) if prod.perfis else {} %}
+                            {% if not perfis_fis_tbl and prod.perfis %}
+                                {% set perfis_fis_tbl = prod.perfis.get('alta', {}) %}
+                            {% endif %}
+                            {% set t_dureza = perfis_fis_tbl.get('Dureza') or perfis_fis_tbl.get('dureza') %}
+                            {% set t_densidade = perfis_fis_tbl.get('Densidade') or perfis_fis_tbl.get('densidade') %}
+                            {% set t_resil = perfis_fis_tbl.get('Resiliencia') or perfis_fis_tbl.get('resiliencia') %}
+                            {% set t_abrasao = perfis_fis_tbl.get('Abrasao') or perfis_fis_tbl.get('abrasao') %}
+                            {% set t_tr = perfis_fis_tbl.get('TensaoRuptura') or perfis_fis_tbl.get('Tensao Ruptura') or perfis_fis_tbl.get('tensao_ruptura') %}
+                            {% set t_along = perfis_fis_tbl.get('Alongamento') or perfis_fis_tbl.get('alongamento') %}
+                            {% set t_rasgo = perfis_fis_tbl.get('Rasgo') or perfis_fis_tbl.get('rasgo') %}
+
+                            {% if t_dureza or t_densidade or t_resil or t_abrasao or t_tr or t_along or t_rasgo %}
+                                <div class="d-flex flex-wrap gap-1" style="max-width: 430px;">
+                                    {% if t_dureza and t_dureza.minimo is not none and t_dureza.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur {{ "%.0f"|format(t_dureza.minimo) }}-{{ "%.0f"|format(t_dureza.maximo) }}</span>{% endif %}
+                                    {% if t_dureza and t_dureza.minimo is not none and t_dureza.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur >= {{ "%.0f"|format(t_dureza.minimo) }}</span>{% endif %}
+                                    {% if t_dureza and t_dureza.maximo is not none and t_dureza.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dur <= {{ "%.0f"|format(t_dureza.maximo) }}</span>{% endif %}
+
+                                    {% if t_densidade and t_densidade.minimo is not none and t_densidade.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens {{ "%.3f"|format(t_densidade.minimo) }}-{{ "%.3f"|format(t_densidade.maximo) }}</span>{% endif %}
+                                    {% if t_densidade and t_densidade.minimo is not none and t_densidade.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens >= {{ "%.3f"|format(t_densidade.minimo) }}</span>{% endif %}
+                                    {% if t_densidade and t_densidade.maximo is not none and t_densidade.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Dens <= {{ "%.3f"|format(t_densidade.maximo) }}</span>{% endif %}
+
+                                    {% if t_resil and t_resil.minimo is not none and t_resil.maximo is not none %}<span class="badge bg-success bg-opacity-10 text-success border">Res {{ "%.0f"|format(t_resil.minimo) }}-{{ "%.0f"|format(t_resil.maximo) }}</span>{% endif %}
+                                    {% if t_resil and t_resil.minimo is not none and t_resil.maximo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Res >= {{ "%.0f"|format(t_resil.minimo) }}</span>{% endif %}
+                                    {% if t_resil and t_resil.maximo is not none and t_resil.minimo is none %}<span class="badge bg-success bg-opacity-10 text-success border">Res <= {{ "%.0f"|format(t_resil.maximo) }}</span>{% endif %}
+                                    {% if t_abrasao and t_abrasao.maximo is not none %}<span class="badge bg-warning bg-opacity-10 text-warning border">Abr <= {{ "%.0f"|format(t_abrasao.maximo) }}</span>{% endif %}
+                                    {% if t_tr and t_tr.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">TR >= {{ "%.1f"|format(t_tr.minimo) }}</span>{% endif %}
+                                    {% if t_along and t_along.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">Along >= {{ "%.0f"|format(t_along.minimo) }}</span>{% endif %}
+                                    {% if t_rasgo and t_rasgo.minimo is not none %}<span class="badge bg-info bg-opacity-10 text-info border">Rasgo >= {{ "%.1f"|format(t_rasgo.minimo) }}</span>{% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
                         <td class="text-end pe-3">
                             <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalEdit{{ prod.cod_sankhya }}">
                                 <i class="fas fa-edit me-1"></i> Editar
@@ -152,7 +192,7 @@
                     {% endfor %}
                     {% if produtos|length == 0 %}
                     <tr>
-                        <td colspan="5" class="text-center py-5 text-muted bg-white">
+                        <td colspan="6" class="text-center py-5 text-muted bg-white">
                             <i class="fas fa-search fa-2x mb-3 opacity-25"></i><br>
                             Nenhum produto encontrado.
                         </td>
@@ -170,12 +210,12 @@
                     {% set args = {'q': query, 'tipo': filtro_tipo, 'status': filtro_status, 'sort': sort_by, 'order': order} %}
                     
                     <li class="page-item {% if pagina_atual_mat == 1 %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat-1, **args) }}"><i class="fas fa-angle-left"></i></a>
+                        <a class="page-link border-0" href="{{ url_for('admin.pagina_config', page_mat=pagina_atual_mat-1, **args) }}"><i class="fas fa-angle-left"></i></a>
                     </li>
                     
                     <li class="page-item d-flex align-items-center mx-2">
                         <span class="small text-muted me-2">Pág.</span>
-                        <form action="/config" method="GET" style="display:inline;">
+                        <form action="{{ url_for('admin.pagina_config') }}" method="GET" style="display:inline;">
                             {% for k, v in args.items() %}
                                 <input type="hidden" name="{{ k }}" value="{{ v }}">
                             {% endfor %}
@@ -186,7 +226,7 @@
                     </li>
                     
                     <li class="page-item {% if pagina_atual_mat == total_paginas_mat %}disabled{% endif %}">
-                        <a class="page-link border-0" href="{{ url_for('pagina_config', page_mat=pagina_atual_mat+1, **args) }}"><i class="fas fa-angle-right"></i></a>
+                        <a class="page-link border-0" href="{{ url_for('admin.pagina_config', page_mat=pagina_atual_mat+1, **args) }}"><i class="fas fa-angle-right"></i></a>
                     </li>
                 </ul>
             </nav>
@@ -205,7 +245,7 @@
 
         <div class="card shadow-sm border-0">
             <div class="card-body p-0">
-                <form id="formRegras" method="POST" action="{{ url_for('salvar_regras') }}">
+                <form id="formRegras" method="POST" action="{{ url_for('admin.salvar_regras') }}">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead class="bg-light text-secondary small text-uppercase">
@@ -281,7 +321,7 @@
                         <i class="fas fa-user-plus me-2"></i>Adicionar Usuário
                     </div>
                     <div class="card-body">
-                        <form action="{{ url_for('adicionar_usuario') }}" method="POST">
+                        <form action="{{ url_for('admin.adicionar_usuario') }}" method="POST">
                             <div class="mb-3">
                                 <label class="form-label small text-muted fw-bold">Username</label>
                                 <input type="text" name="username" class="form-control" required placeholder="ex: operador">
@@ -345,7 +385,7 @@
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         {% else %}
-                                            <a href="{{ url_for('remover_usuario', user_id=u.id) }}" class="btn btn-sm btn-outline-danger" 
+                                            <a href="{{ url_for('admin.remover_usuario', user_id=u.id) }}" class="btn btn-sm btn-outline-danger" 
                                                onclick="return confirm('Tem certeza que deseja remover o usuário {{ u.username }}?');"
                                                title="Remover Usuário">
                                                 <i class="fas fa-trash"></i>
@@ -376,7 +416,7 @@
         <!-- Filtros Auditoria -->
         <div class="card mb-3 border-0 bg-light shadow-sm">
             <div class="card-body py-3">
-                <form method="GET" action="{{ url_for('pagina_config') }}" class="row g-3 align-items-end">
+                <form method="GET" action="{{ url_for('admin.pagina_config') }}" class="row g-3 align-items-end">
                     <div class="col-md-3">
                         <label class="form-label small fw-bold text-muted">Buscar Lote</label>
                         <input type="text" name="audit_busca" class="form-control form-control-sm" placeholder="Ex: ANTIQ..." value="{{ audit_busca }}">
@@ -438,28 +478,29 @@
                                 {% endif %}
                             </td>
                             
-                            <form action="{{ url_for('salvar_correcao') }}" method="POST">
-                                <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
-                                <td>
-                                    <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
-                                           value="{{ ensaio.lote }}" placeholder="Ex: 9563">
-                                </td>
-                                <td>
-                                    <select name="massa" class="form-select form-select-sm" required>
-                                        <option value="" disabled {% if not ensaio.massa %}selected{% endif %}>Selecione...</option>
-                                        {% for mat in materiais_audit %}
-                                            <option value="{{ mat.descricao }}" {% if ensaio.massa and ensaio.massa.descricao == mat.descricao %}selected{% endif %}>
-                                                {{ mat.descricao }}
-                                            </option>
-                                        {% endfor %}
-                                    </select>
-                                </td>
-                                <td class="text-end pe-3">
-                                    <button type="submit" class="btn btn-success btn-sm shadow-sm" title="Salvar">
-                                        <i class="fas fa-check"></i>
-                                    </button>
-                                </td>
-                            </form>
+                            {% set form_id = 'form_ensinar_' ~ ensaio.id_ensaio %}
+                            <td>
+                                <form id="{{ form_id }}" action="{{ url_for('admin.salvar_correcao') }}" method="POST" class="d-none">
+                                    <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
+                                </form>
+                                <input type="text" name="novo_lote" form="{{ form_id }}" class="form-control form-control-sm fw-bold text-primary"
+                                       value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                            </td>
+                            <td>
+                                <select name="massa" form="{{ form_id }}" class="form-select form-select-sm" required>
+                                    <option value="" disabled {% if not ensaio.massa or not ensaio.massa.descricao %}selected{% endif %}>Selecione...</option>
+                                    {% for mat in materiais_audit %}
+                                        <option value="{{ mat }}" {% if ensaio.massa and ensaio.massa.descricao and ensaio.massa.descricao|upper == mat|upper %}selected{% endif %}>
+                                            {{ mat }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td class="text-end pe-3">
+                                <button type="submit" form="{{ form_id }}" class="btn btn-success btn-sm shadow-sm" title="Salvar">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                            </td>
                         </tr>
                         {% else %}
                         <tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro para auditar.</td></tr>
@@ -474,11 +515,11 @@
                 <nav>
                     <ul class="pagination pagination-sm justify-content-center mb-0">
                         <li class="page-item {% if pagina_atual_audit == 1 %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit-1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Anterior</a>
+                            <a class="page-link" href="{{ url_for('admin.pagina_config', page_audit=pagina_atual_audit-1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Anterior</a>
                         </li>
                         <li class="page-item disabled"><span class="page-link">{{ pagina_atual_audit }} / {{ total_paginas_audit }}</span></li>
                         <li class="page-item {% if pagina_atual_audit == total_paginas_audit %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_config', page_audit=pagina_atual_audit+1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Próximo</a>
+                            <a class="page-link" href="{{ url_for('admin.pagina_config', page_audit=pagina_atual_audit+1, audit_busca=audit_busca, audit_status=audit_status, audit_data=audit_data, _anchor='ensinar') }}">Próximo</a>
                         </li>
                     </ul>
                 </nav>
@@ -563,7 +604,7 @@
         {% for u in usuarios %}
             <div class="modal fade" id="modalEditUser{{ u.id }}" tabindex="-1" aria-hidden="true">
                 <div class="modal-dialog">
-                    <form action="{{ url_for('editar_usuario') }}" method="POST">
+                    <form action="{{ url_for('admin.editar_usuario') }}" method="POST">
                         <div class="modal-content">
                             <div class="modal-header bg-light">
                                 <h5 class="modal-title fw-bold"><i class="fas fa-user-edit me-2"></i>Editar Usuário</h5>
@@ -605,7 +646,22 @@
     {% for prod in produtos %}
         <div class="modal fade" id="modalEdit{{ prod.cod_sankhya }}" tabindex="-1">
             <div class="modal-dialog modal-xl">
-                <form action="/salvar_config" method="POST">
+                <form action="{{ url_for('admin.salvar_config') }}" method="POST">
+                    {% set cfg_prod = configs_massas.get(prod.cod_sankhya ~ '', {}) if configs_massas else {} %}
+                    {% set regra_ab5n = cfg_prod.get('regra_abrasao_5n', {}) if cfg_prod.get('regra_abrasao_5n') else {} %}
+                    {% set ab5n_min = regra_ab5n.get('dureza_min', regra_ab5n.get('min', cfg_prod.get('abrasao_5n_dureza_min', cfg_prod.get('abrasao_metodologia_5n_dureza_min', 40)))) %}
+                    {% set ab5n_max = regra_ab5n.get('dureza_max', regra_ab5n.get('max', cfg_prod.get('abrasao_5n_dureza_max', cfg_prod.get('abrasao_metodologia_5n_dureza_max', 50)))) %}
+                    {% set perfis_fis = prod.perfis.get('baixa', {}) if prod.perfis else {} %}
+                    {% if not perfis_fis and prod.perfis %}
+                        {% set perfis_fis = prod.perfis.get('alta', {}) %}
+                    {% endif %}
+                    {% set sp_dureza = perfis_fis.get('Dureza') or perfis_fis.get('dureza') %}
+                    {% set sp_densidade = perfis_fis.get('Densidade') or perfis_fis.get('densidade') %}
+                    {% set sp_resiliencia = perfis_fis.get('Resiliencia') or perfis_fis.get('resiliencia') %}
+                    {% set sp_abrasao = perfis_fis.get('Abrasao') or perfis_fis.get('abrasao') %}
+                    {% set sp_tensao = perfis_fis.get('TensaoRuptura') or perfis_fis.get('Tensao Ruptura') or perfis_fis.get('tensao_ruptura') %}
+                    {% set sp_alongamento = perfis_fis.get('Alongamento') or perfis_fis.get('alongamento') %}
+                    {% set sp_rasgo = perfis_fis.get('Rasgo') or perfis_fis.get('rasgo') %}
                     <div class="modal-content">
                         <div class="modal-header bg-light">
                             <div>
@@ -725,6 +781,86 @@
                                         <div class="col-3"><input type="number" min="0" max="10" class="form-control form-control-sm text-center text-primary fw-bold" name="baixa_{{ param }}_peso" value="{{ p_val.peso if p_val else 10 }}"></div>
                                     </div>
                                     {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="card mb-3 border-success border-opacity-25 shadow-sm">
+                                <div class="card-header bg-success bg-opacity-10 text-success fw-bold">
+                                    <i class="fas fa-vial me-2"></i>Especificacoes de Propriedades Fisicas
+                                </div>
+                                <div class="card-body p-2">
+                                    <div class="row g-1 fw-bold text-muted x-small text-center mb-1">
+                                        <div class="col-4 text-start ps-3">Propriedade</div>
+                                        <div class="col-4">Minimo</div>
+                                        <div class="col-4">Maximo</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Dureza (Shore A)</div>
+                                        <div class="col-4"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="fisica_Dureza_min" value="{{ sp_dureza.minimo if sp_dureza and sp_dureza.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="0.01" class="form-control form-control-sm text-center" name="fisica_Dureza_max" value="{{ sp_dureza.maximo if sp_dureza and sp_dureza.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Densidade (g/cm3)</div>
+                                        <div class="col-4"><input type="number" step="0.001" class="form-control form-control-sm text-center" name="fisica_Densidade_min" value="{{ sp_densidade.minimo if sp_densidade and sp_densidade.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="0.001" class="form-control form-control-sm text-center" name="fisica_Densidade_max" value="{{ sp_densidade.maximo if sp_densidade and sp_densidade.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Resiliencia (%)</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Resiliencia_min" value="{{ sp_resiliencia.minimo if sp_resiliencia and sp_resiliencia.minimo is not none else '' }}"></div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Resiliencia_max" value="{{ sp_resiliencia.maximo if sp_resiliencia and sp_resiliencia.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Abrasao (mm3)</div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Abrasao_max" value="{{ sp_abrasao.maximo if sp_abrasao and sp_abrasao.maximo is not none else '' }}"></div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Tensao de Ruptura (MPa)</div>
+                                        <div class="col-4"><input type="number" step="0.1" class="form-control form-control-sm text-center" name="fisica_TensaoRuptura_min" value="{{ sp_tensao.minimo if sp_tensao and sp_tensao.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-2 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Alongamento da Ruptura (%)</div>
+                                        <div class="col-4"><input type="number" step="1" class="form-control form-control-sm text-center" name="fisica_Alongamento_min" value="{{ sp_alongamento.minimo if sp_alongamento and sp_alongamento.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+
+                                    <div class="row g-1 mb-0 align-items-center">
+                                        <div class="col-4 ps-3 fw-bold text-secondary">Resistencia ao Rasgo (N/mm)</div>
+                                        <div class="col-4"><input type="number" step="0.1" class="form-control form-control-sm text-center" name="fisica_Rasgo_min" value="{{ sp_rasgo.minimo if sp_rasgo and sp_rasgo.minimo is not none else '' }}"></div>
+                                        <div class="col-4 text-center text-muted small">-</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-2 border-info border-opacity-25 shadow-sm">
+                                <div class="card-header bg-info bg-opacity-10 text-info fw-bold d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-ruler-combined me-2"></i>Regra da Abrasao (5 N)</span>
+                                    <span class="badge bg-white text-info border border-info">Configuravel</span>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-muted fw-bold mb-1">Dureza Min (Shore A)</label>
+                                            <input type="number" step="0.1" class="form-control form-control-sm" name="abrasao_5n_dureza_min" value="{{ ab5n_min }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-muted fw-bold mb-1">Dureza Max (Shore A)</label>
+                                            <input type="number" step="0.1" class="form-control form-control-sm" name="abrasao_5n_dureza_max" value="{{ ab5n_max }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="small text-muted">
+                                                A abrasao sera sinalizada como <span class="fw-bold text-primary">metodologia 5 N</span>
+                                                quando a faixa de dureza da especificacao estiver dentro desses limites.
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Preview Curva{% endblock %}
+{% block content %}
+<h3>Preview curva {{ curve.COD_ENSAIO }}</h3>
+<div id="p1" style="height:360px;"></div>
+<div id="p2" style="height:360px;"></div>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+const c = {{ curve|tojson }};
+Plotly.newPlot('p1', [{x:c.tempo,y:c.torque,mode:'lines'}], {title:'Torque vs Tempo'});
+Plotly.newPlot('p2', [{x:c.t_rel,y:c.alpha,mode:'lines'}], {title:'Alpha vs Tempo relativo'});
+</script>
+{% endblock %}

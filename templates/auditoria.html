@@ -10,14 +10,14 @@
             <h2 class="fs-4 mb-0 text-secondary"><i class="fas fa-chalkboard-teacher me-2"></i>Ensinar Sistema</h2>
             <p class="text-muted small">Corrija a identificação de lotes e materiais. As correções têm prioridade máxima sobre o Excel.</p>
         </div>
-        <a href="{{ url_for('rota_atualizar') }}" class="btn btn-primary btn-sm shadow-sm" onclick="return confirm('Isso irá recarregar todos os dados do zero. Continuar?');">
+        <a href="{{ url_for('rota_atualizar', next=request.full_path.rstrip('?')) }}" class="btn btn-primary btn-sm shadow-sm" data-loading="true" data-loading-text="Recarregando base..." onclick="if(confirm('Isso irá recarregar todos os dados do zero. Continuar?')){ativarModalCarregamento('Recarregando base...', 'Aplicando correções e atualizando os dados.'); return true;} return false;">
             <i class="fas fa-sync me-1"></i> Aplicar Correções e Recarregar
         </a>
     </div>
 
     <div class="card mb-4 border-0 shadow-sm bg-light">
         <div class="card-body py-3">
-            <form method="GET" action="{{ url_for('pagina_auditoria') }}" class="row g-3 align-items-end">
+            <form method="GET" action="{{ url_for('admin.pagina_auditoria') }}" class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label small fw-bold text-muted">Buscar Lote</label>
                     <input type="text" name="busca" class="form-control form-control-sm" placeholder="Ex: ANTIQ, 9563..." value="{{ request.args.get('busca', '') }}">
@@ -38,7 +38,7 @@
                 </div>
                 <div class="col-md-3 d-flex gap-2">
                     <button type="submit" class="btn btn-dark btn-sm w-100"><i class="fas fa-filter me-1"></i> Filtrar</button>
-                    <a href="{{ url_for('pagina_auditoria') }}" class="btn btn-outline-secondary btn-sm" title="Limpar"><i class="fas fa-times"></i></a>
+                    <a href="{{ url_for('admin.pagina_auditoria') }}" class="btn btn-outline-secondary btn-sm" title="Limpar"><i class="fas fa-times"></i></a>
                 </div>
             </form>
         </div>
@@ -79,28 +79,29 @@
                             {% endif %}
                         </td>
                         
-                        <form action="{{ url_for('salvar_correcao') }}" method="POST" id="form-{{ ensaio.id_ensaio }}">
-                            <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
-                            <td>
-                                <input type="text" name="novo_lote" class="form-control form-control-sm fw-bold text-primary" 
-                                       value="{{ ensaio.lote }}" placeholder="Ex: 9563">
-                            </td>
-                            <td>
-                                <select name="massa" class="form-select form-select-sm" required>
-                                    <option value="" disabled {% if not ensaio.massa %}selected{% endif %}>Selecione...</option>
-                                    {% for mat in materiais %}
-                                        <option value="{{ mat.descricao }}" {% if ensaio.massa and ensaio.massa.descricao == mat.descricao %}selected{% endif %}>
-                                            {{ mat.descricao }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                            </td>
-                            <td class="text-end pe-3">
-                                <button type="submit" form="form-{{ ensaio.id_ensaio }}" class="btn btn-success btn-sm shadow-sm" title="Salvar Aprendizado">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                            </td>
-                        </form>
+                        {% set form_id = 'form_auditoria_' ~ ensaio.id_ensaio %}
+                        <td>
+                            <form id="{{ form_id }}" action="{{ url_for('admin.salvar_correcao') }}" method="POST" class="d-none">
+                                <input type="hidden" name="lote_original_key" value="{{ ensaio.lote_original or ensaio.lote }}">
+                            </form>
+                            <input type="text" name="novo_lote" form="{{ form_id }}" class="form-control form-control-sm fw-bold text-primary"
+                                   value="{{ ensaio.lote }}" placeholder="Ex: 9563">
+                        </td>
+                        <td>
+                            <select name="massa" form="{{ form_id }}" class="form-select form-select-sm" required>
+                                <option value="" disabled {% if not ensaio.massa or not ensaio.massa.descricao %}selected{% endif %}>Selecione...</option>
+                                {% for mat in materiais %}
+                                    <option value="{{ mat }}" {% if ensaio.massa and ensaio.massa.descricao and ensaio.massa.descricao|upper == mat|upper %}selected{% endif %}>
+                                        {{ mat }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-end pe-3">
+                            <button type="submit" form="{{ form_id }}" class="btn btn-success btn-sm shadow-sm" title="Salvar Aprendizado">
+                                <i class="fas fa-check"></i>
+                            </button>
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
@@ -124,13 +125,13 @@
                 <nav>
                     <ul class="pagination pagination-sm mb-0">
                         <li class="page-item {% if pagina_atual == 1 %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_auditoria', page=pagina_atual-1, **request_args) }}">
+                            <a class="page-link" href="{{ url_for('admin.pagina_auditoria', page=pagina_atual-1, **request_args) }}">
                                 <i class="fas fa-chevron-left"></i>
                             </a>
                         </li>
 
                         <li class="page-item d-flex align-items-center px-2">
-                            <form action="{{ url_for('pagina_auditoria') }}" method="GET" class="d-flex align-items-center">
+                            <form action="{{ url_for('admin.pagina_auditoria') }}" method="GET" class="d-flex align-items-center">
                                 {% for key, value in request_args.items() %}
                                     {% if key != 'page' %}
                                         <input type="hidden" name="{{ key }}" value="{{ value }}">
@@ -142,7 +143,7 @@
                         </li>
 
                         <li class="page-item {% if pagina_atual == total_paginas %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('pagina_auditoria', page=pagina_atual+1, **request_args) }}">
+                            <a class="page-link" href="{{ url_for('admin.pagina_auditoria', page=pagina_atual+1, **request_args) }}">
                                 <i class="fas fa-chevron-right"></i>
                             </a>
                         </li>
