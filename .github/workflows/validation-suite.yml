@@ -1,0 +1,105 @@
+name: Validation Suite
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  simulation-hardening:
+    runs-on: ubuntu-latest
+    env:
+      V2_VALIDATION_GATE_MODE: ${{ vars.V2_VALIDATION_GATE_MODE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install minimal test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scipy flask flask-login python-dotenv pytest
+
+      - name: Run core hardening tests
+        run: |
+          pytest -q \
+            tests/test_vulcanization_service.py \
+            tests/test_vulcanization_service_v2.py \
+            tests/test_v2_validation_suite.py \
+            tests/test_v2_validation_runner_entrypoint.py \
+            tests/test_engine_registry.py \
+            tests/test_simulation_schema.py \
+            tests/test_reometria_engine_selection.py \
+            tests/test_fem_vulcanization_service.py
+
+      - name: Run v2 validation suite (quick)
+        run: |
+          GATE_MODE="${V2_VALIDATION_GATE_MODE:-informative}"
+          python -m services.run_v2_validation_suite \
+            --quick \
+            --out-dir data/out/ci_validation \
+            --sim-out-dir data/out/ci_validation/sims \
+            --report-stem v2_validation_ci \
+            --gate-mode "$GATE_MODE"
+
+      - name: Summarize validation result
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          report_path = Path("data/out/ci_validation/v2_validation_ci.json")
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          summary_lines = [
+              f"suite={report.get('suite')}",
+              f"engine={report.get('engine')} ({report.get('engine_status')})",
+              f"quick_mode={report.get('quick_mode')}",
+              f"quality_gate_mode={report.get('quality_gate_mode')}",
+              f"total_cases={report.get('total_cases')}",
+              f"all_required_passed={report.get('all_required_passed')}",
+              f"has_critical_quality={report.get('has_critical_quality')}",
+              f"ci_gate_passed={report.get('ci_gate_passed')}",
+              f"quality_status_counts={report.get('quality_status_counts')}",
+          ]
+          summary_text = "\n".join(summary_lines)
+
+          Path("data/out/ci_validation/summary.txt").write_text(summary_text, encoding="utf-8")
+          Path("data/out/ci_validation/quality_summary.json").write_text(
+              json.dumps(
+                  {
+                      "quality_gate_mode": report.get("quality_gate_mode"),
+                      "quality_status_counts": report.get("quality_status_counts"),
+                      "has_critical_quality": report.get("has_critical_quality"),
+                      "ci_gate_passed": report.get("ci_gate_passed"),
+                  },
+                  indent=2,
+                  ensure_ascii=False,
+              ),
+              encoding="utf-8",
+          )
+
+          github_summary = Path(".github_step_summary.md")
+          github_summary.write_text("## v2 Validation Summary\n\n```\n" + summary_text + "\n```\n", encoding="utf-8")
+          print(summary_text)
+
+          gate_mode = str(report.get("quality_gate_mode") or "informative").lower()
+          if gate_mode == "strict" and (not bool(report.get("ci_gate_passed"))):
+              sys.exit(1)
+          PY
+          cat .github_step_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-validation-artifacts
+          path: |
+            data/out/ci_validation/v2_validation_ci.json
+            data/out/ci_validation/v2_validation_ci.csv
+            data/out/ci_validation/summary.txt
+            data/out/ci_validation/quality_summary.json

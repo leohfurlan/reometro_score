@@ -195,3 +195,29 @@ def test_load_simulation_exposes_stride_scaled_dx(tmp_path, monkeypatch):
     assert sim["store_stride"] > 1
     assert np.isclose(sim["dx"], sim["dx_compute"] * sim["store_stride"])
     assert int(np.prod(sim["shape"])) < int(np.prod(sim["full_shape"]))
+
+
+def test_load_simulation_normalized_exposes_unified_schema(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    sim_id, _ = vs.run_simulation(
+        fit_payload=_fit_payload(),
+        mode="prensa",
+        dim=1,
+        shape_raw="20",
+        dx=0.001,
+        dt=1.0,
+        t_end=2.0,
+        mold_temp_c=170.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=1,
+    )
+
+    sim = vs.load_simulation_normalized(sim_id)
+
+    assert sim["engine"] == "empirical_v1"
+    assert sim["engine_status"] == "stable"
+    assert "temperature_snapshots" in sim
+    assert "alpha_c" in sim
+    assert "alpha_r" in sim
+    assert "heat_source" in sim

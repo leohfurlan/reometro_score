@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 pytest.importorskip("fipy")
 
-from services.fem_vulcanization_service import run_fem_simulation
+from services.fem_vulcanization_service import run_fem_simulation, run_fem_simulation_normalized
 
 
 def _base_config():
@@ -68,3 +68,12 @@ def test_exotherm_increases_peak_temperature():
     tmax_with_source = float(np.max(np.asarray(sim_with_source["t_snaps"], dtype=float)))
 
     assert tmax_with_source > tmax_no_source
+
+
+def test_run_fem_simulation_normalized_exposes_engine_and_schema():
+    sim = run_fem_simulation_normalized(_base_config())
+
+    assert sim["engine"] == "axisymmetric_fipy"
+    assert sim["engine_status"] == "prototype"
+    assert sim["geometry_type"] == "axisymmetric_cylindrical_section"
+    assert "temperature_snapshots" in sim

@@ -320,3 +320,13 @@ def load_simulation(sim_id):
         "t_snaps": d["t_snaps"],
         "alpha_snaps": d["alpha_snaps"],
     }
+
+
+def load_simulation_normalized(sim_id):
+    from services.engine_registry import ENGINE_EMPIRICAL_V1
+    from services.simulation_schema import normalize_simulation_output
+
+    sim = load_simulation(sim_id)
+    if sim is None:
+        return None
+    return normalize_simulation_output(sim, engine=ENGINE_EMPIRICAL_V1)

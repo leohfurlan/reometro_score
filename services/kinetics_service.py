@@ -8,12 +8,66 @@ import numpy as np
 
 from connection import connect_to_database
 from services.kinetics_solver import fit_kinetics, parametrize_curve, alpha_model, first_crossing_time
+from services.scorch_extraction import DEFAULT_TIME_FLOOR_S, extract_scorch_points, fit_arrhenius_from_scorch
 
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 ALPHA_COMPARE_TARGETS_DEFAULT = [0.10, 0.20, 0.50, 0.90]
 KINETIC_MODEL_VERSION = 2
 KINETIC_MODEL_EXPRESSION = "alpha = k(T) * t^n / (1 + k(T) * t^n)"
+INDUCTION_MODEL_VERSION = 2
+INDUCTION_MODEL_EXPRESSION = "ln(t_scorch) = intercept + slope*(1/T); t_scorch(T) = (1/A_ind) * exp(E_ind / (R*T))"
+INDUCTION_SOURCE = "scorch_torque_min_after_time_floor"
+INDUCTION_TIME_FLOOR_S = DEFAULT_TIME_FLOOR_S
+INDUCTION_FIT_MIN_POINTS = 3
+INDUCTION_FIT_MIN_TEMP_SPAN_K = 8.0
+INDUCTION_FIT_MIN_R2 = 0.60
+
+
+def _confidence_from_fit(arrhenius_result):
+    if not arrhenius_result.get("success"):
+        return "low"
+    quality = str(arrhenius_result.get("fit_quality") or "").lower()
+    if quality in {"high", "medium", "low"}:
+        return quality
+    return "medium"
+
+
+def _build_induction_payload(curves):
+    scorch_points = extract_scorch_points(curves, time_floor=INDUCTION_TIME_FLOOR_S)
+    arrhenius_result = fit_arrhenius_from_scorch(
+        scorch_points,
+        min_points=INDUCTION_FIT_MIN_POINTS,
+        min_temp_span_k=INDUCTION_FIT_MIN_TEMP_SPAN_K,
+        min_r2=INDUCTION_FIT_MIN_R2,
+    )
+    confidence = _confidence_from_fit(arrhenius_result)
+
+    induction_payload = {
+        "enabled": bool(arrhenius_result.get("success")),
+        "source": INDUCTION_SOURCE,
+        "message": arrhenius_result.get("message"),
+        "time_floor_s": float(INDUCTION_TIME_FLOOR_S),
+        "confidence": confidence,
+        "fit_quality": arrhenius_result.get("fit_quality"),
+        "model_regime": arrhenius_result.get("induction_model_regime") or "single_arrhenius",
+        "samples": arrhenius_result.get("points_table") or [],
+        "points_used": arrhenius_result.get("points_used") or [],
+        "points_discarded": arrhenius_result.get("points_discarded") or [],
+        "temperature_range_k": arrhenius_result.get("temperature_range_k"),
+        "temperature_range_c": arrhenius_result.get("temperature_range_c"),
+        "temperature_validity_range": arrhenius_result.get("temperature_validity_range"),
+        "criteria": arrhenius_result.get("criteria") or {},
+        "regression": {
+            "intercept": arrhenius_result.get("intercept"),
+            "slope": arrhenius_result.get("slope"),
+            "A_ind": arrhenius_result.get("A_ind"),
+            "E_ind": arrhenius_result.get("E_ind"),
+            "R2": arrhenius_result.get("R2"),
+            "points_used": arrhenius_result.get("valid_points"),
+        },
+    }
+    return induction_payload, arrhenius_result
 
 
 def _nearest_alpha_time(time_vec, alpha_vec, alpha_target):
@@ -171,6 +225,7 @@ def run_fit(cod_ensaios):
     rows = get_curve_points(cod_ensaios)
     curves = _group_curves(rows)
     result = fit_kinetics(curves)
+    induction_payload, induction_fit = _build_induction_payload(curves)
 
     payload = {
         "fit_id": datetime.utcnow().strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:8],
@@ -178,6 +233,16 @@ def run_fit(cod_ensaios):
         **result,
         "kinetic_model_version": KINETIC_MODEL_VERSION,
         "kinetic_model_expression": KINETIC_MODEL_EXPRESSION,
+        "induction_model_version": INDUCTION_MODEL_VERSION,
+        "induction_model_expression": INDUCTION_MODEL_EXPRESSION,
+        "induction": induction_payload,
+        "A_ind": induction_fit.get("A_ind"),
+        "E_ind": induction_fit.get("E_ind"),
+        "induction_confidence": induction_payload.get("confidence"),
+        "induction_source": induction_payload.get("source"),
+        "induction_fit_quality": induction_payload.get("fit_quality"),
+        "temperature_validity_range": induction_payload.get("temperature_validity_range"),
+        "induction_model_regime": induction_payload.get("model_regime"),
         "ensaios": [
             {"COD_ENSAIO": c["COD_ENSAIO"], "T_C": c["T_C"], "T_K": c["T_K"]}
             for c in curves

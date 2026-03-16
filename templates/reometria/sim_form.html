@@ -91,10 +91,19 @@
   <div class="col-md-4">
     <label class="form-label">Motor de simulacao</label>
     <select class="form-select" id="engine_select" name="engine">
-      <option value="empirical_v1" {% if engine == 'empirical_v1' %}selected{% endif %}>Atual (empirical_v1)</option>
-      <option value="thermo_kinetic_v2" {% if engine == 'thermo_kinetic_v2' %}selected{% endif %}>Novo (thermo_kinetic_v2)</option>
+      {% for option in engine_catalog %}
+      <option
+        value="{{ option.engine }}"
+        {% if engine == option.engine %}selected{% endif %}
+        {% if not option.enabled %}disabled{% endif %}
+      >
+        {{ option.engine }} - {{ option.status }}{% if option.is_default %} (default){% endif %}{% if not option.enabled %} [desabilitado]{% endif %}
+      </option>
+      {% endfor %}
     </select>
-    <div class="small text-muted mt-1">Padrao: motor atual. Use v2 para o fluxo termo-cinetico novo.</div>
+    <div class="small text-muted mt-1">
+      Padrao: <code>{{ default_engine }}</code>. Motores <code>experimental</code>/<code>prototype</code> exigem selecao explicita.
+    </div>
   </div>
 
   <div class="col-md-2">

@@ -282,3 +282,11 @@ def run_fem_simulation(config):
         },
         "kinetics_params": asdict(kinetics.params),
     }
+
+
+def run_fem_simulation_normalized(config):
+    from services.engine_registry import ENGINE_AXISYMMETRIC_FIPY
+    from services.simulation_schema import normalize_simulation_output
+
+    sim = run_fem_simulation(config)
+    return normalize_simulation_output(sim, engine=ENGINE_AXISYMMETRIC_FIPY)

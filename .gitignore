@@ -26,6 +26,7 @@ instance/*.db
 *.db
 instance/users_reoscore.db
 *.csv
-scripts/
+scripts/*
+!scripts/run_v2_validation_suite.py
 data/
 users_reoscore.db

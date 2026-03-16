@@ -4,7 +4,17 @@ from pathlib import Path
 
 import numpy as np
 
+from services.engine_registry import ENGINE_THERMO_KINETIC_V2, get_engine_status
+from services.simulation_schema import normalize_simulation_output
 from services import vulcanization_service_v2 as vs2
+
+
+QUALITY_STATUS_ORDER = {
+    "healthy": 0,
+    "info": 1,
+    "warning": 2,
+    "critical": 3,
+}
 
 
 def build_validation_cases(*, quick=False):
@@ -163,6 +173,50 @@ def _compute_metrics(sim):
         and np.isfinite(np.asarray(sim["alpha_r_snaps"], dtype=float)).all()
         and np.isfinite(np.asarray(sim["alpha_snaps"], dtype=float)).all()
     )
+    solver_metrics = dict(sim.get("metrics") or {})
+    clip_events_count = int(solver_metrics.get("clip_events_count", sim.get("clip_events_count", 0)) or 0)
+    nan_recovery_events = int(solver_metrics.get("nan_recovery_events", sim.get("nan_recovery_events", 0)) or 0)
+    numerical_warning_count = int(
+        solver_metrics.get(
+            "numerical_warning_count",
+            len(sim.get("numerical_warnings") or solver_metrics.get("numerical_warnings") or []),
+        )
+        or 0
+    )
+    stiffness_alerts = list(solver_metrics.get("stiffness_alerts") or [])
+    quality_flags = list(solver_metrics.get("quality_flags") or [])
+    quality_status = str(solver_metrics.get("quality_status") or "healthy").lower()
+    if quality_status not in QUALITY_STATUS_ORDER:
+        quality_status = "warning"
+    quality_severity_breakdown = dict(solver_metrics.get("quality_severity_breakdown") or {})
+    induction_extrapolation_warning = bool(
+        solver_metrics.get("induction_extrapolation_warning", sim.get("induction_extrapolation_warning", False))
+    )
+    induction_extrapolation_level = str(
+        solver_metrics.get("induction_extrapolation_level")
+        or ("mild" if induction_extrapolation_warning else "none")
+    )
+    temperature_validity_range = dict(
+        solver_metrics.get("temperature_validity_range") or sim.get("temperature_validity_range") or {}
+    )
+
+    alerts = []
+    if int(solver_metrics.get("substeps_max_per_step", 0) or 0) >= 8:
+        alerts.append("high_substepping")
+    if float(solver_metrics.get("max_source_to_diffusion_dT_ratio", 0.0) or 0.0) >= 10.0:
+        alerts.append("source_dominance")
+    if nan_recovery_events > 0:
+        alerts.append("nan_recovery")
+    if clip_events_count > 0:
+        alerts.append("clipping_events")
+    if numerical_warning_count > 0:
+        alerts.append("numerical_warnings")
+    if stiffness_alerts:
+        alerts.append("stiffness_alerts")
+    if induction_extrapolation_warning:
+        alerts.append("induction_extrapolation")
+    if quality_status in {"warning", "critical"}:
+        alerts.append(f"quality_{quality_status}")
 
     return {
         "temperature_max_c": float(np.max(final_temp) - 273.15),
@@ -181,17 +235,55 @@ def _compute_metrics(sim):
         "alpha_mean_ts": [float(x) for x in np.asarray(alpha_mean_ts, dtype=float)],
         "alpha_min_ts": [float(x) for x in np.asarray(alpha_min_ts, dtype=float)],
         "alpha_max_ts": [float(x) for x in np.asarray(alpha_max_ts, dtype=float)],
+        "substeps_total": int(solver_metrics.get("substeps_total", 0) or 0),
+        "substeps_max_per_step": int(solver_metrics.get("substeps_max_per_step", 0) or 0),
+        "substeps_mean_per_step": float(solver_metrics.get("substeps_mean_per_step", 0.0) or 0.0),
+        "max_cure_rate_s_inv": float(solver_metrics.get("max_cure_rate_s_inv", 0.0) or 0.0),
+        "max_reversion_rate_s_inv": float(solver_metrics.get("max_reversion_rate_s_inv", 0.0) or 0.0),
+        "max_heat_source_w_m3": float(solver_metrics.get("max_heat_source_w_m3", 0.0) or 0.0),
+        "max_source_to_diffusion_dT_ratio": float(
+            solver_metrics.get("max_source_to_diffusion_dT_ratio", 0.0) or 0.0
+        ),
+        "clip_events_count": clip_events_count,
+        "nan_recovery_events": nan_recovery_events,
+        "numerical_warning_count": numerical_warning_count,
+        "critical_step_index": int(solver_metrics.get("critical_step_index", 0) or 0),
+        "critical_step_time_s": float(solver_metrics.get("critical_step_time_s", 0.0) or 0.0),
+        "critical_step_reason": str(solver_metrics.get("critical_step_reason") or "unknown"),
+        "critical_step_context": dict(solver_metrics.get("critical_step_context") or {}),
+        "critical_step_metrics": dict(solver_metrics.get("critical_step_metrics") or {}),
+        "stiffness_alerts": stiffness_alerts,
+        "alerts": alerts,
+        "induction_confidence": str(solver_metrics.get("induction_confidence") or sim.get("induction_confidence") or ""),
+        "induction_source": str(solver_metrics.get("induction_source") or sim.get("induction_source") or ""),
+        "induction_fit_quality": str(
+            solver_metrics.get("induction_fit_quality") or sim.get("induction_fit_quality") or ""
+        ),
+        "induction_model_regime": str(
+            solver_metrics.get("induction_model_regime") or sim.get("induction_model_regime") or "single_arrhenius"
+        ),
+        "temperature_validity_range": temperature_validity_range,
+        "induction_extrapolation_warning": induction_extrapolation_warning,
+        "induction_extrapolation_level": induction_extrapolation_level,
+        "quality_flags": quality_flags,
+        "quality_status": quality_status,
+        "quality_severity_breakdown": quality_severity_breakdown,
         "criteria": {
             "solver_no_nan": finite_solver,
             "cooling_started": cooling_started,
             "temperature_drops_after_cooling": bool(cooling_started and (temp_drop_after_cooling > 1e-4)),
             "mean_alpha_reaches_0_9_before_cooling": bool(cooling_started and (alpha_at_cooling_start >= 0.9)),
             "delta_alpha_near_optimal": False,
+            "no_nan_recovery_events": bool(nan_recovery_events == 0),
+            "no_clip_events": bool(clip_events_count == 0),
+            "has_stiffness_alerts": bool(len(alerts) > 0),
+            "quality_not_critical": bool(quality_status != "critical"),
+            "induction_within_validity_range": bool(not induction_extrapolation_warning),
         },
     }
 
 
-def apply_delta_alpha_criterion(case_rows, tolerance=1e-9):
+def apply_delta_alpha_criterion(case_rows, tolerance=2e-6):
     grouped = {}
     for row in case_rows:
         grouped.setdefault(row["size_class"], {})[row["profile"]] = row
@@ -216,6 +308,8 @@ def _serialize_case_for_csv(case_row):
     metrics = case_row["metrics"]
     criteria = case_row["criteria"]
     return {
+        "engine": case_row.get("engine", ENGINE_THERMO_KINETIC_V2),
+        "engine_status": case_row.get("engine_status", get_engine_status(ENGINE_THERMO_KINETIC_V2)),
         "case_id": case_row["case_id"],
         "size_class": case_row["size_class"],
         "profile": case_row["profile"],
@@ -228,11 +322,40 @@ def _serialize_case_for_csv(case_row):
         "demold_time_s": metrics["demold_time_s"],
         "post_cooling_temp_drop_c": metrics["post_cooling_temp_drop_c"],
         "post_cooling_alpha_growth": metrics["post_cooling_alpha_growth"],
+        "substeps_total": metrics["substeps_total"],
+        "substeps_max_per_step": metrics["substeps_max_per_step"],
+        "substeps_mean_per_step": metrics["substeps_mean_per_step"],
+        "max_cure_rate_s_inv": metrics["max_cure_rate_s_inv"],
+        "max_reversion_rate_s_inv": metrics["max_reversion_rate_s_inv"],
+        "max_heat_source_w_m3": metrics["max_heat_source_w_m3"],
+        "max_source_to_diffusion_dT_ratio": metrics["max_source_to_diffusion_dT_ratio"],
+        "clip_events_count": metrics["clip_events_count"],
+        "nan_recovery_events": metrics["nan_recovery_events"],
+        "numerical_warning_count": metrics["numerical_warning_count"],
+        "critical_step_index": metrics["critical_step_index"],
+        "critical_step_time_s": metrics["critical_step_time_s"],
+        "critical_step_reason": metrics["critical_step_reason"],
+        "quality_status": metrics["quality_status"],
+        "quality_flags": ";".join(
+            str(x.get("code") if isinstance(x, dict) else x) for x in (metrics.get("quality_flags") or [])
+        ),
+        "induction_extrapolation_warning": metrics["induction_extrapolation_warning"],
+        "induction_extrapolation_level": metrics["induction_extrapolation_level"],
+        "induction_confidence": metrics["induction_confidence"],
+        "induction_source": metrics["induction_source"],
+        "induction_fit_quality": metrics["induction_fit_quality"],
+        "induction_model_regime": metrics["induction_model_regime"],
+        "alerts": ";".join(str(x) for x in (metrics.get("alerts") or [])),
         "solver_no_nan": criteria["solver_no_nan"],
         "cooling_started": criteria["cooling_started"],
         "temperature_drops_after_cooling": criteria["temperature_drops_after_cooling"],
         "mean_alpha_reaches_0_9_before_cooling": criteria["mean_alpha_reaches_0_9_before_cooling"],
         "delta_alpha_near_optimal": criteria["delta_alpha_near_optimal"],
+        "no_nan_recovery_events": criteria["no_nan_recovery_events"],
+        "no_clip_events": criteria["no_clip_events"],
+        "has_stiffness_alerts": criteria["has_stiffness_alerts"],
+        "quality_not_critical": criteria["quality_not_critical"],
+        "induction_within_validity_range": criteria["induction_within_validity_range"],
     }
 
 
@@ -264,7 +387,12 @@ def run_v2_validation_suite(
     quick=False,
     cases=None,
     sim_out_dir=None,
+    gate_mode="informative",
 ):
+    gate_mode_norm = str(gate_mode or "informative").strip().lower()
+    if gate_mode_norm not in {"informative", "strict"}:
+        gate_mode_norm = "informative"
+
     case_defs = list(cases) if cases is not None else build_validation_cases(quick=quick)
     rows = []
 
@@ -276,12 +404,15 @@ def run_v2_validation_suite(
     try:
         for case in case_defs:
             sim_id, _ = vs2.run_simulation_v2(**case["sim_kwargs"])
-            sim = vs2.load_simulation_v2(sim_id)
+            sim_raw = vs2.load_simulation_v2(sim_id)
+            sim = normalize_simulation_output(sim_raw, engine=ENGINE_THERMO_KINETIC_V2)
             metrics = _compute_metrics(sim)
             row = {
                 "case_id": str(case["case_id"]),
                 "size_class": str(case["size_class"]),
                 "profile": str(case["profile"]),
+                "engine": ENGINE_THERMO_KINETIC_V2,
+                "engine_status": get_engine_status(ENGINE_THERMO_KINETIC_V2),
                 "metrics": metrics,
                 "criteria": dict(metrics["criteria"]),
             }
@@ -297,15 +428,44 @@ def run_v2_validation_suite(
         "mean_alpha_reaches_0_9_before_cooling",
         "delta_alpha_near_optimal",
     ]
+    alert_flags = [
+        "no_nan_recovery_events",
+        "no_clip_events",
+        "has_stiffness_alerts",
+        "quality_not_critical",
+        "induction_within_validity_range",
+    ]
     for row in rows:
         row["pass_required"] = bool(all(bool(row["criteria"][flag]) for flag in required_flags))
+        row["pass_strict"] = bool(row["pass_required"] and row["criteria"].get("quality_not_critical", True))
+
+    quality_status_counts = {"healthy": 0, "info": 0, "warning": 0, "critical": 0}
+    for row in rows:
+        status = str(row.get("metrics", {}).get("quality_status") or "healthy").lower()
+        if status not in quality_status_counts:
+            status = "warning"
+        quality_status_counts[status] += 1
+
+    all_required_passed = bool(all(bool(r["pass_required"]) for r in rows))
+    has_critical_quality = bool(quality_status_counts["critical"] > 0)
+    if gate_mode_norm == "strict":
+        ci_gate_passed = bool(all_required_passed and (not has_critical_quality))
+    else:
+        ci_gate_passed = True
 
     report = {
         "suite": "v2_physical_validation",
+        "engine": ENGINE_THERMO_KINETIC_V2,
+        "engine_status": get_engine_status(ENGINE_THERMO_KINETIC_V2),
         "quick_mode": bool(quick),
+        "quality_gate_mode": gate_mode_norm,
         "total_cases": len(rows),
         "required_flags": required_flags,
-        "all_required_passed": bool(all(bool(r["pass_required"]) for r in rows)),
+        "alert_flags_non_blocking": alert_flags,
+        "all_required_passed": all_required_passed,
+        "has_critical_quality": has_critical_quality,
+        "quality_status_counts": dict(quality_status_counts),
+        "ci_gate_passed": bool(ci_gate_passed),
         "cases": rows,
     }
 

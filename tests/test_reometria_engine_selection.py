@@ -1,7 +1,9 @@
 import os
 import sys
+import types
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.modules.setdefault("pyodbc", types.SimpleNamespace(connect=lambda *args, **kwargs: None))
 
 from reoscore.webapp.routes import reometria as rr
 
@@ -60,6 +62,7 @@ def test_dispatch_can_trigger_v2_engine(monkeypatch):
 
     monkeypatch.setattr(rr, "run_simulation_v1", _run_v1)
     monkeypatch.setattr(rr, "run_simulation_v2", _run_v2)
+    monkeypatch.setenv("REOMETRIA_ENABLE_THERMO_KINETIC_V2", "1")
 
     params = _base_sim_params()
     params["engine"] = rr.ENGINE_THERMO_KINETIC_V2
@@ -85,3 +88,35 @@ def test_load_simulation_with_engine_falls_back_to_v2(monkeypatch):
     assert sim is not None
     assert sim["source"] == "v2"
     assert engine == rr.ENGINE_THERMO_KINETIC_V2
+
+
+def test_engine_resolution_keeps_v2_out_of_default_path(monkeypatch):
+    monkeypatch.setenv("REOMETRIA_ENABLE_THERMO_KINETIC_V2", "1")
+
+    implicit = rr._resolve_engine(rr.ENGINE_THERMO_KINETIC_V2, explicit_selection=False)
+    explicit = rr._resolve_engine(rr.ENGINE_THERMO_KINETIC_V2, explicit_selection=True)
+
+    assert implicit == rr.ENGINE_EMPIRICAL_V1
+    assert explicit == rr.ENGINE_THERMO_KINETIC_V2
+
+
+def test_axisymmetric_engine_requires_feature_flag(monkeypatch):
+    monkeypatch.delenv("REOMETRIA_ENABLE_AXISYMMETRIC_FIPY", raising=False)
+    disabled = rr._resolve_engine(rr.ENGINE_AXISYMMETRIC_FIPY, explicit_selection=True)
+    assert disabled == rr.ENGINE_EMPIRICAL_V1
+
+    monkeypatch.setenv("REOMETRIA_ENABLE_AXISYMMETRIC_FIPY", "1")
+    enabled = rr._resolve_engine(rr.ENGINE_AXISYMMETRIC_FIPY, explicit_selection=True)
+    assert enabled == rr.ENGINE_AXISYMMETRIC_FIPY
+
+
+def test_axisymmetric_engine_is_blocked_in_web_execution_path(monkeypatch):
+    monkeypatch.setenv("REOMETRIA_ENABLE_AXISYMMETRIC_FIPY", "1")
+    params = _base_sim_params()
+    params["engine"] = rr.ENGINE_AXISYMMETRIC_FIPY
+
+    try:
+        rr._run_simulation_with_engine(_fit_payload(), params)
+        assert False, "Expected prototype guard rail for axisymmetric engine"
+    except RuntimeError as exc:
+        assert "prototype" in str(exc).lower()

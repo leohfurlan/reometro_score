@@ -15,6 +15,16 @@ from services.kinetics_service import (
     run_fit,
     update_fit_parameters,
 )
+from services.engine_registry import (
+    ENGINE_AXISYMMETRIC_FIPY as ENGINE_AXISYMMETRIC_FIPY_REGISTRY,
+    ENGINE_EMPIRICAL_V1 as ENGINE_EMPIRICAL_V1_REGISTRY,
+    ENGINE_THERMO_KINETIC_V2 as ENGINE_THERMO_KINETIC_V2_REGISTRY,
+    get_engine_status,
+    list_engine_catalog,
+    normalize_engine as normalize_engine_registry,
+    resolve_engine_for_execution,
+)
+from services.simulation_schema import normalize_simulation_output
 from services.vulcanization_service import load_simulation as load_simulation_v1, run_simulation as run_simulation_v1
 from services.vulcanization_service_v2 import load_simulation_v2, run_simulation_v2
 
@@ -24,9 +34,14 @@ reometria_bp = Blueprint("reometria", __name__)
 _SIM_JOBS = {}
 _SIM_JOBS_LOCK = threading.Lock()
 _SIM_JOB_TTL_SEC = 6 * 3600
-ENGINE_EMPIRICAL_V1 = "empirical_v1"
-ENGINE_THERMO_KINETIC_V2 = "thermo_kinetic_v2"
-ENGINE_OPTIONS = (ENGINE_EMPIRICAL_V1, ENGINE_THERMO_KINETIC_V2)
+ENGINE_EMPIRICAL_V1 = ENGINE_EMPIRICAL_V1_REGISTRY
+ENGINE_THERMO_KINETIC_V2 = ENGINE_THERMO_KINETIC_V2_REGISTRY
+ENGINE_AXISYMMETRIC_FIPY = ENGINE_AXISYMMETRIC_FIPY_REGISTRY
+ENGINE_OPTIONS = (
+    ENGINE_EMPIRICAL_V1,
+    ENGINE_THERMO_KINETIC_V2,
+    ENGINE_AXISYMMETRIC_FIPY,
+)
 
 
 def _mm_to_cells(length_mm, dx):
@@ -86,10 +101,23 @@ def _get_sim_job(job_id):
 
 
 def _normalize_engine(value):
-    engine = str(value or ENGINE_EMPIRICAL_V1).strip().lower()
-    if engine not in ENGINE_OPTIONS:
-        return ENGINE_EMPIRICAL_V1
-    return engine
+    return normalize_engine_registry(value)
+
+
+def _resolve_engine(value, *, explicit_selection):
+    return resolve_engine_for_execution(value, explicit_selection=bool(explicit_selection))
+
+
+def _serialize_for_json(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [_serialize_for_json(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _serialize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (np.floating, np.integer, np.bool_)):
+        return value.item()
+    return value
 
 
 def _run_simulation_with_engine(fit_payload, sim_params, progress_callback=None, cancel_checker=None):
@@ -107,12 +135,19 @@ def _run_simulation_with_engine(fit_payload, sim_params, progress_callback=None,
         sim_params["snapshot_every"],
         sim_params["platen_axis"],
     )
-    engine = _normalize_engine(sim_params.get("engine"))
+    explicit_selection = sim_params.get("engine_explicit")
+    if explicit_selection is None:
+        explicit_selection = sim_params.get("engine") is not None
+    engine = _resolve_engine(sim_params.get("engine"), explicit_selection=explicit_selection)
     if engine == ENGINE_THERMO_KINETIC_V2:
         return run_simulation_v2(
             *common_args,
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
+        )
+    if engine == ENGINE_AXISYMMETRIC_FIPY:
+        raise RuntimeError(
+            "Engine axisymmetric_fipy esta em status prototype e ainda nao foi integrada ao fluxo web de simulacao."
         )
     return run_simulation_v1(
         *common_args,
@@ -143,7 +178,9 @@ def _load_simulation_with_engine(sim_id, engine_hint=None):
 
 
 def _parse_simulation_request(form_data):
-    engine = _normalize_engine(form_data.get("engine"))
+    engine_raw = form_data.get("engine")
+    engine_explicit = engine_raw is not None and str(engine_raw).strip() != ""
+    engine = _resolve_engine(engine_raw, explicit_selection=engine_explicit)
     mode = str(form_data.get("mode", "prensa") or "prensa").strip().lower()
     if mode not in ("prensa", "autoclave"):
         mode = "prensa"
@@ -193,6 +230,7 @@ def _parse_simulation_request(form_data):
 
     return {
         "engine": engine,
+        "engine_explicit": bool(engine_explicit),
         "mode": mode,
         "dim": int(dim),
         "shape_raw": shape,
@@ -229,6 +267,7 @@ def _run_simulation_job(job_id, fit_payload, sim_params):
             stage="iniciando",
             message="Iniciando simulacao...",
             engine=_normalize_engine(sim_params.get("engine")),
+            engine_status=get_engine_status(sim_params.get("engine")),
         )
         sim_id, _ = _run_simulation_with_engine(
             fit_payload,
@@ -244,6 +283,7 @@ def _run_simulation_job(job_id, fit_payload, sim_params):
             message="Simulacao concluida com sucesso.",
             sim_id=sim_id,
             engine=_normalize_engine(sim_params.get("engine")),
+            engine_status=get_engine_status(sim_params.get("engine")),
             finished_at=time.time(),
         )
     except RuntimeError as exc:
@@ -359,7 +399,8 @@ def reometria_simulate_form(fit_id):
     mode = request.args.get("mode", "prensa")
     if mode not in ("prensa", "autoclave"):
         mode = "prensa"
-    engine = _normalize_engine(request.args.get("engine", ENGINE_EMPIRICAL_V1))
+    engine_qs = request.args.get("engine")
+    engine = _resolve_engine(engine_qs, explicit_selection=(engine_qs is not None and str(engine_qs).strip() != ""))
     payload = load_fit_payload(fit_id)
     if not payload:
         flash("Fit nao encontrado.", "danger")
@@ -369,7 +410,8 @@ def reometria_simulate_form(fit_id):
         fit_id=fit_id,
         mode=mode,
         engine=engine,
-        engine_options=ENGINE_OPTIONS,
+        default_engine=_resolve_engine(None, explicit_selection=False),
+        engine_catalog=list_engine_catalog(include_disabled=True),
     )
 
 
@@ -407,7 +449,11 @@ def reometria_simulate_start(fit_id):
 
     sim_params = _parse_simulation_request(request.form)
     job_id = _create_sim_job()
-    _update_sim_job(job_id, engine=sim_params["engine"])
+    _update_sim_job(
+        job_id,
+        engine=sim_params["engine"],
+        engine_status=get_engine_status(sim_params["engine"]),
+    )
 
     worker = threading.Thread(
         target=_run_simulation_job,
@@ -463,11 +509,6 @@ def reometria_simulate_view(sim_id):
         flash("Simulacao nao encontrada.", "danger")
         return redirect(url_for("reometria.reometria_fit"))
 
-    sim["engine"] = engine_used or ENGINE_EMPIRICAL_V1
-    serializable = {
-        **sim,
-        "times": sim["times"].tolist(),
-        "t_snaps": sim["t_snaps"].tolist(),
-        "alpha_snaps": sim["alpha_snaps"].tolist(),
-    }
+    sim = normalize_simulation_output(sim, engine=(engine_used or ENGINE_EMPIRICAL_V1))
+    serializable = _serialize_for_json(sim)
     return render_template("reometria/sim_view.html", sim=sim, sim_json=json.dumps(serializable))

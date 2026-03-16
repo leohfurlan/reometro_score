@@ -178,3 +178,11 @@ A nova feature usa a mesma conexão SQL Server já existente em `connection.py`:
 ### Dependências novas
 - `scipy` (ajuste não linear com `least_squares`)
 - `plotly` (gráficos web interativos)
+
+## Simulation hardening notes (Sprint 1)
+
+- Engine status, feature flags and unified output contract:
+  - `docs/simulation_engines.md`
+- Official local command for v2 validation suite:
+  - `python -m services.run_v2_validation_suite --quick --gate-mode informative --out-dir data/out --report-stem v2_validation_report`
+  - Strict gate (optional): `python -m services.run_v2_validation_suite --quick --gate-mode strict --out-dir data/out --report-stem v2_validation_report`

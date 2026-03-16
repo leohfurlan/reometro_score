@@ -154,7 +154,7 @@
   }
 </style>
 <h2>Visualizacao da Simulacao {{ sim.sim_id }}</h2>
-<p><b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
+<p><b>Motor:</b> {{ sim.engine }} ({{ sim.engine_status }}) | <b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
 
 {% if sim.dim == 1 %}
 <div class="alert alert-secondary">
