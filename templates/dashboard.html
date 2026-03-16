@@ -3,8 +3,44 @@
 
 {% block content %}
 <div class="container-fluid">
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="text-secondary fw-bold mb-0">Producao Atual por Banbury</h2>
+            <div class="d-flex align-items-center gap-2">
+                <small class="text-muted" id="banburyStatusMeta">Carregando dados do SharePoint...</small>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="banburyRefreshBtn">
+                    <i class="fas fa-rotate-right me-1"></i>Atualizar cards
+                </button>
+            </div>
+        </div>
+
+        <div class="row g-3" id="banburyStatusGrid">
+            {% for equipamento in ['100L', '80L', '40L'] %}
+            <div class="col-xl-4 col-md-6">
+                <div class="card p-3 shadow-sm h-100 border-start border-4 border-secondary-subtle" data-banbury-card="{{ equipamento }}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-bold text-secondary">Banbury {{ equipamento }}</div>
+                        <span class="badge bg-secondary-subtle text-secondary" data-field="status">Carregando</span>
+                    </div>
+
+                    <div class="small text-muted" data-field="loading">Buscando entrada mais recente...</div>
+                    <div class="small text-danger d-none" data-field="error"></div>
+
+                    <div class="d-none" data-field="content">
+                        <div class="small text-muted mb-1">Codigo: <span class="text-dark fw-semibold" data-field="codigo">-</span></div>
+                        <div class="small text-muted mb-1">Descricao: <span class="text-dark fw-semibold" data-field="descricao">-</span></div>
+                        <div class="small text-muted mb-1">Lote: <span class="text-dark fw-semibold" data-field="lote">-</span></div>
+                        <div class="small text-muted mb-1">Inicio da producao: <span class="text-dark fw-semibold" data-field="inicio">-</span></div>
+                        <div class="small text-muted mb-0">Reometro: <span class="text-dark fw-semibold text-uppercase" data-field="reometro">-</span></div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="text-secondary fw-bold">Visão Geral da Qualidade</h2>
+        <h2 class="text-secondary fw-bold">Visao Geral da Qualidade</h2>
         <form class="d-flex gap-2">
             <input type="date" name="date_start" class="form-control form-control-sm" value="{{ date_start }}">
             <input type="date" name="date_end" class="form-control form-control-sm" value="{{ date_end }}">
@@ -15,7 +51,7 @@
     <div class="row g-3 mb-4">
         <div class="col-md-3">
             <div class="card p-3 border-start border-4 border-success shadow-sm">
-                <div class="text-muted x-small fw-bold">ÍNDICE DE APROVAÇÃO (ICG)</div>
+                <div class="text-muted x-small fw-bold">INDICE DE APROVACAO (ICG)</div>
                 <div class="d-flex justify-content-between align-items-center mt-2">
                     <h2 class="mb-0 fw-bold">{{ "%.1f"|format(kpi.icg) }}%</h2>
                     <i class="fas fa-check-circle fa-2x text-success opacity-25"></i>
@@ -24,7 +60,7 @@
         </div>
         <div class="col-md-3">
             <div class="card p-3 border-start border-4 border-primary shadow-sm">
-                <div class="text-muted x-small fw-bold">SCORE MÉDIO (QSM)</div>
+                <div class="text-muted x-small fw-bold">SCORE MEDIO (QSM)</div>
                 <div class="d-flex justify-content-between align-items-center mt-2">
                     <h2 class="mb-0 fw-bold">{{ "%.1f"|format(kpi.qsm) }}</h2>
                     <i class="fas fa-chart-line fa-2x text-primary opacity-25"></i>
@@ -55,7 +91,7 @@
         <div class="col-lg-8">
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-white fw-bold text-secondary">
-                    <i class="fas fa-history me-2"></i>Evolução do Score Médio (30 Dias)
+                    <i class="fas fa-history me-2"></i>Evolucao do Score Medio (30 Dias)
                 </div>
                 <div class="card-body">
                     <canvas id="chartTrend" height="100"></canvas>
@@ -77,14 +113,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Inicialização dos Gráficos (similar ao anterior, mas adaptado ao novo layout)
     const ctxTrend = document.getElementById('chartTrend');
     new Chart(ctxTrend, {
         type: 'line',
         data: {
             labels: {{ chart_trend.labels | safe }},
             datasets: [{
-                label: 'Score Médio',
+                label: 'Score Medio',
                 data: {{ chart_trend.data | safe }},
                 borderColor: '#0d6efd',
                 tension: 0.3,
@@ -105,6 +140,174 @@
                 backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#6c757d', '#20c997']
             }]
         }
+    });
+
+    const BANBURY_ORDER = ['100L', '80L', '40L'];
+    const BANBURY_API_URL = "{{ url_for('api_banbury_status') }}";
+    const banburyRefreshBtn = document.getElementById('banburyRefreshBtn');
+
+    function getBanburyCard(equipamento) {
+        return document.querySelector(`[data-banbury-card="${equipamento}"]`);
+    }
+
+    function formatarDataHora(valor) {
+        if (!valor) {
+            return 'N/D';
+        }
+
+        const data = new Date(valor);
+        if (Number.isNaN(data.getTime())) {
+            return `${valor}`.replace('T', ' ');
+        }
+
+        return data.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function setRefreshButtonLoading(isLoading) {
+        if (!banburyRefreshBtn) return;
+
+        banburyRefreshBtn.disabled = !!isLoading;
+        if (isLoading) {
+            banburyRefreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Atualizando...';
+        } else {
+            banburyRefreshBtn.innerHTML = '<i class="fas fa-rotate-right me-1"></i>Atualizar cards';
+        }
+    }
+
+    function setBanburyCardState(card, estado) {
+        const statusBadge = card.querySelector('[data-field="status"]');
+        const loading = card.querySelector('[data-field="loading"]');
+        const error = card.querySelector('[data-field="error"]');
+        const content = card.querySelector('[data-field="content"]');
+
+        loading.classList.add('d-none');
+        error.classList.add('d-none');
+        content.classList.add('d-none');
+
+        if (estado === 'loading') {
+            statusBadge.className = 'badge bg-secondary-subtle text-secondary';
+            statusBadge.textContent = 'Carregando';
+            loading.classList.remove('d-none');
+            return;
+        }
+
+        if (estado === 'erro') {
+            statusBadge.className = 'badge bg-danger-subtle text-danger';
+            statusBadge.textContent = 'Erro';
+            error.classList.remove('d-none');
+            return;
+        }
+
+        if (estado === 'sem_dados') {
+            statusBadge.className = 'badge bg-warning-subtle text-warning';
+            statusBadge.textContent = 'Sem dados';
+            content.classList.remove('d-none');
+            return;
+        }
+
+        statusBadge.className = 'badge bg-success-subtle text-success';
+        statusBadge.textContent = 'Atual';
+        content.classList.remove('d-none');
+    }
+
+    function preencherCard(card, item) {
+        card.querySelector('[data-field="codigo"]').textContent = item.codigo || 'N/D';
+        card.querySelector('[data-field="descricao"]').textContent = item.descricao || 'N/D';
+        card.querySelector('[data-field="lote"]').textContent = item.lote || 'N/D';
+        card.querySelector('[data-field="inicio"]').textContent = formatarDataHora(item.data_hora);
+        card.querySelector('[data-field="reometro"]').textContent = item.reometro || 'N/D';
+    }
+
+    function mapearEquipamento(item) {
+        const texto = `${item?.equipamento || ''}`;
+        const encontrado = texto.match(/(100L|80L|40L)/i);
+        return encontrado ? encontrado[1].toUpperCase() : null;
+    }
+
+    async function carregarStatusBanbury(opts = {}) {
+        const { manual = false } = opts;
+        const meta = document.getElementById('banburyStatusMeta');
+        setRefreshButtonLoading(true);
+
+        BANBURY_ORDER.forEach((equipamento) => {
+            const card = getBanburyCard(equipamento);
+            if (card) {
+                setBanburyCardState(card, 'loading');
+            }
+        });
+        meta.textContent = manual ? 'Atualizando cards...' : 'Carregando dados do SharePoint...';
+
+        try {
+            const response = await fetch(BANBURY_API_URL, {
+                headers: { 'Accept': 'application/json' },
+                cache: 'no-store'
+            });
+            const payload = await response.json();
+
+            if (!response.ok || payload.status !== 'ok') {
+                throw new Error(payload.mensagem || 'Falha ao obter status de producao.');
+            }
+
+            const mapa = new Map();
+            (payload.cards || []).forEach((item) => {
+                const chave = mapearEquipamento(item);
+                if (chave) {
+                    mapa.set(chave, item);
+                }
+            });
+
+            BANBURY_ORDER.forEach((equipamento) => {
+                const card = getBanburyCard(equipamento);
+                if (!card) return;
+
+                const item = mapa.get(equipamento);
+                if (!item || item.status === 'sem_dados') {
+                    preencherCard(card, {
+                        codigo: null,
+                        descricao: 'Sem dados recentes',
+                        lote: null,
+                        data_hora: null,
+                        reometro: null
+                    });
+                    setBanburyCardState(card, 'sem_dados');
+                    return;
+                }
+
+                preencherCard(card, item);
+                setBanburyCardState(card, 'ok');
+            });
+
+            if (payload.atualizado_em) {
+                meta.textContent = `Atualizado em ${payload.atualizado_em.replace('T', ' ')}`;
+            } else {
+                meta.textContent = 'Dados de SharePoint atualizados.';
+            }
+        } catch (error) {
+            BANBURY_ORDER.forEach((equipamento) => {
+                const card = getBanburyCard(equipamento);
+                if (!card) return;
+
+                const errorNode = card.querySelector('[data-field="error"]');
+                errorNode.textContent = error.message || 'Erro ao carregar dados.';
+                setBanburyCardState(card, 'erro');
+            });
+            meta.textContent = 'Falha ao carregar dados do SharePoint.';
+        } finally {
+            setRefreshButtonLoading(false);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (banburyRefreshBtn) {
+            banburyRefreshBtn.addEventListener('click', () => carregarStatusBanbury({ manual: true }));
+        }
+        carregarStatusBanbury();
     });
 </script>
 {% endblock %}

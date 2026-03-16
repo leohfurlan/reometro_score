@@ -22,6 +22,7 @@ from sqlalchemy.orm import load_only
 from services.config_manager import carregar_configuracoes
 from services.learning_service import carregar_aprendizado_mapa
 from services.report_service import gerar_estrutura_relatorio
+from services.banbury_status_service import obter_status_producao_banbury
 from models.score_versioning import ScoreResultado
 from models.formula import Formula
 from models.formulation_v2 import (
@@ -567,6 +568,14 @@ def dashboard_home():
         date_end=d_end,
         ultimo_update=last_update_obj.updated_at if last_update_obj else None
     )
+
+
+@app.route('/api/dashboard/banbury-status')
+@login_required
+def api_banbury_status():
+    resultado = obter_status_producao_banbury()
+    http_status = 200 if resultado.get('status') == 'ok' else 500
+    return jsonify(resultado), http_status
 
 @app.route('/qualidade')
 @login_required

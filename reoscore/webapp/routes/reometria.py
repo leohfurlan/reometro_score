@@ -2,10 +2,13 @@ import json
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from services.kinetics_service import (
     build_alpha_time_comparison,
@@ -13,6 +16,7 @@ from services.kinetics_service import (
     list_ensaios_for_fit,
     load_fit_payload,
     run_fit,
+    save_fit_payload,
     update_fit_parameters,
 )
 from services.engine_registry import (
@@ -25,8 +29,16 @@ from services.engine_registry import (
     resolve_engine_for_execution,
 )
 from services.simulation_schema import normalize_simulation_output
-from services.vulcanization_service import load_simulation as load_simulation_v1, run_simulation as run_simulation_v1
-from services.vulcanization_service_v2 import load_simulation_v2, run_simulation_v2
+from services.vulcanization_service import (
+    load_simulation as load_simulation_v1,
+    load_simulation_normalized as load_simulation_v1_normalized,
+    run_simulation as run_simulation_v1,
+)
+from services.vulcanization_service_v2 import (
+    load_simulation_v2,
+    load_simulation_v2_normalized,
+    run_simulation_v2,
+)
 
 from reoscore.webapp.utils import parse_float_locale, parse_int_locale
 
@@ -42,6 +54,301 @@ ENGINE_OPTIONS = (
     ENGINE_THERMO_KINETIC_V2,
     ENGINE_AXISYMMETRIC_FIPY,
 )
+_REOMETRIA_OUT_DIR = Path("data/out")
+
+
+def _safe_float(value, default=None):
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(numeric):
+        return default
+    return float(numeric)
+
+
+def _safe_datetime_from_iso(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _safe_date_from_yyyy_mm_dd(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _extract_sim_id_from_filename(filename):
+    name = str(filename or "")
+    if not name.endswith(".npz"):
+        return None, None
+    stem = name[:-4]
+    if stem.startswith("sim_v2_"):
+        return stem[len("sim_v2_") :], ENGINE_THERMO_KINETIC_V2
+    if stem.startswith("sim_"):
+        return stem[len("sim_") :], ENGINE_EMPIRICAL_V1
+    return None, None
+
+
+def _timestamp_from_sim_id(sim_id):
+    token = str(sim_id or "").split("_", 1)[0]
+    if len(token) != 14 or not token.isdigit():
+        return None
+    try:
+        dt = datetime.strptime(token, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return float(dt.timestamp())
+
+
+def _timestamp_from_created_at(value):
+    numeric = _safe_float(value, default=None)
+    if numeric is not None:
+        return numeric
+
+    dt = _safe_datetime_from_iso(value)
+    if dt is None:
+        return None
+    return float(dt.timestamp())
+
+
+def _to_created_at_display(created_at_raw, sort_ts):
+    if created_at_raw:
+        return str(created_at_raw).replace("T", " ")
+    if sort_ts is None:
+        return "--"
+    return datetime.fromtimestamp(float(sort_ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _extract_mold_temp_c(sim_payload):
+    payload = sim_payload or {}
+    for key in ("mold_temp_c", "mold_temperature_c", "temp_molde_c"):
+        numeric = _safe_float(payload.get(key), default=None)
+        if numeric is not None:
+            return numeric
+
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    for key in ("mold_temp_c", "temperature_max_c"):
+        numeric = _safe_float(metrics.get(key), default=None)
+        if numeric is not None:
+            return numeric
+    return None
+
+
+def _load_simulation_normalized_with_fallback(sim_id, engine_hint=None):
+    engine_hint = _normalize_engine(engine_hint)
+    if engine_hint == ENGINE_THERMO_KINETIC_V2:
+        load_sequence = (
+            (ENGINE_THERMO_KINETIC_V2, load_simulation_v2_normalized),
+            (ENGINE_EMPIRICAL_V1, load_simulation_v1_normalized),
+        )
+    else:
+        load_sequence = (
+            (ENGINE_EMPIRICAL_V1, load_simulation_v1_normalized),
+            (ENGINE_THERMO_KINETIC_V2, load_simulation_v2_normalized),
+        )
+
+    for engine_key, loader in load_sequence:
+        try:
+            simulation = loader(sim_id)
+        except Exception:
+            simulation = None
+        if simulation:
+            return simulation, engine_key
+
+    try:
+        simulation_raw, engine_used = _load_simulation_with_engine(sim_id, engine_hint=engine_hint)
+    except Exception:
+        return None, None
+    if not simulation_raw:
+        return None, None
+
+    engine_final = engine_used or ENGINE_EMPIRICAL_V1
+    try:
+        simulation_norm = normalize_simulation_output(simulation_raw, engine=engine_final)
+    except Exception:
+        return None, None
+    return simulation_norm, engine_final
+
+
+def list_simulations_by_fit(fit_id):
+    fit_id_target = str(fit_id or "").strip()
+    if not fit_id_target:
+        return []
+
+    out_dir = _REOMETRIA_OUT_DIR
+    if (not out_dir.exists()) or (not out_dir.is_dir()):
+        return []
+
+    try:
+        files = sorted(out_dir.glob("sim*.npz"))
+    except Exception:
+        return []
+
+    results = []
+    seen_sim_ids = set()
+    for file_path in files:
+        sim_id, engine_hint = _extract_sim_id_from_filename(file_path.name)
+        if not sim_id or sim_id in seen_sim_ids:
+            continue
+        seen_sim_ids.add(sim_id)
+
+        try:
+            simulation, engine_used = _load_simulation_normalized_with_fallback(sim_id, engine_hint=engine_hint)
+        except Exception:
+            simulation, engine_used = None, None
+        if not simulation:
+            continue
+
+        sim_fit_id = str(simulation.get("fit_id") or "").strip()
+        if sim_fit_id != fit_id_target:
+            continue
+
+        engine_key = _normalize_engine(simulation.get("engine") or engine_used or engine_hint)
+        engine_status = str(simulation.get("engine_status") or get_engine_status(engine_key))
+        mode = str(simulation.get("mode") or "--")
+        status = str(simulation.get("status") or "concluida")
+        mold_temp_c = _extract_mold_temp_c(simulation)
+
+        created_at_raw = simulation.get("created_at")
+        sort_ts = _timestamp_from_created_at(created_at_raw)
+        if sort_ts is None:
+            sort_ts = _timestamp_from_sim_id(sim_id)
+        if sort_ts is None:
+            try:
+                sort_ts = float(file_path.stat().st_mtime)
+            except Exception:
+                sort_ts = 0.0
+
+        results.append(
+            {
+                "sim_id": sim_id,
+                "fit_id": sim_fit_id,
+                "engine": engine_key,
+                "engine_status": engine_status,
+                "mode": mode,
+                "mold_temp_c": mold_temp_c,
+                "status": status,
+                "created_at": created_at_raw,
+                "created_at_display": _to_created_at_display(created_at_raw, sort_ts),
+                "_sort_ts": float(sort_ts or 0.0),
+            }
+        )
+
+    results.sort(key=lambda item: float(item.get("_sort_ts") or 0.0), reverse=True)
+    for item in results:
+        item.pop("_sort_ts", None)
+    return results
+
+
+def list_fit_reports(date_start=None, date_end=None, q=None, limit=300):
+    out_dir = _REOMETRIA_OUT_DIR
+    if (not out_dir.exists()) or (not out_dir.is_dir()):
+        return []
+
+    try:
+        files = list(out_dir.glob("fit_*.json"))
+    except Exception:
+        return []
+
+    start_date = _safe_date_from_yyyy_mm_dd(date_start)
+    end_date = _safe_date_from_yyyy_mm_dd(date_end)
+    q_norm = str(q or "").strip().lower()
+
+    items = []
+    for file_path in files:
+        try:
+            with file_path.open("r", encoding="utf-8") as fp:
+                payload = json.load(fp)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        fit_id = str(payload.get("fit_id") or "").strip()
+        if not fit_id:
+            fit_id = file_path.stem.replace("fit_", "", 1)
+        if not fit_id:
+            continue
+
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        titulo = str(metadata.get("titulo") or "").strip()
+        observacoes = str(metadata.get("observacoes") or "").strip()
+        inicio_producao_raw = str(
+            metadata.get("inicio_producao")
+            or metadata.get("inicio_producao_datahora")
+            or ""
+        ).strip()
+        created_at_raw = payload.get("created_at")
+        created_dt = _safe_datetime_from_iso(created_at_raw)
+        if created_dt is None:
+            try:
+                created_dt = datetime.fromtimestamp(float(file_path.stat().st_mtime), tz=timezone.utc)
+            except Exception:
+                created_dt = datetime.fromtimestamp(0.0, tz=timezone.utc)
+
+        created_date = created_dt.date()
+        if start_date and created_date < start_date:
+            continue
+        if end_date and created_date > end_date:
+            continue
+
+        if q_norm:
+            searchable = " ".join(
+                [
+                    fit_id,
+                    titulo,
+                    observacoes,
+                    inicio_producao_raw,
+                    str(payload.get("message") or ""),
+                    " ".join(str((e or {}).get("COD_ENSAIO", "")) for e in (payload.get("ensaios") or [])),
+                ]
+            ).lower()
+            if q_norm not in searchable:
+                continue
+
+        rmse_value = _safe_float(payload.get("rmse_alpha"), default=None)
+        ensaios_count = len(payload.get("ensaios") or [])
+        success = bool(payload.get("success"))
+        status = "OK" if success else "Falhou"
+        created_at_display = created_at_raw if created_at_raw else created_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        items.append(
+            {
+                "fit_id": fit_id,
+                "titulo": titulo,
+                "observacoes": observacoes,
+                "inicio_producao": inicio_producao_raw,
+                "created_at": created_at_raw,
+                "created_at_display": created_at_display,
+                "rmse_alpha": rmse_value,
+                "status": status,
+                "success": success,
+                "ensaios_count": ensaios_count,
+                "_sort_ts": float(created_dt.timestamp()),
+            }
+        )
+
+    items.sort(key=lambda item: float(item.get("_sort_ts") or 0.0), reverse=True)
+    if limit and int(limit) > 0:
+        items = items[: int(limit)]
+    for item in items:
+        item.pop("_sort_ts", None)
+    return items
 
 
 def _mm_to_cells(length_mm, dx):
@@ -322,8 +629,24 @@ def reometria_fit():
         "date_end": request.args.get("date_end", ""),
         "q": request.args.get("q", ""),
     }
+    fit_filters = {
+        "fit_date_start": request.args.get("fit_date_start", ""),
+        "fit_date_end": request.args.get("fit_date_end", ""),
+        "fit_q": request.args.get("fit_q", ""),
+    }
     ensaios = list_ensaios_for_fit(filters["date_start"] or None, filters["date_end"] or None, filters["q"] or None)
-    return render_template("reometria/fit.html", ensaios=ensaios, filters=filters)
+    fits_history = list_fit_reports(
+        date_start=fit_filters["fit_date_start"] or None,
+        date_end=fit_filters["fit_date_end"] or None,
+        q=fit_filters["fit_q"] or None,
+    )
+    return render_template(
+        "reometria/fit.html",
+        ensaios=ensaios,
+        filters=filters,
+        fit_filters=fit_filters,
+        fits_history=fits_history,
+    )
 
 
 @reometria_bp.route("/reometria/fit/preview/<int:cod_ensaio>")
@@ -360,7 +683,13 @@ def reometria_fit_result(fit_id):
         flash("Resultado de fit nao encontrado.", "danger")
         return redirect(url_for("reometria.reometria_fit"))
     alpha_time_comparison = build_alpha_time_comparison(payload)
-    return render_template("reometria/fit_result.html", payload=payload, alpha_time_comparison=alpha_time_comparison)
+    simulacoes_executadas = list_simulations_by_fit(fit_id)
+    return render_template(
+        "reometria/fit_result.html",
+        payload=payload,
+        alpha_time_comparison=alpha_time_comparison,
+        simulacoes_executadas=simulacoes_executadas,
+    )
 
 
 @reometria_bp.route("/reometria/fit/update/<fit_id>", methods=["POST"])
@@ -391,6 +720,51 @@ def reometria_fit_update(fit_id):
             "n": float(payload.get("n", 0.0)),
         }
     )
+
+
+@reometria_bp.route("/reometria/fit/update_meta/<fit_id>", methods=["POST"])
+@login_required
+def reometria_fit_update_meta(fit_id):
+    try:
+        data = request.get_json(silent=False)
+    except (BadRequest, UnsupportedMediaType):
+        return jsonify({"success": False, "message": "Body JSON invalido."}), 400
+
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "Body JSON invalido."}), 400
+
+    payload = load_fit_payload(fit_id)
+    if not payload:
+        return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
+
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    titulo = str(data.get("titulo") or "").strip()
+    observacoes = str(data.get("observacoes") or "").strip()
+    inicio_producao = str(
+        data.get("inicio_producao")
+        or data.get("inicio_producao_datahora")
+        or ""
+    ).strip()
+    if inicio_producao:
+        inicio_dt = _safe_datetime_from_iso(inicio_producao)
+        if inicio_dt is None:
+            return jsonify({"success": False, "message": "Data/hora de inicio da producao invalida."}), 400
+        inicio_producao = inicio_dt.isoformat()
+
+    metadata["titulo"] = titulo
+    metadata["observacoes"] = observacoes
+    metadata["inicio_producao"] = inicio_producao
+    payload["metadata"] = metadata
+
+    try:
+        save_fit_payload(payload)
+    except Exception:
+        return jsonify({"success": False, "message": "Falha ao salvar metadados."}), 500
+
+    return jsonify({"success": True, "message": "Metadados atualizados"})
 
 
 @reometria_bp.route("/reometria/simulate/<fit_id>")
