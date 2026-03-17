@@ -53,8 +53,8 @@ MODEL_EXPRESSIONS = {
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1: "alpha = (k(T) * t^n) / (1 + k(T) * t^n)",
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1: "alpha = (k_ref * t_eq(t)^n) / (1 + k_ref * t_eq(t)^n)",
     MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1: (
-        "dalpha/dt = (k1 + k2*alpha^m) * (1-alpha)^n; "
-        "S(t)=ML + (MH-ML)*alpha + k_march*t - k_rev*(1-exp(-beta_rev*t))"
+        "dalpha/dt = (k1 + k2*alpha^m) * (1-alpha)^n with t_eff=max(0,t-t_ind(T)); "
+        "S(t)=ML + (MH-ML)*alpha + k_march*alpha*t - k_rev*(1-exp(-beta_rev*max(0,t-t_rev)))"
     ),
     MODEL_FAMILY_LEROY2013_CONTINUOUS_V1: (
         "d(alpha_v)/dt=(Av1+Av2*alpha_v)*exp(-Ev/(R*T))*(1-alpha_v)^2; "
@@ -607,12 +607,16 @@ def _normalize_fit_payload_model(payload):
         payload.pop("k_march", None)
         payload.pop("k_rev", None)
         payload.pop("beta_rev", None)
+        payload.pop("t_rev", None)
+        payload.pop("A_ind", None)
+        payload.pop("E_ind", None)
+        payload.pop("t_ind", None)
         if not payload.get("calibration_strategy"):
             payload["calibration_strategy"] = "hierarchical_v1"
         if not payload.get("calibration_stage_selected"):
             payload["calibration_stage_selected"] = "stage1"
     elif family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
-        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev", "t_rev", "A_ind", "E_ind", "t_ind"):
             payload[key] = float(params.get(key, 0.0))
         payload["k_ref"] = float(params.get("k_ref", params.get("k1", 0.0)))
         payload["k0"] = float(params.get("k0", params.get("k1", 0.0)))
@@ -943,7 +947,7 @@ def update_fit_parameters(fit_id, k_value=None, ea=None, n=None, parameter_updat
         payload = update_model_parameters(payload, parameter_updates=updates)
     elif family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
         updates = {}
-        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev", "t_rev", "A_ind", "E_ind", "t_ind"):
             numeric = _safe_float((parameter_updates or {}).get(key), default=None)
             if numeric is not None:
                 updates[key] = float(numeric)

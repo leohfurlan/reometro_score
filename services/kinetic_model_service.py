@@ -60,7 +60,11 @@ KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS = {
     "n": (0.5, 3.0),
     "k_march": (0.0, 0.5),
     "k_rev": (0.0, 0.5),
-    "beta_rev": (1e-6, 0.5),
+    "beta_rev": (0.0, 1.0),
+    "t_rev": (0.0, 7200.0),
+    "A_ind": (0.0, 1e20),
+    "E_ind": (0.0, 2.5e5),
+    "t_ind": (0.0, 7200.0),
 }
 
 CURE_COMPLETION_RULE_ALPHA_099 = "alpha_practical_0_99"
@@ -75,6 +79,8 @@ DEFAULT_CURE_COMPLETION_RULE = CURE_COMPLETION_RULE_ALPHA_099
 
 ALPHA_METRIC_TARGETS_DEFAULT = (0.10, 0.30, 0.50, 0.90, 0.95, 0.99)
 PARAM_DECIMALS = 2
+KAMAL_OBJECTIVE_WEIGHT_SCORCH = 0.02
+KAMAL_OBJECTIVE_WEIGHT_T90 = 0.01
 
 
 def _safe_float(value, default=None):
@@ -324,6 +330,10 @@ def _kamal_sourour_param_defaults():
         "k_march": 0.0,
         "k_rev": 0.0,
         "beta_rev": 0.01,
+        "t_rev": 240.0,
+        "A_ind": 0.0,
+        "E_ind": 0.0,
+        "t_ind": 0.0,
     }
 
 
@@ -360,12 +370,30 @@ class KamalSourourExpandedEngine:
     Expanded Kamal-Sourour cure model for rheometry curves.
 
     Equations:
-    - d(alpha)/dt = a_T(T) * (k1 + k2 * alpha^m) * (1 - alpha)^n
-    - S(t) = ML + (MH - ML) * alpha(t) + (k_march * t) - R(t)
-    - R(t) = k_rev * (1 - exp(-beta_rev * t))
+    - d(alpha)/dt = a_T(T) * (k1 + k2 * alpha^m) * (1 - alpha)^n, with t_eff=max(0, t-t_ind(T))
+    - S(t) = ML + (MH - ML) * alpha(t) + (k_march * alpha(t) * t) - R(t)
+    - R(t) = k_rev * (1 - exp(-beta_rev * max(0, t - t_rev)))
 
     where a_T(T) is the Arrhenius factor relative to reference temperature.
     """
+
+    @staticmethod
+    def induction_time_s(temp_k: float, params: Dict[str, float]) -> float:
+        p = _kamal_sourour_sanitize_params(params)
+        temp_safe = float(max(_safe_float(temp_k, default=298.15), 1.0))
+
+        t_ind_direct = float(max(_safe_float(p.get("t_ind"), default=0.0) or 0.0, 0.0))
+        a_ind = float(max(_safe_float(p.get("A_ind"), default=0.0) or 0.0, 0.0))
+        e_ind = float(max(_safe_float(p.get("E_ind"), default=0.0) or 0.0, 0.0))
+
+        if a_ind <= 0.0:
+            return t_ind_direct
+
+        exponent = float(np.clip(e_ind / (R_GAS * temp_safe), -700.0, 700.0))
+        t_arrhenius = float(np.exp(exponent) / max(a_ind, 1e-300))
+        if not np.isfinite(t_arrhenius):
+            return t_ind_direct
+        return float(max(t_arrhenius, t_ind_direct, 0.0))
 
     @staticmethod
     def _rate(alpha: float, temp_k: float, params: Dict[str, float], reference_temperature_k: float) -> float:
@@ -433,32 +461,62 @@ class KamalSourourExpandedEngine:
         if time_unique.size <= 1:
             alpha_unique = np.asarray([0.0], dtype=float)
         else:
+            t_ind = KamalSourourExpandedEngine.induction_time_s(float(temp_unique[0]), p)
+            t_ind = float(max(t_ind, 0.0))
+            active_start = int(np.searchsorted(time_unique, t_ind, side="left"))
+            alpha_unique = np.zeros_like(time_unique, dtype=float)
 
-            def _rhs(alpha_state, t_scalar):
-                alpha_val = float(np.asarray(alpha_state, dtype=float).reshape(-1)[0])
-                temp_val = float(np.interp(float(t_scalar), time_unique, temp_unique))
-                return KamalSourourExpandedEngine._rate(alpha_val, temp_val, p, ref_k)
+            if active_start >= time_unique.size:
+                alpha_unique = np.zeros_like(time_unique, dtype=float)
+            else:
+                time_active = np.asarray(time_unique[active_start:], dtype=float)
+                temp_active = np.asarray(temp_unique[active_start:], dtype=float)
+                time_eff = np.maximum(time_active - t_ind, 0.0)
 
-            try:
-                alpha_unique = np.asarray(
-                    odeint(
-                        _rhs,
-                        np.asarray([0.0], dtype=float),
-                        np.asarray(time_unique, dtype=float),
-                        hmax=float(max(np.max(np.diff(time_unique)), 1e-3)),
-                        mxstep=6000,
-                    ),
-                    dtype=float,
-                ).reshape(-1)
-                if alpha_unique.size != time_unique.size or not np.isfinite(alpha_unique).all():
-                    raise ValueError("odeint returned non-finite Kamal-Sourour trajectory")
-            except Exception:
-                alpha_unique = KamalSourourExpandedEngine._integrate_fallback(
-                    time_unique,
-                    temp_unique,
-                    p,
-                    ref_k,
-                )
+                prepend_zero = bool(time_eff.size and float(time_eff[0]) > 1e-12)
+                if prepend_zero:
+                    time_eff_ode = np.concatenate(([0.0], time_eff))
+                    temp_eff_ode = np.concatenate(([float(temp_active[0])], temp_active))
+                else:
+                    time_eff_ode = time_eff
+                    temp_eff_ode = temp_active
+
+                if time_eff_ode.size <= 1:
+                    alpha_active = np.zeros_like(time_active, dtype=float)
+                else:
+
+                    def _rhs(alpha_state, t_scalar):
+                        alpha_val = float(np.asarray(alpha_state, dtype=float).reshape(-1)[0])
+                        temp_val = float(np.interp(float(t_scalar), time_eff_ode, temp_eff_ode))
+                        return KamalSourourExpandedEngine._rate(alpha_val, temp_val, p, ref_k)
+
+                    try:
+                        alpha_ode = np.asarray(
+                            odeint(
+                                _rhs,
+                                np.asarray([0.0], dtype=float),
+                                np.asarray(time_eff_ode, dtype=float),
+                                hmax=float(max(np.max(np.diff(time_eff_ode)), 1e-3)),
+                                mxstep=6000,
+                            ),
+                            dtype=float,
+                        ).reshape(-1)
+                        if alpha_ode.size != time_eff_ode.size or not np.isfinite(alpha_ode).all():
+                            raise ValueError("odeint returned non-finite Kamal-Sourour trajectory")
+                    except Exception:
+                        alpha_ode = KamalSourourExpandedEngine._integrate_fallback(
+                            np.asarray(time_eff_ode, dtype=float),
+                            np.asarray(temp_eff_ode, dtype=float),
+                            p,
+                            ref_k,
+                        )
+
+                    if prepend_zero and alpha_ode.size:
+                        alpha_active = np.asarray(alpha_ode[1:], dtype=float)
+                    else:
+                        alpha_active = np.asarray(alpha_ode, dtype=float)
+
+                alpha_unique[active_start:] = np.asarray(alpha_active, dtype=float)
 
         alpha_unique = np.maximum.accumulate(np.clip(alpha_unique, 0.0, 1.0))
         alpha = np.interp(time, time_unique, alpha_unique)
@@ -482,8 +540,16 @@ class KamalSourourExpandedEngine:
         alpha_vec = alpha_vec[:size]
 
         baseline = float(m_min) + (alpha_vec * (float(m_max) - float(m_min)))
-        march = float(p["k_march"]) * time
-        reversion = float(p["k_rev"]) * (1.0 - np.exp(-float(p["beta_rev"]) * time))
+        march = float(p["k_march"]) * alpha_vec * time
+
+        t_rev = float(max(_safe_float(p.get("t_rev"), default=0.0) or 0.0, 0.0))
+        time_after_rev = np.maximum(time - t_rev, 0.0)
+        beta_rev = float(max(_safe_float(p.get("beta_rev"), default=0.0) or 0.0, 0.0))
+        if float(p["k_rev"]) <= 0.0 or beta_rev <= 0.0:
+            reversion = np.zeros_like(time_after_rev, dtype=float)
+        else:
+            exp_term = np.exp(np.clip(-beta_rev * time_after_rev, -700.0, 0.0))
+            reversion = float(p["k_rev"]) * (1.0 - exp_term)
         return baseline + march - reversion
 
 
@@ -1076,6 +1142,135 @@ def _kamal_guess_reversion(curves_data):
     if not drops:
         return 0.0
     return float(np.clip(np.median(np.asarray(drops, dtype=float)), 0.0, KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][1]))
+
+
+def _kamal_guess_reversion_onset(curves_data):
+    onsets = []
+    for curve in curves_data:
+        markers = dict(curve.get("markers") or {})
+        regions = dict(markers.get("regions") or {})
+        onset_marker = _safe_float((regions.get("possible_reversion") or {}).get("start_s"), default=None)
+        if onset_marker is not None and onset_marker >= 0.0:
+            onsets.append(float(onset_marker))
+            continue
+
+        torque = np.asarray(curve.get("torque_real"), dtype=float)
+        time = np.asarray(curve.get("time_s"), dtype=float)
+        size = min(torque.size, time.size)
+        if size < 8:
+            continue
+
+        torque_i = torque[:size]
+        time_i = time[:size]
+        tail_size = int(np.clip(round(size * 0.15), 5, max(size, 5)))
+        tail_mean = float(np.mean(torque_i[-tail_size:]))
+        drop = float(np.max(torque_i) - tail_mean)
+        if drop <= 0.02:
+            continue
+        peak_idx = int(np.argmax(torque_i))
+        onsets.append(float(time_i[peak_idx]))
+
+    if not onsets:
+        return 0.0
+    return float(np.clip(np.median(np.asarray(onsets, dtype=float)), 0.0, KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["t_rev"][1]))
+
+
+def _kamal_curve_scorch_time_s(curve_data):
+    markers = dict(curve_data.get("markers") or {})
+    scorch = _safe_float(markers.get("scorch_time_s"), default=None)
+    if scorch is not None and scorch >= 0.0:
+        return float(scorch)
+
+    time = np.asarray(curve_data.get("time_s"), dtype=float)
+    alpha = np.asarray(curve_data.get("alpha_real"), dtype=float)
+    size = min(time.size, alpha.size)
+    if size < 2:
+        return None
+
+    time = np.asarray(time[:size], dtype=float)
+    alpha = np.clip(np.asarray(alpha[:size], dtype=float), 0.0, 1.0)
+    scorch = first_crossing_time(time, alpha, 0.02)
+    if scorch is None:
+        scorch = crossing_or_nearest_time(time, alpha, 0.02)
+    if scorch is None:
+        return None
+    return float(max(float(scorch), 0.0))
+
+
+def _kamal_arrhenius_induction_time_s(temp_k, a_ind, e_ind):
+    temp_safe = float(max(_safe_float(temp_k, default=298.15) or 298.15, 1.0))
+    a_safe = float(max(_safe_float(a_ind, default=0.0) or 0.0, 0.0))
+    e_safe = float(max(_safe_float(e_ind, default=0.0) or 0.0, 0.0))
+    if a_safe <= 0.0:
+        return None
+
+    exponent = float(np.clip(e_safe / (R_GAS * temp_safe), -700.0, 700.0))
+    t_ind = float(np.exp(exponent) / max(a_safe, 1e-300))
+    if not np.isfinite(t_ind):
+        return None
+    return float(max(t_ind, 0.0))
+
+
+def _kamal_fit_induction_arrhenius(curves_data):
+    samples_temp = []
+    samples_t_ind = []
+    curve_scorch = []
+
+    for curve in curves_data:
+        scorch_s = _kamal_curve_scorch_time_s(curve)
+        curve_scorch.append(scorch_s)
+
+        if scorch_s is None or scorch_s <= 0.0:
+            continue
+        temp = np.asarray(curve.get("temperature_k"), dtype=float)
+        if temp.size == 0:
+            continue
+        temp_ref = float(max(np.median(temp), 1.0))
+        samples_temp.append(temp_ref)
+        samples_t_ind.append(float(max(scorch_s, 1e-6)))
+
+    a_ind = 0.0
+    e_ind = 0.0
+    if len(samples_temp) >= 2 and float(np.ptp(np.asarray(samples_temp, dtype=float))) >= 2.0:
+        x = 1.0 / np.maximum(np.asarray(samples_temp, dtype=float), 1.0)
+        y = np.log(np.maximum(np.asarray(samples_t_ind, dtype=float), 1e-12))
+        slope, intercept = np.polyfit(x, y, deg=1)
+        if np.isfinite(float(slope)) and np.isfinite(float(intercept)):
+            e_ind = float(max(float(slope) * R_GAS, 0.0))
+            a_candidate = float(np.exp(np.clip(-float(intercept), -700.0, 700.0)))
+            if np.isfinite(a_candidate) and a_candidate > 0.0:
+                a_ind = a_candidate
+
+    curve_t_ind = []
+    for idx, curve in enumerate(curves_data):
+        temp = np.asarray(curve.get("temperature_k"), dtype=float)
+        temp_ref = float(max(np.median(temp), 1.0)) if temp.size else 298.15
+        t_ind = _kamal_arrhenius_induction_time_s(temp_ref, a_ind, e_ind)
+        if t_ind is None:
+            t_ind = _safe_float(curve_scorch[idx], default=0.0)
+        curve_t_ind.append(float(max(_safe_float(t_ind, default=0.0) or 0.0, 0.0)))
+
+    return {
+        "A_ind": float(max(a_ind, 0.0)),
+        "E_ind": float(max(e_ind, 0.0)),
+        "curve_t_ind_s": curve_t_ind,
+        "sample_count": int(len(samples_temp)),
+    }
+
+
+def _kamal_alpha_mask_upto_peak(size, torque_real):
+    size_int = int(max(size, 0))
+    if size_int <= 0:
+        return np.asarray([], dtype=bool)
+
+    torque = np.asarray(torque_real, dtype=float)
+    torque_size = min(size_int, torque.size)
+    if torque_size <= 0:
+        return np.ones((size_int,), dtype=bool)
+
+    peak_idx = int(np.argmax(torque[:torque_size]))
+    idx = np.arange(size_int, dtype=int)
+    return idx <= peak_idx
 
 
 def _prepare_training_curves(curves):
@@ -1672,7 +1867,22 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
         k2_guess = max(k1_guess * 1.8, 1e-12)
         k_march_guess = _kamal_guess_tail_slope(curves_data)
         k_rev_guess = _kamal_guess_reversion(curves_data)
-        beta_rev_fixed = _kamal_sourour_param_defaults()["beta_rev"]
+        beta_rev_guess = _kamal_sourour_param_defaults()["beta_rev"]
+        induction_fit = _kamal_fit_induction_arrhenius(curves_data)
+        a_ind_guess = float(induction_fit.get("A_ind", 0.0))
+        e_ind_guess = float(induction_fit.get("E_ind", 0.0))
+        curve_t_ind = [float(max(v, 0.0)) for v in (induction_fit.get("curve_t_ind_s") or [])]
+        t_rev_guess = _kamal_guess_reversion_onset(curves_data)
+        if curve_t_ind:
+            t_rev_guess = max(float(t_rev_guess), float(np.percentile(np.asarray(curve_t_ind, dtype=float), 50)))
+
+        t_rev_lb = float(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["t_rev"][0])
+        if curve_t_ind:
+            t_rev_lb = max(t_rev_lb, float(np.percentile(np.asarray(curve_t_ind, dtype=float), 25)) + 1e-6)
+        t_rev_ub = float(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["t_rev"][1])
+        if t_rev_lb >= t_rev_ub:
+            t_rev_lb = float(max(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["t_rev"][0], t_rev_ub - 1.0))
+        t_rev_guess = float(np.clip(t_rev_guess, t_rev_lb, t_rev_ub))
 
         p0 = np.asarray(
             [
@@ -1683,6 +1893,8 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                 n0,
                 k_march_guess,
                 k_rev_guess,
+                beta_rev_guess,
+                t_rev_guess,
             ],
             dtype=float,
         )
@@ -1695,6 +1907,8 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["n"][0],
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_march"][0],
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][0],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["beta_rev"][0],
+                t_rev_lb,
             ],
             dtype=float,
         )
@@ -1707,6 +1921,8 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["n"][1],
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_march"][1],
                 KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][1],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["beta_rev"][1],
+                t_rev_ub,
             ],
             dtype=float,
         )
@@ -1720,19 +1936,44 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                 "n": float(p_vec[4]),
                 "k_march": float(p_vec[5]),
                 "k_rev": float(p_vec[6]),
-                "beta_rev": float(beta_rev_fixed),
+                "beta_rev": float(p_vec[7]),
+                "t_rev": float(p_vec[8]),
+                "A_ind": float(a_ind_guess),
+                "E_ind": float(e_ind_guess),
             }
             return _kamal_sourour_sanitize_params(raw)
+
+        def _curve_ts2_real(time_seg, alpha_real_seg, curve):
+            markers = dict(curve.get("markers") or {})
+            ts2_real = _safe_float(markers.get("scorch_time_s"), default=None)
+            if ts2_real is None:
+                ts2_real = first_crossing_time(time_seg, alpha_real_seg, 0.02)
+            if ts2_real is None:
+                ts2_real = crossing_or_nearest_time(time_seg, alpha_real_seg, 0.02)
+            return _safe_float(ts2_real, default=None)
+
+        def _curve_t90_real(time_seg, alpha_real_seg, curve):
+            markers = dict(curve.get("markers") or {})
+            t90_real = _safe_float(markers.get("T90_s"), default=None)
+            if t90_real is None:
+                t90_real = first_crossing_time(time_seg, alpha_real_seg, 0.90)
+            if t90_real is None:
+                t90_real = crossing_or_nearest_time(time_seg, alpha_real_seg, 0.90)
+            return _safe_float(t90_real, default=None)
 
         def residuals_kamal(p_vec):
             params = _compose_params(p_vec)
             blocks = []
-            for curve in curves_data:
+            for idx, curve in enumerate(curves_data):
+                curve_params = dict(params)
+                if idx < len(curve_t_ind):
+                    curve_params["t_ind"] = float(max(curve_t_ind[idx], 0.0))
+
                 pred_alpha = np.asarray(
                     predict_alpha(
                         time_s=curve["time_s"],
                         temperature_k=curve["temperature_k"],
-                        params=params,
+                        params=curve_params,
                         model_family=family,
                         reference_temperature_k=reference_temperature_k,
                     ),
@@ -1743,10 +1984,13 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                 if size <= 0:
                     continue
 
-                alpha_res = pred_alpha[:size] - real_alpha[:size]
-                blocks.append(alpha_res)
-
                 torque_real = np.asarray(curve.get("torque_real"), dtype=float)
+                alpha_mask = _kamal_alpha_mask_upto_peak(size, torque_real)
+                if alpha_mask.size and bool(np.any(alpha_mask)):
+                    alpha_res = pred_alpha[:size][alpha_mask] - real_alpha[:size][alpha_mask]
+                    if alpha_res.size:
+                        blocks.append(alpha_res)
+
                 ml = _safe_float(curve.get("ML"), default=None)
                 mh = _safe_float(curve.get("MH"), default=None)
                 torque_size = min(size, torque_real.size)
@@ -1757,13 +2001,42 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                         time_s=time_seg,
                         m_min=ml,
                         m_max=mh,
-                        params=params,
+                        params=curve_params,
                     )
                     torque_err = np.asarray(torque_model, dtype=float) - torque_real[:torque_size]
                     span = max(abs(float(mh) - float(ml)), 1e-6)
                     tail_den = max(float(time_seg[-1]) if time_seg.size else 0.0, 1e-6)
                     tail_weight = 1.0 + (0.75 * (time_seg / tail_den))
                     blocks.append(0.8 * ((torque_err / span) * tail_weight))
+
+                    ts2_real = _curve_ts2_real(time_seg, real_alpha[:torque_size], curve)
+                    ts2_model = crossing_or_nearest_time(time_seg, pred_alpha[:torque_size], 0.02)
+                    if ts2_real is not None and ts2_model is not None:
+                        ts2_err = float(ts2_model - ts2_real)
+                        blocks.append(
+                            np.asarray(
+                                [math.sqrt(KAMAL_OBJECTIVE_WEIGHT_SCORCH) * ts2_err],
+                                dtype=float,
+                            )
+                        )
+
+                    t90_real = _curve_t90_real(time_seg, real_alpha[:torque_size], curve)
+                    t90_model = crossing_or_nearest_time(time_seg, pred_alpha[:torque_size], 0.90)
+                    if t90_real is not None and t90_model is not None:
+                        t90_err = float(t90_model - t90_real)
+                        blocks.append(
+                            np.asarray(
+                                [math.sqrt(KAMAL_OBJECTIVE_WEIGHT_T90) * t90_err],
+                                dtype=float,
+                            )
+                        )
+
+                    if idx < len(curve_t_ind):
+                        t_ind_curve = float(max(curve_t_ind[idx], 0.0))
+                        t_rev_val = float(max(params.get("t_rev", 0.0), 0.0))
+                        if t_rev_val <= t_ind_curve:
+                            t_rev_violation = (t_ind_curve - t_rev_val) + 1e-6
+                            blocks.append(np.asarray([0.5 * t_rev_violation], dtype=float))
 
             if not blocks:
                 return np.asarray([], dtype=float)
@@ -1780,12 +2053,16 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
 
         alpha_residuals = []
         torque_residuals = []
-        for curve in curves_data:
+        for idx, curve in enumerate(curves_data):
+            curve_params = dict(params_opt)
+            if idx < len(curve_t_ind):
+                curve_params["t_ind"] = float(max(curve_t_ind[idx], 0.0))
+
             pred_alpha = np.asarray(
                 predict_alpha(
                     time_s=curve["time_s"],
                     temperature_k=curve["temperature_k"],
-                    params=params_opt,
+                    params=curve_params,
                     model_family=family,
                     reference_temperature_k=reference_temperature_k,
                 ),
@@ -1795,9 +2072,12 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
             size = min(pred_alpha.size, real_alpha.size, curve["time_s"].size)
             if size <= 0:
                 continue
-            alpha_residuals.append(pred_alpha[:size] - real_alpha[:size])
 
             torque_real = np.asarray(curve.get("torque_real"), dtype=float)
+            alpha_mask = _kamal_alpha_mask_upto_peak(size, torque_real)
+            if alpha_mask.size and bool(np.any(alpha_mask)):
+                alpha_residuals.append(pred_alpha[:size][alpha_mask] - real_alpha[:size][alpha_mask])
+
             ml = _safe_float(curve.get("ML"), default=None)
             mh = _safe_float(curve.get("MH"), default=None)
             torque_size = min(size, torque_real.size)
@@ -1807,7 +2087,7 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
                     time_s=curve["time_s"][:torque_size],
                     m_min=ml,
                     m_max=mh,
-                    params=params_opt,
+                    params=curve_params,
                 )
                 torque_residuals.append(np.asarray(torque_model, dtype=float) - torque_real[:torque_size])
 
@@ -1834,6 +2114,9 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
             "k_march": float(params_opt["k_march"]),
             "k_rev": float(params_opt["k_rev"]),
             "beta_rev": float(params_opt["beta_rev"]),
+            "t_rev": float(params_opt["t_rev"]),
+            "A_ind": float(params_opt["A_ind"]),
+            "E_ind": float(params_opt["E_ind"]),
             "rmse_alpha": rmse_alpha,
             "rmse_torque": rmse_torque,
             "nfev": int(result.nfev),
@@ -1981,6 +2264,8 @@ def _fit_stability_penalty(fit_result):
         k1 = _safe_float(params.get("k1", params.get("k_ref", params.get("k0"))), default=None)
         k2 = _safe_float(params.get("k2"), default=None)
         k_march = _safe_float(params.get("k_march"), default=None)
+        beta_rev = _safe_float(params.get("beta_rev"), default=None)
+        t_rev = _safe_float(params.get("t_rev"), default=None)
         if (
             ea is None
             or m_val is None
@@ -1990,6 +2275,8 @@ def _fit_stability_penalty(fit_result):
             or k1 <= 0.0
             or k2 <= 0.0
             or k_march is None
+            or beta_rev is None
+            or t_rev is None
         ):
             return float("inf")
 
@@ -1999,6 +2286,8 @@ def _fit_stability_penalty(fit_result):
             ("m", m_val),
             ("n", n_val),
             ("k_march", k_march),
+            ("beta_rev", beta_rev),
+            ("t_rev", t_rev),
         ):
             lo, hi = KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS[key]
             span = max(float(hi - lo), 1e-12)
@@ -2390,7 +2679,7 @@ def extract_model_parameters(payload, model_family=None):
 
     if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
         kamal_raw = {}
-        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev", "t_rev", "A_ind", "E_ind", "t_ind"):
             val = _safe_float(raw.get(key), default=None)
             if val is None:
                 val = _safe_float((payload or {}).get(key), default=None)
@@ -2485,7 +2774,7 @@ def update_model_parameters(payload, *, k_value=None, ea=None, n=None, parameter
                 updates["n"] = n
 
         merged = dict(params)
-        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev", "t_rev", "A_ind", "E_ind", "t_ind"):
             if key in updates:
                 numeric = _safe_float(updates.get(key), default=None)
                 if numeric is not None:

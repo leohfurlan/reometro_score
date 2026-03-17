@@ -147,6 +147,56 @@ def test_kamal_torque_model_applies_marching_and_reversion():
     assert float(torque[-1]) != pytest.approx(float(linear_only[-1]), rel=1e-9, abs=1e-9)
 
 
+def test_kamal_induction_shift_blocks_alpha_before_t_ind():
+    params = {
+        "k1": 0.0025,
+        "k2": 0.0065,
+        "Ea": 76000.0,
+        "m": 1.1,
+        "n": 1.4,
+        "A_ind": 8000.0,
+        "E_ind": 50000.0,
+    }
+    time = np.linspace(0.0, 350.0, 351, dtype=float)
+    temp_k = np.full_like(time, 443.15, dtype=float)
+
+    t_ind = kms.KamalSourourExpandedEngine.induction_time_s(float(temp_k[0]), params)
+    alpha = kms.predict_alpha_nonisothermal(
+        time_s=time,
+        temperature_k=temp_k,
+        params=params,
+        model_family=kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
+        reference_temperature_k=433.15,
+    )
+
+    pre_mask = time < max(t_ind - 1e-6, 0.0)
+    assert t_ind > 0.0
+    assert np.max(alpha[pre_mask]) <= 1e-9
+    assert float(alpha[-1]) > 0.0
+
+
+def test_kamal_torque_uses_t_rev_onset_equation():
+    params = {
+        "k1": 0.002,
+        "k2": 0.006,
+        "Ea": 78000.0,
+        "m": 1.0,
+        "n": 1.3,
+        "k_march": 0.04,
+        "k_rev": 0.20,
+        "beta_rev": 0.05,
+        "t_rev": 120.0,
+    }
+    time = np.linspace(0.0, 220.0, 221, dtype=float)
+    alpha = np.full_like(time, fill_value=0.8, dtype=float)
+    torque = kms.torque_from_alpha_kamal_sourour_expanded(alpha, time, 2.0, 6.0, params)
+
+    base = kms.torque_from_alpha(alpha, 2.0, 6.0)
+    expected = base + (params["k_march"] * alpha * time) - (
+        params["k_rev"] * (1.0 - np.exp(-params["beta_rev"] * np.maximum(time - params["t_rev"], 0.0)))
+    )
+    assert np.allclose(torque, expected, atol=1e-12)
+
 def test_arrhenius_reference_factor_direction_vs_reference_temperature():
     ea = 70000.0
     t_ref = 433.15
