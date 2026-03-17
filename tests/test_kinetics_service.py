@@ -155,3 +155,73 @@ def test_group_curves_uses_robust_ml_mh_and_clamps_alpha():
     assert curve["MH"] > curve["ML"]
     assert np.all(alpha >= 0.0)
     assert np.all(alpha <= 1.0)
+
+
+def test_extract_experimental_markers_includes_regions_and_txx():
+    curve = _mock_curve(777, 170.0, scorch_time_s=12.0)
+    markers_by_curve = ks.extract_experimental_markers([curve])
+    markers = markers_by_curve[curve["COD_ENSAIO"]]
+
+    assert "T10_s" in markers
+    assert "T30_s" in markers
+    assert "T50_s" in markers
+    assert "T90_s" in markers
+    assert "T95_s" in markers
+    assert "T99_s" in markers
+    assert "scorch_time_s" in markers
+    assert "regions" in markers
+    assert "growth" in markers["regions"]
+    assert "possible_reversion" in markers["regions"]
+
+
+def test_run_fit_leroy_persists_hierarchical_metadata_and_states(monkeypatch):
+    curves = [
+        _mock_curve(801, 150.0, scorch_time_s=20.0),
+        _mock_curve(802, 170.0, scorch_time_s=12.0),
+        _mock_curve(803, 185.0, scorch_time_s=8.0),
+    ]
+
+    monkeypatch.setattr(ks, "get_curve_points", lambda _ids: [])
+    monkeypatch.setattr(ks, "_group_curves", lambda _rows: curves)
+    monkeypatch.setattr(
+        ks,
+        "fit_model_parameters",
+        lambda **_kwargs: {
+            "success": True,
+            "message": "leroy fit mocked",
+            "model_family": "leroy2013_continuous_v1",
+            "model_version": "v1",
+            "fit_method": "least_squares",
+            "reference_temperature_K": 433.15,
+            "model_parameters": {
+                "Av1": 0.015,
+                "Av2": 0.045,
+                "Ev": 90000.0,
+                "X": 0.67,
+                "Ar": 0.22,
+                "Er": 140000.0,
+            },
+            "Av1": 0.015,
+            "Av2": 0.045,
+            "Ev": 90000.0,
+            "X": 0.67,
+            "Ar": 0.22,
+            "Er": 140000.0,
+            "rmse_alpha": 0.05,
+            "calibration_strategy": "hierarchical_v1",
+            "calibration_stage_selected": "stage1",
+            "seed_statistics": {"Av1_median": 0.014, "Av2_median": 0.042, "X_median": 0.66, "Ar_median": 0.2},
+            "identifiability": {"status": "warning", "parameters_near_bounds": [], "high_correlation_pairs": [], "condition_indicator": 1e8},
+        },
+    )
+
+    payload = ks.run_fit([801, 802, 803], model_family="leroy2013_continuous_v1")
+
+    assert payload["model_family"] == "leroy2013_continuous_v1"
+    assert payload["calibration_strategy"] == "hierarchical_v1"
+    assert payload["calibration_stage_selected"] == "stage1"
+    assert "experimental_markers" in payload
+    assert "identifiability" in payload
+    assert "seed_statistics" in payload
+    assert "alpha_v_model" in payload["curves"][0]
+    assert "alpha_unstable_model" in payload["curves"][0]

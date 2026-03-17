@@ -7,6 +7,7 @@ import numpy as np
 from services.kinetic_model_service import (
     DEFAULT_REFERENCE_TEMPERATURE_K,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
     arrhenius_reference_factor,
@@ -207,6 +208,8 @@ def run_simulation(
     t_field = np.full(shape, init_temp_c + 273.15, dtype=np.float32)
     cure_drive_field = np.zeros(shape, dtype=np.float32)
     t_eq_field = np.zeros(shape, dtype=np.float32)
+    alpha_v_field = np.zeros(shape, dtype=np.float32)
+    alpha_unstable_field = np.zeros(shape, dtype=np.float32)
     alpha_field = np.zeros(shape, dtype=np.float32)
 
     family_raw = (fit_payload or {}).get("model_family")
@@ -226,6 +229,12 @@ def run_simulation(
     k0 = float(max(params.get("k0", params.get("k_ref", 1e-8)), 1e-300))
     ea = float(max(params.get("Ea", 0.0), 0.0))
     n = float(np.clip(params.get("n", 1.2), 0.2, 12.0))
+    av1 = float(max(params.get("Av1", 0.0), 0.0))
+    av2 = float(max(params.get("Av2", 0.0), 0.0))
+    ev = float(max(params.get("Ev", 0.0), 0.0))
+    x_stable = float(np.clip(params.get("X", 0.7), 1e-4, 1.0 - 1e-4))
+    ar = float(max(params.get("Ar", 0.0), 0.0))
+    er = float(max(params.get("Er", 0.0), 0.0))
 
     if mode == "prensa":
         selected_platen_axis = 0 if platen_axis is None else int(platen_axis)
@@ -238,6 +247,8 @@ def run_simulation(
     _emit_progress("inicializando", 3, "Inicializando campos de temperatura e cura...")
     times = np.empty((store_count,), dtype=np.float64)
     t_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
+    alpha_v_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
+    alpha_unstable_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     alpha_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
 
     prev_t = 0.0
@@ -290,6 +301,32 @@ def run_simulation(
                     dt_pow_n = max((t_sub ** n) - (t_prev_sub ** n), 0.0)
                     cure_drive_field = cure_drive_field + (k_t * dt_pow_n)
                     alpha_field = cure_drive_field / (1.0 + cure_drive_field)
+                elif model_family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+                    kv = np.maximum(av1 + (av2 * np.asarray(alpha_v_field, dtype=float)), 0.0)
+                    kv = kv * np.exp(np.clip(-ev / (R_GAS * temp_safe), -700.0, 700.0))
+                    dalpha_v_dt = kv * np.square(np.maximum(1.0 - np.asarray(alpha_v_field, dtype=float), 0.0))
+                    alpha_v_field = np.maximum(
+                        np.asarray(alpha_v_field, dtype=float),
+                        np.asarray(alpha_v_field, dtype=float) + (dalpha_v_dt * dt_inner),
+                    )
+                    alpha_v_field = np.clip(alpha_v_field, 0.0, 1.0).astype(np.float32, copy=False)
+
+                    kr = np.maximum(ar, 0.0) * np.exp(np.clip(-er / (R_GAS * temp_safe), -700.0, 700.0))
+                    dalpha_unstable_dt = ((1.0 - x_stable) * dalpha_v_dt) - (
+                        kr * np.asarray(alpha_unstable_field, dtype=float)
+                    )
+                    alpha_unstable_field = (
+                        np.asarray(alpha_unstable_field, dtype=float) + (dalpha_unstable_dt * dt_inner)
+                    )
+                    alpha_unstable_field = np.clip(alpha_unstable_field, 0.0, 1.0)
+                    alpha_unstable_field = np.minimum(
+                        alpha_unstable_field,
+                        (1.0 - x_stable) * np.asarray(alpha_v_field, dtype=float),
+                    ).astype(np.float32, copy=False)
+                    alpha_field = (x_stable * np.asarray(alpha_v_field, dtype=float)) + np.asarray(
+                        alpha_unstable_field,
+                        dtype=float,
+                    )
                 else:
                     shift = arrhenius_reference_factor(
                         temp_safe,
@@ -305,6 +342,8 @@ def run_simulation(
         if store_pos < store_count and step == int(store_indices[store_pos]):
             times[store_pos] = t_now
             t_snaps[store_pos] = t_field[store_slices].astype(np.float32, copy=False)
+            alpha_v_snaps[store_pos] = alpha_v_field[store_slices].astype(np.float32, copy=False)
+            alpha_unstable_snaps[store_pos] = alpha_unstable_field[store_slices].astype(np.float32, copy=False)
             alpha_snaps[store_pos] = alpha_field[store_slices].astype(np.float32, copy=False)
             store_pos += 1
 
@@ -343,6 +382,8 @@ def run_simulation(
         model_parameters=np.array(dict(params), dtype=object),
         times=times,
         t_snaps=t_snaps,
+        alpha_v_snaps=alpha_v_snaps,
+        alpha_unstable_snaps=alpha_unstable_snaps,
         alpha_snaps=alpha_snaps,
     )
     _emit_progress("concluido", 100, "Simulacao concluida.")
@@ -379,6 +420,11 @@ def load_simulation(sim_id):
             except Exception:
                 model_parameters = {}
 
+    alpha_v_snaps = d["alpha_v_snaps"] if "alpha_v_snaps" in files else np.asarray(d["alpha_snaps"], dtype=np.float32)
+    alpha_unstable_snaps = (
+        d["alpha_unstable_snaps"] if "alpha_unstable_snaps" in files else np.zeros_like(alpha_v_snaps)
+    )
+
     return {
         "sim_id": str(d["sim_id"]),
         "fit_id": str(d["fit_id"]),
@@ -403,6 +449,10 @@ def load_simulation(sim_id):
         "t_end": float(d["t_end"]),
         "times": d["times"],
         "t_snaps": d["t_snaps"],
+        "alpha_v_snaps": alpha_v_snaps,
+        "alpha_unstable_snaps": alpha_unstable_snaps,
+        "alpha_c_snaps": alpha_v_snaps,
+        "alpha_r_snaps": alpha_unstable_snaps,
         "alpha_snaps": d["alpha_snaps"],
     }
 

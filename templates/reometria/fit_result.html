@@ -7,9 +7,11 @@
 {% endif %}
 {% set fit_last_update = payload.get('updated_at') or payload.get('created_at') %}
 {% set model_family = payload.get('model_family', 'edo_order_n_v1') %}
-{% set kinetic_key = 'k0' if model_family == 'edo_order_n_v1' else 'k_ref' %}
-{% set kinetic_label = 'k0' if model_family == 'edo_order_n_v1' else 'k_ref' %}
-{% set kinetic_value = payload.get(kinetic_key) if payload.get(kinetic_key) is not none else payload.get('k0', payload.get('k_ref', 0)) %}
+{% set requested_model_family = payload.get('requested_model_family', model_family) %}
+{% set is_leroy_model = model_family == 'leroy2013_continuous_v1' %}
+{% set kinetic_key = 'k0' if model_family == 'edo_order_n_v1' else ('k_ref' if not is_leroy_model else 'Av1') %}
+{% set kinetic_label = 'k0' if model_family == 'edo_order_n_v1' else ('k_ref' if not is_leroy_model else 'Av1') %}
+{% set kinetic_value = payload.get(kinetic_key) if payload.get(kinetic_key) is not none else payload.get('k0', payload.get('k_ref', payload.get('Av1', 0))) %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <style>
   .param-value { font-size: 1.1rem; font-weight: 600; }
@@ -21,6 +23,12 @@
   .dashboard-header-title {
     font-size: 1.35rem;
     font-weight: 600;
+  }
+  .equation-box {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
   }
 </style>
 
@@ -64,71 +72,151 @@
       <div class="col-12">
         <div class="alert alert-light border mb-1">
           <div><b>Modelo:</b> <code>{{ model_family }}</code> ({{ payload.get('model_version', 'v1') }})</div>
+          <div><b>Modelo solicitado:</b> <code>{{ requested_model_family }}</code></div>
           <div><b>Fit method:</b> {{ payload.get('fit_method', 'least_squares') }}</div>
           <div><b>T referencia (K):</b> {{ ('%.2f'|format(payload.get('reference_temperature_K', 433.15))).replace('.', ',') }}</div>
           <div><b>Regra de cura pratica:</b> <code>{{ payload.get('cure_completion_rule', 'alpha_practical_0_99') }}</code></div>
         </div>
       </div>
-      <div class="col-lg-4">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center">
-              <b>{{ kinetic_label }}</b>
-              <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="k">Slider</button>
-            </div>
-            <div class="param-value" id="display-k">{{ '%.6e'|format(kinetic_value or 0) }}</div>
-            <div class="param-editor d-none" id="editor-k">
-              <label for="slider-k" class="form-label small text-muted mb-1">Ajuste (log10)</label>
-              <input type="range" class="form-range" id="slider-k" min="-12" max="8" step="0.01">
-              <label for="input-k" class="form-label small text-muted mb-1">Valor direto</label>
-              <input type="number" class="form-control form-control-sm" id="input-k" min="1e-12" max="1e8" step="any">
+      <div class="col-12">
+        <div class="equation-box mb-1">
+          <div class="fw-semibold mb-2">Equacoes do modelo (LaTeX)</div>
+          {% if is_leroy_model %}
+            <div>\( \alpha_{stable} = X\alpha_v \)</div>
+            <div>\( \frac{d\alpha_v}{dt} = (A_{v1} + A_{v2}\alpha_v)\exp\left(\frac{-E_v}{RT}\right)(1-\alpha_v)^2 \)</div>
+            <div>\( k_r(T) = A_r\exp\left(\frac{-E_r}{RT}\right) \)</div>
+            <div>\( \frac{d\alpha_{unstable}}{dt} = (1-X)\frac{d\alpha_v}{dt} - k_r(T)\alpha_{unstable} \)</div>
+            <div>\( \alpha_{total} = \alpha_{stable} + \alpha_{unstable} \)</div>
+          {% elif model_family == 'edo_order_n_v1' %}
+            <div>\( \frac{d\alpha}{dt} = k(T)\left(1-\alpha\right)^n \)</div>
+            <div>\( k(T) = k_0\exp\left(\frac{-E_a}{RT}\right) \)</div>
+          {% elif model_family == 'pinheiro_sigmoidal_v1' %}
+            <div>\( x(t) = k(T)t^n \)</div>
+            <div>\( \alpha(t) = \frac{x}{1+x} \)</div>
+            <div>\( k(T) = k_{ref}\exp\left[-\frac{E_a}{R}\left(\frac{1}{T}-\frac{1}{T_{ref}}\right)\right] \)</div>
+          {% else %}
+            <div>\( t_{eq}(t,T) = t\exp\left[-\frac{E_a}{R}\left(\frac{1}{T}-\frac{1}{T_{ref}}\right)\right] \)</div>
+            <div>\( x(t_{eq}) = k_{ref}t_{eq}^n \)</div>
+            <div>\( \alpha(t) = \frac{x}{1+x} \)</div>
+          {% endif %}
+        </div>
+      </div>
+      {% if not is_leroy_model %}
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center">
+                <b>{{ kinetic_label }}</b>
+                <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="k">Slider</button>
+              </div>
+              <div class="param-value" id="display-k">{{ '%.6e'|format(kinetic_value or 0) }}</div>
+              <div class="param-editor d-none" id="editor-k">
+                <label for="slider-k" class="form-label small text-muted mb-1">Ajuste (log10)</label>
+                <input type="range" class="form-range" id="slider-k" min="-12" max="8" step="0.01">
+                <label for="input-k" class="form-label small text-muted mb-1">Valor direto</label>
+                <input type="number" class="form-control form-control-sm" id="input-k" min="1e-12" max="1e8" step="any">
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="col-lg-4">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center">
-              <b>Ea (J/mol)</b>
-              <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="Ea">Slider</button>
-            </div>
-            <div class="param-value" id="display-Ea">{{ '%.2f'|format(payload.Ea or 0) }}</div>
-            <div class="param-editor d-none" id="editor-Ea">
-              <label for="slider-Ea" class="form-label small text-muted mb-1">Ajuste</label>
-              <input type="range" class="form-range" id="slider-Ea" min="50000" max="250000" step="100">
-              <label for="input-Ea" class="form-label small text-muted mb-1">Valor direto</label>
-              <input type="number" class="form-control form-control-sm" id="input-Ea" min="50000" max="250000" step="100">
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center">
+                <b>Ea (J/mol)</b>
+                <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="Ea">Slider</button>
+              </div>
+              <div class="param-value" id="display-Ea">{{ '%.2f'|format(payload.Ea or 0) }}</div>
+              <div class="param-editor d-none" id="editor-Ea">
+                <label for="slider-Ea" class="form-label small text-muted mb-1">Ajuste</label>
+                <input type="range" class="form-range" id="slider-Ea" min="50000" max="250000" step="100">
+                <label for="input-Ea" class="form-label small text-muted mb-1">Valor direto</label>
+                <input type="number" class="form-control form-control-sm" id="input-Ea" min="50000" max="250000" step="100">
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="col-lg-4">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center">
-              <b>n</b>
-              <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="n">Slider</button>
-            </div>
-            <div class="param-value" id="display-n">{{ '%.4f'|format(payload.n or 0) }}</div>
-            <div class="param-editor d-none" id="editor-n">
-              <label for="slider-n" class="form-label small text-muted mb-1">Ajuste</label>
-              <input type="range" class="form-range" id="slider-n" min="0.5" max="12.0" step="0.01">
-              <label for="input-n" class="form-label small text-muted mb-1">Valor direto</label>
-              <input type="number" class="form-control form-control-sm" id="input-n" min="0.5" max="12.0" step="0.01">
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center">
+                <b>n</b>
+                <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="n">Slider</button>
+              </div>
+              <div class="param-value" id="display-n">{{ '%.2f'|format(payload.n or 0) }}</div>
+              <div class="param-editor d-none" id="editor-n">
+                <label for="slider-n" class="form-label small text-muted mb-1">Ajuste</label>
+                <input type="range" class="form-range" id="slider-n" min="0.5" max="12.0" step="0.01">
+                <label for="input-n" class="form-label small text-muted mb-1">Valor direto</label>
+                <input type="number" class="form-control form-control-sm" id="input-n" min="0.5" max="12.0" step="0.01">
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      {% else %}
+        <div class="col-12">
+          <div class="alert alert-info border mb-2">
+            <div><b>Estrategia de calibracao:</b> {{ payload.get('calibration_strategy', 'hierarchical_v1') }}</div>
+            <div><b>Estagio selecionado:</b> {{ payload.get('calibration_stage_selected', '--') }}</div>
+            <div><b>Identificabilidade:</b> {{ (payload.get('identifiability') or {}).get('status', '--') }}</div>
+            {% if payload.get('alerts') %}
+              <div><b>Alertas:</b> {{ (payload.get('alerts') or [])|join(', ') }}</div>
+            {% endif %}
+          </div>
+          <div class="card">
+            <div class="card-body">
+              <div class="row g-2">
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-Av1">Av1</label>
+                  <input type="range" class="form-range" id="leroy-Av1-slider" min="-12" max="4" step="0.01">
+                  <input type="number" class="form-control form-control-sm" id="leroy-Av1" step="0.01" min="0" value="{{ '%.2f'|format(payload.get('Av1', 0) or 0) }}">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-Av2">Av2</label>
+                  <input type="range" class="form-range" id="leroy-Av2-slider" min="-12" max="4.61" step="0.01">
+                  <input type="number" class="form-control form-control-sm" id="leroy-Av2" step="0.01" min="0" value="{{ '%.2f'|format(payload.get('Av2', 0) or 0) }}">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-Ev">Ev (J/mol)</label>
+                  <input type="range" class="form-range" id="leroy-Ev-slider" min="40000" max="160000" step="100">
+                  <input type="number" class="form-control form-control-sm" id="leroy-Ev" step="0.01" min="0" value="{{ '%.2f'|format(payload.get('Ev', 0) or 0) }}">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-X">X</label>
+                  <input type="range" class="form-range" id="leroy-X-slider" min="0.0001" max="0.9999" step="0.0001">
+                  <input type="number" class="form-control form-control-sm" id="leroy-X" step="0.01" min="0" max="1" value="{{ '%.2f'|format(payload.get('X', 0) or 0) }}">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-Ar">Ar</label>
+                  <input type="range" class="form-range" id="leroy-Ar-slider" min="-12" max="8" step="0.01">
+                  <input type="number" class="form-control form-control-sm" id="leroy-Ar" step="0.01" min="0" value="{{ '%.2f'|format(payload.get('Ar', 0) or 0) }}">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label mb-1" for="leroy-Er">Er (J/mol)</label>
+                  <input type="range" class="form-range" id="leroy-Er-slider" min="80000" max="320000" step="100">
+                  <input type="number" class="form-control form-control-sm" id="leroy-Er" step="0.01" min="0" value="{{ '%.2f'|format(payload.get('Er', 0) or 0) }}">
+                </div>
+              </div>
+              <div class="mt-3 d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-success btn-sm" id="saveLeroyParams">Salvar alteracoes (backend)</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelLeroyParams">Restaurar originais</button>
+                <small class="text-muted">Sliders atualizam os graficos em tempo real. O botao salvar persiste no backend.</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
     </div>
 
-    <div class="d-none mb-3" id="paramActions">
-      <button type="button" class="btn btn-success btn-sm" id="saveParamChanges">Salvar alteracoes</button>
-      <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelParamChanges">Cancelar alteracoes</button>
-      <small class="text-muted ms-2">As alteracoes atualizam o grafico em tempo real ({{ kinetic_label }}, Ea, n).</small>
-    </div>
+    {% if not is_leroy_model %}
+      <div class="d-none mb-3" id="paramActions">
+        <button type="button" class="btn btn-success btn-sm" id="saveParamChanges">Salvar alteracoes</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelParamChanges">Cancelar alteracoes</button>
+        <small class="text-muted ms-2">As alteracoes atualizam o grafico em tempo real ({{ kinetic_label }}, Ea, n).</small>
+      </div>
+    {% endif %}
 
     <div class="row g-3 mb-3">
       <div class="col-md-6"><div class="card"><div class="card-body"><b>RMSE alpha</b><div>{{ '%.5f'|format(payload.rmse_alpha or 0) }}</div></div></div></div>
@@ -144,6 +232,13 @@
     <ul>
     {% for e in payload.ensaios %}<li>{{ e.COD_ENSAIO }} - {{ ('%.1f'|format(e.T_C)).replace('.', ',') }} C</li>{% endfor %}
     </ul>
+
+    <div id="alpha_chart" style="height:420px;"></div>
+    <div id="torque_chart" style="height:420px;"></div>
+    <div class="alert alert-secondary mt-3 mb-3">
+      <b>Legenda dos graficos:</b>
+      linha continua = dado experimental, linha tracejada = modelo ajustado/simulado; cores distinguem os ensaios.
+    </div>
 
     <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
       <h5 class="mb-0">Comparacao de tempos por alpha</h5>
@@ -191,9 +286,6 @@
       <div class="alert alert-warning">Nao ha dados de curva para comparar tempos de alpha.</div>
     {% endif %}
     </div>
-
-    <div id="alpha_chart" style="height:420px;"></div>
-    <div id="torque_chart" style="height:420px;"></div>
   </div>
 </div>
 
@@ -292,11 +384,18 @@
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(', '\\)'], ['$', '$']] },
+  };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
   const curvesRaw = {{ payload.curves|tojson }};
   const alphaComparisonSeed = {{ alpha_time_comparison|tojson }};
   const updateUrl = {{ url_for('reometria.reometria_fit_update', fit_id=payload.fit_id)|tojson }};
   const updateMetaUrl = {{ url_for('reometria.reometria_fit_update_meta', fit_id=payload.fit_id)|tojson }};
   const modelFamily = {{ model_family|tojson }};
+  const isLeroyModel = (modelFamily === 'leroy2013_continuous_v1');
   const kineticKey = {{ kinetic_key|tojson }};
   const kineticLabel = {{ kinetic_label|tojson }};
   const referenceTemperatureK = Number({{ (payload.get('reference_temperature_K', 433.15))|tojson }});
@@ -306,16 +405,36 @@
     Ea: { min: 0.0, max: 350000.0 },
     n: { min: 0.2, max: 12.0 },
   };
+  const LEROY_LIMITS = {
+    Av1: { min: 1e-12, max: 1e4, scale: 'log' },
+    Av2: { min: 1e-12, max: 4e4, scale: 'log' },
+    Ev: { min: 4.0e4, max: 1.6e5, scale: 'linear' },
+    X: { min: 1.0e-4, max: 1.0 - 1.0e-4, scale: 'linear' },
+    Ar: { min: 0.0, max: 1e8, scale: 'log' },
+    Er: { min: 8.0e4, max: 3.2e5, scale: 'linear' },
+  };
 
   const state = {
     original: {
       k: Number({{ (kinetic_value if kinetic_value is not none else 1e-3)|tojson }}),
-      Ea: Number({{ (payload.Ea if payload.Ea is not none else 80000.0)|tojson }}),
-      n: Number({{ (payload.n if payload.n is not none else 1.2)|tojson }}),
+      Ea: Number({{ (payload.get('Ea') if payload.get('Ea') is not none else 80000.0)|tojson }}),
+      n: Number({{ (payload.get('n') if payload.get('n') is not none else 1.2)|tojson }}),
     },
     current: null,
   };
   state.current = { ...state.original };
+  const leroyState = {
+    original: {
+      Av1: Number({{ (payload.get('Av1', 1e-4))|tojson }}),
+      Av2: Number({{ (payload.get('Av2', 1e-2))|tojson }}),
+      Ev: Number({{ (payload.get('Ev', 90000.0))|tojson }}),
+      X: Number({{ (payload.get('X', 0.65))|tojson }}),
+      Ar: Number({{ (payload.get('Ar', 0.0))|tojson }}),
+      Er: Number({{ (payload.get('Er', 180000.0))|tojson }}),
+    },
+    current: null,
+  };
+  leroyState.current = { ...leroyState.original };
 
   const controls = {
     k: { slider: document.getElementById('slider-k'), input: document.getElementById('input-k') },
@@ -330,6 +449,8 @@
   const actionsEl = document.getElementById('paramActions');
   const saveBtn = document.getElementById('saveParamChanges');
   const cancelBtn = document.getElementById('cancelParamChanges');
+  const saveLeroyBtn = document.getElementById('saveLeroyParams');
+  const cancelLeroyBtn = document.getElementById('cancelLeroyParams');
   const toggleComparisonBtn = document.getElementById('toggleAlphaComparisonBtn');
   const comparisonWrap = document.getElementById('alphaComparisonWrap');
   const metadataControls = {
@@ -350,9 +471,58 @@
   }
 
   const palette = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6610f2', '#20c997', '#6f42c1', '#d63384'];
+  const leroyControls = {
+    Av1: { input: document.getElementById('leroy-Av1'), slider: document.getElementById('leroy-Av1-slider') },
+    Av2: { input: document.getElementById('leroy-Av2'), slider: document.getElementById('leroy-Av2-slider') },
+    Ev: { input: document.getElementById('leroy-Ev'), slider: document.getElementById('leroy-Ev-slider') },
+    X: { input: document.getElementById('leroy-X'), slider: document.getElementById('leroy-X-slider') },
+    Ar: { input: document.getElementById('leroy-Ar'), slider: document.getElementById('leroy-Ar-slider') },
+    Er: { input: document.getElementById('leroy-Er'), slider: document.getElementById('leroy-Er-slider') },
+  };
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function roundParam2(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return numeric;
+    return Math.round(numeric * 100) / 100;
+  }
+
+  function clampExponent(exponent) {
+    return clamp(exponent, -700.0, 700.0);
+  }
+
+  function sanitizeLeroyParam(name, rawValue) {
+    const limits = LEROY_LIMITS[name];
+    if (!limits) return Number(rawValue);
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) return limits.min;
+    const clamped = clamp(numeric, limits.min, limits.max);
+    return clamp(roundParam2(clamped), limits.min, limits.max);
+  }
+
+  function leroySliderToValue(name, sliderValue) {
+    const limits = LEROY_LIMITS[name];
+    if (!limits) return Number(sliderValue);
+    const numeric = Number(sliderValue);
+    if (!Number.isFinite(numeric)) return limits.min;
+    if (limits.scale === 'log') {
+      return Math.pow(10, numeric);
+    }
+    return clamp(numeric, limits.min, limits.max);
+  }
+
+  function leroyValueToSlider(name, value) {
+    const limits = LEROY_LIMITS[name];
+    const safe = sanitizeLeroyParam(name, value);
+    if (!limits) return safe;
+    if (limits.scale === 'log') {
+      if (safe <= 0) return -12;
+      return Math.log10(safe);
+    }
+    return safe;
   }
 
   function toNumericArray(values) {
@@ -367,15 +537,20 @@
     const alpha = toNumericArray(curve.alpha);
     const tempo = toNumericArray(curve.tempo);
     const torque = toNumericArray(curve.torque);
+    const tempProfile = toNumericArray(curve.temp_k_profile);
     const pairedLen = Math.min(tRel.length, alpha.length);
     const torqueLen = Math.min(tempo.length, torque.length);
     return {
       ...curve,
       T_C: Number(curve.T_C),
+      T_K: Number(curve.T_K),
+      ML: Number(curve.ML),
+      MH: Number(curve.MH),
       t_rel: tRel.slice(0, pairedLen),
       alpha: alpha.slice(0, pairedLen),
       tempo: tempo.slice(0, torqueLen),
       torque: torque.slice(0, torqueLen),
+      temp_k_profile: tempProfile,
     };
   }
 
@@ -406,31 +581,35 @@
     return null;
   }
 
-  function nearestAlphaTime(timeVec, alphaVec, alphaTarget) {
+  function medianNearestAlphaTime(timeVec, alphaVec, alphaTarget, nearestCount = 3) {
     const size = Math.min(timeVec.length, alphaVec.length);
     if (size === 0) return null;
 
-    let bestIdx = -1;
-    let bestDiff = Number.POSITIVE_INFINITY;
+    const candidates = [];
     for (let i = 0; i < size; i += 1) {
       const alphaValue = Number(alphaVec[i]);
       const timeValue = Number(timeVec[i]);
       if (!Number.isFinite(alphaValue) || !Number.isFinite(timeValue)) continue;
-      const diff = Math.abs(alphaValue - alphaTarget);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestIdx = i;
-      }
+      candidates.push({ time: timeValue, diff: Math.abs(alphaValue - alphaTarget) });
     }
 
-    if (bestIdx < 0) return null;
-    return Number(timeVec[bestIdx]);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      if (a.diff !== b.diff) return a.diff - b.diff;
+      return a.time - b.time;
+    });
+
+    const k = Math.max(1, Math.min(Math.floor(nearestCount), candidates.length));
+    const times = candidates.slice(0, k).map((row) => row.time).sort((a, b) => a - b);
+    const mid = Math.floor(times.length / 2);
+    if (times.length % 2 === 1) return Number(times[mid]);
+    return Number((times[mid - 1] + times[mid]) / 2.0);
   }
 
   function crossingOrNearestTime(timeVec, alphaVec, alphaTarget) {
     const crossing = firstCrossingTime(timeVec, alphaVec, alphaTarget);
     if (crossing !== null) return crossing;
-    return nearestAlphaTime(timeVec, alphaVec, alphaTarget);
+    return medianNearestAlphaTime(timeVec, alphaVec, alphaTarget, 3);
   }
 
   function buildModelTimeline() {
@@ -454,7 +633,11 @@
   function formatK(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
-    return num.toExponential(6);
+    const absNum = Math.abs(num);
+    if ((absNum > 0 && absNum < 1e-2) || absNum >= 1e4) {
+      return num.toExponential(2);
+    }
+    return num.toFixed(2);
   }
 
   function formatEa(value) {
@@ -466,7 +649,7 @@
   function formatN(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
-    return num.toFixed(4);
+    return num.toFixed(2);
   }
 
   function updateParamDisplays() {
@@ -481,13 +664,13 @@
     const nSafe = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
 
     controls.k.slider.value = String(Math.log10(kSafe));
-    controls.k.input.value = kSafe.toExponential(6);
+    controls.k.input.value = formatK(kSafe);
 
     controls.Ea.slider.value = String(eaSafe);
     controls.Ea.input.value = eaSafe.toFixed(2);
 
     controls.n.slider.value = String(nSafe);
-    controls.n.input.value = nSafe.toFixed(4);
+    controls.n.input.value = nSafe.toFixed(2);
   }
 
   function isDirty() {
@@ -507,7 +690,178 @@
     cancelBtn.disabled = !dirty;
   }
 
+  function syncLeroyControlValuesFromState() {
+    Object.keys(leroyControls).forEach((name) => {
+      const control = leroyControls[name];
+      if (!control || !control.input || !control.slider) return;
+      const safeValue = sanitizeLeroyParam(name, leroyState.current[name]);
+      control.input.value = roundParam2(safeValue).toFixed(2);
+      control.slider.value = String(leroyValueToSlider(name, safeValue));
+    });
+  }
+
+  function setLeroyParamValue(name, rawValue) {
+    if (!Object.prototype.hasOwnProperty.call(leroyState.current, name)) return;
+    leroyState.current[name] = roundParam2(sanitizeLeroyParam(name, rawValue));
+    syncLeroyControlValuesFromState();
+    refreshUiAndCharts();
+  }
+
+  function bindLeroyControls() {
+    Object.keys(leroyControls).forEach((name) => {
+      const control = leroyControls[name];
+      if (!control || !control.input || !control.slider) return;
+      control.slider.addEventListener('input', () => {
+        const mapped = leroySliderToValue(name, control.slider.value);
+        setLeroyParamValue(name, mapped);
+      });
+      control.input.addEventListener('input', () => setLeroyParamValue(name, control.input.value));
+      control.input.addEventListener('change', () => setLeroyParamValue(name, control.input.value));
+    });
+  }
+
+  function quantile(values, q) {
+    const data = values.filter((value) => Number.isFinite(value)).slice().sort((a, b) => a - b);
+    if (!data.length) return null;
+    const qq = clamp(Number(q), 0.0, 1.0);
+    const pos = qq * (data.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    if (lo === hi) return data[lo];
+    const frac = pos - lo;
+    return data[lo] + (frac * (data[hi] - data[lo]));
+  }
+
+  function estimateMlMh(curve) {
+    const mlRaw = Number(curve.ML);
+    const mhRaw = Number(curve.MH);
+    if (Number.isFinite(mlRaw) && Number.isFinite(mhRaw) && mhRaw > mlRaw) {
+      return { ml: mlRaw, mh: mhRaw };
+    }
+
+    const torque = toNumericArray(curve.torque);
+    if (!torque.length) return null;
+    const ml = quantile(torque, 0.05);
+    const mh = quantile(torque, 0.95);
+    if (!Number.isFinite(ml) || !Number.isFinite(mh) || mh <= ml) return null;
+    return { ml, mh };
+  }
+
+  function buildLeroyTemperatureProfile(curve, size) {
+    const fallbackTemp = Math.max(
+      Number.isFinite(curve.T_K) ? curve.T_K : ((Number.isFinite(curve.T_C) ? curve.T_C : 25.0) + 273.15),
+      1.0
+    );
+    const out = new Array(size).fill(fallbackTemp);
+    const tempProfile = toNumericArray(curve.temp_k_profile);
+    if (!tempProfile.length) return out;
+    const lim = Math.min(size, tempProfile.length);
+    for (let i = 0; i < lim; i += 1) {
+      const tVal = Number(tempProfile[i]);
+      out[i] = Number.isFinite(tVal) ? Math.max(tVal, 1.0) : fallbackTemp;
+    }
+    return out;
+  }
+
+  function integrateLeroyStatesForCurve(curve, timeline) {
+    const params = {
+      Av1: sanitizeLeroyParam('Av1', leroyState.current.Av1),
+      Av2: sanitizeLeroyParam('Av2', leroyState.current.Av2),
+      Ev: sanitizeLeroyParam('Ev', leroyState.current.Ev),
+      X: sanitizeLeroyParam('X', leroyState.current.X),
+      Ar: sanitizeLeroyParam('Ar', leroyState.current.Ar),
+      Er: sanitizeLeroyParam('Er', leroyState.current.Er),
+    };
+    const time = toNumericArray(timeline).map((value) => Math.max(value, 0.0));
+    const size = time.length;
+    if (size === 0) {
+      return {
+        alpha_v: [],
+        alpha_stable: [],
+        alpha_unstable: [],
+        alpha_total: [],
+      };
+    }
+
+    for (let i = 1; i < size; i += 1) {
+      if (time[i] < time[i - 1]) time[i] = time[i - 1];
+    }
+
+    const temp = buildLeroyTemperatureProfile(curve, size);
+    const alphaV = new Array(size).fill(0.0);
+    const alphaUnstable = new Array(size).fill(0.0);
+    const xStable = params.X;
+    const maxSubsteps = 64;
+
+    for (let i = 1; i < size; i += 1) {
+      const dt = Math.max(time[i] - time[i - 1], 0.0);
+      if (dt <= 0) {
+        alphaV[i] = alphaV[i - 1];
+        alphaUnstable[i] = alphaUnstable[i - 1];
+        continue;
+      }
+
+      const tempI = Math.max(Number(temp[i]), 1.0);
+      let av = alphaV[i - 1];
+      let au = alphaUnstable[i - 1];
+      const maxRateGuess = Math.max(
+        (params.Av1 + (params.Av2 * Math.max(av, 0.0))) * Math.exp(clampExponent(-params.Ev / (R_GAS * tempI))),
+        1e-12
+      );
+      const substeps = clamp(Math.ceil(dt * maxRateGuess * 8.0), 1, maxSubsteps);
+      const dtInner = dt / substeps;
+
+      for (let s = 0; s < substeps; s += 1) {
+        const kv = Math.max(
+          (params.Av1 + (params.Av2 * av)) * Math.exp(clampExponent(-params.Ev / (R_GAS * tempI))),
+          0.0
+        );
+        const dalphaVdt = kv * Math.pow(1.0 - av, 2.0);
+        let avNext = Math.min(1.0, av + (dalphaVdt * dtInner));
+        if (avNext < av) avNext = av;
+
+        let kr = 0.0;
+        if (params.Ar > 0.0) {
+          kr = Math.max(params.Ar * Math.exp(clampExponent(-params.Er / (R_GAS * tempI))), 0.0);
+        }
+
+        const dalphaUnstableDt = ((1.0 - xStable) * dalphaVdt) - (kr * au);
+        const auUpper = Math.max((1.0 - xStable) * avNext, 0.0);
+        const auNext = au + (dalphaUnstableDt * dtInner);
+
+        av = clamp(avNext, 0.0, 1.0);
+        au = clamp(auNext, 0.0, auUpper);
+      }
+
+      alphaV[i] = av;
+      alphaUnstable[i] = au;
+    }
+
+    for (let i = 1; i < size; i += 1) {
+      if (alphaV[i] < alphaV[i - 1]) alphaV[i] = alphaV[i - 1];
+    }
+
+    const alphaStable = alphaV.map((av) => clamp(xStable * av, 0.0, 1.0));
+    const alphaUnstableClamped = alphaUnstable.map((au, idx) => {
+      const upper = Math.max((1.0 - xStable) * alphaV[idx], 0.0);
+      return clamp(au, 0.0, upper);
+    });
+    const alphaTotal = alphaStable.map((asValue, idx) => clamp(asValue + alphaUnstableClamped[idx], 0.0, 1.0));
+
+    return {
+      alpha_v: alphaV,
+      alpha_stable: alphaStable,
+      alpha_unstable: alphaUnstableClamped,
+      alpha_total: alphaTotal,
+    };
+  }
+
   function computeAlphaModelForTimeline(curve, timeline) {
+    if (isLeroyModel) {
+      const states = integrateLeroyStatesForCurve(curve, timeline);
+      return toNumericArray(states.alpha_total);
+    }
+
     const tempK = Math.max((Number.isFinite(curve.T_C) ? curve.T_C : 0) + 273.15, 1.0);
     const n = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
     const ea = clamp(state.current.Ea, LIMITS.Ea.min, LIMITS.Ea.max);
@@ -576,7 +930,7 @@
     const blocks = curves.map((curve) => {
       const realTime = curve.t_rel;
       const realAlpha = curve.alpha;
-      const simAlpha = computeAlphaModelForTimeline(curve, realTime);
+      const simAlpha = computeAlphaModelForTimeline(curve, realTime).slice(0, realTime.length);
 
       const canEvalReal = realTime.length >= 1 && realTime.length === realAlpha.length;
       const canEvalSim = realTime.length >= 1 && realTime.length === simAlpha.length;
@@ -647,13 +1001,28 @@
   function buildTorqueData() {
     const traces = [];
     curves.forEach((curve, idx) => {
+      const color = palette[idx % palette.length];
       traces.push({
         x: curve.tempo,
         y: curve.torque,
         mode: 'lines',
-        name: `Torque ${curve.COD_ENSAIO}`,
-        line: { color: palette[idx % palette.length], width: 2 },
+        name: `torque real ${curve.COD_ENSAIO}`,
+        line: { color, width: 2 },
       });
+
+      const mlMh = estimateMlMh(curve);
+      const torqueTime = curve.tempo.length ? curve.tempo : curve.t_rel;
+      if (mlMh && torqueTime.length) {
+        const alphaModelAtTorqueTime = computeAlphaModelForTimeline(curve, torqueTime);
+        const torqueModel = alphaModelAtTorqueTime.map((alphaVal) => mlMh.ml + (clamp(alphaVal, 0.0, 1.0) * (mlMh.mh - mlMh.ml)));
+        traces.push({
+          x: torqueTime,
+          y: torqueModel,
+          mode: 'lines',
+          name: `torque modelo ${curve.COD_ENSAIO}`,
+          line: { color, width: 2, dash: 'dot' },
+        });
+      }
     });
     return traces;
   }
@@ -664,6 +1033,8 @@
       buildAlphaData(),
       {
         title: 'Alpha real vs modelo',
+        showlegend: true,
+        legend: { orientation: 'h', y: -0.22, x: 0.0 },
         xaxis: {
           title: 't relativo (s)',
           dtick: 60,
@@ -678,7 +1049,7 @@
           range: [0, 1],
           gridcolor: '#d9d9d9',
         },
-        margin: { t: 56, r: 24, b: 56, l: 64 },
+        margin: { t: 56, r: 24, b: 86, l: 64 },
       },
       { responsive: true, displaylogo: false }
     );
@@ -690,6 +1061,8 @@
       buildTorqueData(),
       {
         title: 'Torque vs tempo',
+        showlegend: true,
+        legend: { orientation: 'h', y: -0.22, x: 0.0 },
         xaxis: {
           title: 'Tempo (s)',
           dtick: 60,
@@ -697,24 +1070,33 @@
           gridcolor: '#d9d9d9',
         },
         yaxis: { title: 'Torque' },
-        margin: { t: 56, r: 24, b: 56, l: 64 },
+        margin: { t: 56, r: 24, b: 86, l: 64 },
       },
       { responsive: true, displaylogo: false }
     );
   }
 
   function refreshUiAndCharts() {
-    updateParamDisplays();
-    syncControlValuesFromState();
-    updateActionButtons();
+    if (!isLeroyModel) {
+      updateParamDisplays();
+      syncControlValuesFromState();
+      updateActionButtons();
+    } else {
+      syncLeroyControlValuesFromState();
+    }
     drawAlphaChart();
+    drawTorqueChart();
     renderAlphaComparisonTable();
   }
 
   function setParamValue(param, value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    state.current[param] = clamp(parsed, LIMITS[param].min, LIMITS[param].max);
+    let nextValue = clamp(parsed, LIMITS[param].min, LIMITS[param].max);
+    if (param === 'Ea' || param === 'n') {
+      nextValue = roundParam2(nextValue);
+    }
+    state.current[param] = nextValue;
     refreshUiAndCharts();
   }
 
@@ -779,6 +1161,51 @@
     }
   }
 
+  async function saveLeroyParams() {
+    if (!isLeroyModel || !saveLeroyBtn) return;
+    if (!window.confirm('Salvar parametros Leroy2013 e recalcular curvas no backend?')) return;
+
+    const payloadBody = {
+      Av1: sanitizeLeroyParam('Av1', leroyState.current.Av1),
+      Av2: sanitizeLeroyParam('Av2', leroyState.current.Av2),
+      Ev: sanitizeLeroyParam('Ev', leroyState.current.Ev),
+      X: sanitizeLeroyParam('X', leroyState.current.X),
+      Ar: sanitizeLeroyParam('Ar', leroyState.current.Ar),
+      Er: sanitizeLeroyParam('Er', leroyState.current.Er),
+    };
+
+    const hasInvalid = Object.values(payloadBody).some((value) => !Number.isFinite(value));
+    if (hasInvalid) {
+      window.alert('Preencha todos os parametros Leroy com valores numericos validos.');
+      return;
+    }
+
+    const originalText = saveLeroyBtn.textContent;
+    saveLeroyBtn.disabled = true;
+    saveLeroyBtn.textContent = 'Salvando...';
+    try {
+      const response = await fetch(updateUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadBody),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Falha ao salvar parametros Leroy.');
+      }
+      window.location.reload();
+    } catch (error) {
+      window.alert(error.message || 'Erro ao salvar parametros Leroy.');
+      saveLeroyBtn.disabled = false;
+      saveLeroyBtn.textContent = originalText;
+    }
+  }
+
+  function cancelLeroyChanges() {
+    leroyState.current = { ...leroyState.original };
+    refreshUiAndCharts();
+  }
+
   async function saveChanges() {
     if (!isDirty()) return;
     if (!window.confirm(`Confirmar salvamento das alteracoes de ${kineticLabel}, Ea e n?`)) return;
@@ -823,15 +1250,18 @@
     refreshUiAndCharts();
   }
 
-  document.querySelectorAll('.param-edit-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      const param = button.dataset.param;
-      const editor = document.getElementById(`editor-${param}`);
-      const isHidden = editor.classList.contains('d-none');
-      editor.classList.toggle('d-none', !isHidden);
-      button.textContent = isHidden ? 'Ocultar' : 'Slider';
+  if (!isLeroyModel) {
+    document.querySelectorAll('.param-edit-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const param = button.dataset.param;
+        const editor = document.getElementById(`editor-${param}`);
+        if (!editor) return;
+        const isHidden = editor.classList.contains('d-none');
+        editor.classList.toggle('d-none', !isHidden);
+        button.textContent = isHidden ? 'Ocultar' : 'Slider';
+      });
     });
-  });
+  }
 
   if (toggleComparisonBtn && comparisonWrap) {
     toggleComparisonBtn.addEventListener('click', () => {
@@ -844,10 +1274,20 @@
     metadataControls.saveBtn.addEventListener('click', saveMetadata);
   }
 
-  saveBtn.addEventListener('click', saveChanges);
-  cancelBtn.addEventListener('click', cancelChanges);
-  bindControls();
-  refreshUiAndCharts();
-  drawTorqueChart();
+  if (isLeroyModel) {
+    if (saveLeroyBtn) {
+      saveLeroyBtn.addEventListener('click', saveLeroyParams);
+    }
+    if (cancelLeroyBtn) {
+      cancelLeroyBtn.addEventListener('click', cancelLeroyChanges);
+    }
+    bindLeroyControls();
+    refreshUiAndCharts();
+  } else {
+    if (saveBtn) saveBtn.addEventListener('click', saveChanges);
+    if (cancelBtn) cancelBtn.addEventListener('click', cancelChanges);
+    bindControls();
+    refreshUiAndCharts();
+  }
 </script>
 {% endblock %}

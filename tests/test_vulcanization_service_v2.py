@@ -798,3 +798,54 @@ def test_critical_step_reason_tracks_dominant_mechanism(tmp_path, monkeypatch):
         E_ind=5.0e4,
     )
     assert str((sim_extrapolation.get("metrics") or {}).get("critical_step_reason")) == "induction_extrapolation"
+
+
+def test_leroy_model_v2_persists_alpha_unstable_field(tmp_path, monkeypatch):
+    fit_payload = {
+        "fit_id": "fit_v2_leroy",
+        "model_family": "leroy2013_continuous_v1",
+        "model_parameters": {
+            "Av1": 0.015,
+            "Av2": 0.050,
+            "Ev": 90000.0,
+            "X": 0.62,
+            "Ar": 0.8,
+            "Er": 125000.0,
+        },
+        "A_ind": 5.0e8,
+        "E_ind": 8.5e4,
+        "induction_confidence": "high",
+        "induction_fit_quality": "high",
+        "temperature_validity_range": {
+            "min_c": 130.0,
+            "max_c": 220.0,
+            "span_c": 90.0,
+            "min_k": 403.15,
+            "max_k": 493.15,
+            "span_k": 90.0,
+        },
+    }
+
+    sim = _run_case(
+        tmp_path,
+        monkeypatch,
+        fit_payload=fit_payload,
+        kinetics_params=None,
+        exotherm_enabled=False,
+        t_end=120.0,
+        mold_temp_c=190.0,
+        A_ind=5.0e8,
+        E_ind=8.5e4,
+    )
+
+    alpha = np.asarray(sim["alpha_snaps"], dtype=float)
+    alpha_c = np.asarray(sim["alpha_c_snaps"], dtype=float)
+    alpha_unstable = np.asarray(sim["alpha_unstable_snaps"], dtype=float)
+    metrics = dict(sim.get("metrics") or {})
+
+    assert sim.get("model_family") == "leroy2013_continuous_v1"
+    assert alpha_unstable.shape == alpha.shape
+    assert np.isfinite(alpha_unstable).all()
+    assert float(np.min(alpha_unstable)) >= 0.0
+    assert np.all(alpha <= alpha_c + 1e-9)
+    assert metrics.get("kinetic_model_family") == "leroy2013_continuous_v1"

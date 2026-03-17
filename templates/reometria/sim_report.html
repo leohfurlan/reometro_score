@@ -1,0 +1,354 @@
+{% extends 'base.html' %}
+{% block title %}Relatorio de Simulacao{% endblock %}
+{% block content %}
+<style>
+  .report-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+
+  .report-meta-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .report-legend {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .report-step-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 10px;
+    background: #ffffff;
+  }
+
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+
+    .card {
+      border: none !important;
+      box-shadow: none !important;
+    }
+  }
+</style>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div>
+        <h3 class="mb-1">Relatorio de Simulacao {{ report.sim_id }}</h3>
+        <div class="text-muted">Fit: {{ report.fit_id or '--' }} | Motor: {{ report.engine }} ({{ report.engine_status }})</div>
+      </div>
+      <div class="no-print d-flex gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('reometria.reometria_simulate_view', sim_id=report.sim_id, engine=report.engine) }}">Voltar</a>
+        <button class="btn btn-primary btn-sm" type="button" onclick="window.print()">Imprimir relatorio</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><b>Resumo da simulacao</b></div>
+  <div class="card-body">
+    <div class="report-meta-grid">
+      <div class="report-meta-card"><b>Modo</b><div>{{ report.mode or '--' }}</div></div>
+      <div class="report-meta-card"><b>Dimensao</b><div>{{ report.dim }}</div></div>
+      <div class="report-meta-card"><b>Malha</b><div>{{ report.shape }}</div></div>
+      <div class="report-meta-card"><b>dx (m)</b><div>{{ report.dx if report.dx is not none else '--' }}</div></div>
+      <div class="report-meta-card">
+        <b>Steps selecionados</b>
+        <div>
+          {% for idx in report.selected_steps %}
+            <span class="badge bg-primary">{{ idx }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="report-meta-card"><b>Titulo do fit</b><div>{{ report.fit_titulo or '--' }}</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><b>Parametros do fit e observacoes</b></div>
+  <div class="card-body">
+    <div class="mb-2"><b>Modelo:</b> <code>{{ report.fit_model_family }}</code> ({{ report.fit_model_version }}) | <b>Metodo:</b> {{ report.fit_method }}</div>
+    <div class="table-responsive mb-3">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Parametro</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in report.fit_parameters %}
+          <tr>
+            <td><code>{{ row.name }}</code></td>
+            <td>
+              {% if row.value is number %}
+                {{ ('%.2f'|format(row.value)).replace('.', ',') }}
+              {% else %}
+                {{ row.value }}
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="2">Sem parametros disponiveis no payload do fit.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="report-legend">
+      <div><b>Legenda das curvas:</b> linha continua = dado real; linha tracejada = modelo.</div>
+      <div><b>Legenda de snapshots:</b> escala de cores representa 0% a 100% de cura e temperatura em C.</div>
+    </div>
+    <div class="mt-3">
+      <b>Observacoes do fit:</b>
+      <div class="border rounded p-2 bg-light">{{ report.fit_observacoes or 'Sem observacoes registradas.' }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><b>Curvas reometricas do fit</b></div>
+  <div class="card-body">
+    <div id="report_alpha_curves" style="height:420px;"></div>
+    <div id="report_torque_curves" style="height:420px;"></div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><b>Snapshots selecionados para o relatorio final</b></div>
+  <div class="card-body">
+    {% for snap in report.snapshots %}
+    <div class="report-step-card mb-3">
+      <div class="mb-2"><b>Step {{ snap.step }}</b> | t = {{ '%.2f'|format(snap.time_s) }} s</div>
+      <div class="row g-2">
+        <div class="col-lg-6">
+          <div id="report_step_cure_{{ loop.index0 }}" style="height:320px;"></div>
+        </div>
+        <div class="col-lg-6">
+          <div id="report_step_temp_{{ loop.index0 }}" style="height:320px;"></div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+  const reportData = {{ report_json|safe }};
+  const palette = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6610f2', '#20c997', '#6f42c1', '#d63384'];
+
+  function toNumericArray(values) {
+    if (!Array.isArray(values)) return [];
+    return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function interpolateSeries(xRef, yRef, xTarget) {
+    const x = toNumericArray(xRef);
+    const y = toNumericArray(yRef);
+    if (!x.length || !y.length) return xTarget.map(() => 0.0);
+    const size = Math.min(x.length, y.length);
+    const xx = x.slice(0, size);
+    const yy = y.slice(0, size);
+    return xTarget.map((target) => {
+      const t = Number(target);
+      if (!Number.isFinite(t)) return 0.0;
+      if (t <= xx[0]) return yy[0];
+      if (t >= xx[size - 1]) return yy[size - 1];
+      let idx = 1;
+      while (idx < size && xx[idx] < t) idx += 1;
+      const x0 = xx[idx - 1];
+      const x1 = xx[idx];
+      const y0 = yy[idx - 1];
+      const y1 = yy[idx];
+      if (x1 === x0) return y1;
+      const frac = (t - x0) / (x1 - x0);
+      return y0 + (frac * (y1 - y0));
+    });
+  }
+
+  function buildCurvePlots() {
+    const curves = Array.isArray(reportData.fit_curves) ? reportData.fit_curves : [];
+    const alphaTraces = [];
+    const torqueTraces = [];
+
+    curves.forEach((curve, idx) => {
+      const color = palette[idx % palette.length];
+      const cod = curve.COD_ENSAIO ?? (idx + 1);
+      const tRel = toNumericArray(curve.t_rel);
+      const alphaReal = toNumericArray(curve.alpha);
+      const alphaModel = toNumericArray(curve.alpha_model);
+      const tempo = toNumericArray(curve.tempo);
+      const torqueReal = toNumericArray(curve.torque);
+      let torqueModel = toNumericArray(curve.torque_model);
+
+      if (!torqueModel.length && alphaModel.length && tempo.length) {
+        const ml = Number(curve.ML);
+        const mh = Number(curve.MH);
+        if (Number.isFinite(ml) && Number.isFinite(mh) && mh > ml) {
+          const alphaAtTempo = interpolateSeries(tRel, alphaModel, tempo);
+          torqueModel = alphaAtTempo.map((alphaVal) => ml + (clamp(alphaVal, 0.0, 1.0) * (mh - ml)));
+        }
+      }
+
+      if (tRel.length && alphaReal.length) {
+        alphaTraces.push({
+          x: tRel,
+          y: alphaReal,
+          mode: 'lines',
+          name: `alpha real ${cod}`,
+          line: { color, width: 2 },
+        });
+      }
+      if (tRel.length && alphaModel.length) {
+        alphaTraces.push({
+          x: tRel,
+          y: alphaModel,
+          mode: 'lines',
+          name: `alpha modelo ${cod}`,
+          line: { color, width: 2, dash: 'dot' },
+        });
+      }
+
+      if (tempo.length && torqueReal.length) {
+        torqueTraces.push({
+          x: tempo,
+          y: torqueReal,
+          mode: 'lines',
+          name: `torque real ${cod}`,
+          line: { color, width: 2 },
+        });
+      }
+      if (tempo.length && torqueModel.length) {
+        torqueTraces.push({
+          x: tempo,
+          y: torqueModel,
+          mode: 'lines',
+          name: `torque modelo ${cod}`,
+          line: { color, width: 2, dash: 'dot' },
+        });
+      }
+    });
+
+    Plotly.react('report_alpha_curves', alphaTraces, {
+      title: 'Curvas alpha real vs modelo',
+      showlegend: true,
+      legend: { orientation: 'h', y: -0.2, x: 0 },
+      xaxis: { title: 't relativo (s)' },
+      yaxis: { title: 'alpha', range: [0, 1] },
+      margin: { t: 56, r: 20, b: 80, l: 64 },
+    }, { responsive: true, displaylogo: false });
+
+    Plotly.react('report_torque_curves', torqueTraces, {
+      title: 'Curvas torque real vs modelo',
+      showlegend: true,
+      legend: { orientation: 'h', y: -0.2, x: 0 },
+      xaxis: { title: 'tempo (s)' },
+      yaxis: { title: 'torque' },
+      margin: { t: 56, r: 20, b: 80, l: 64 },
+    }, { responsive: true, displaylogo: false });
+  }
+
+  function slice3dMiddle(snapshot3d) {
+    if (!Array.isArray(snapshot3d) || !snapshot3d.length) return [];
+    const mid = Math.max(0, Math.floor(snapshot3d.length / 2));
+    const mat = snapshot3d[mid];
+    return Array.isArray(mat) ? mat : [];
+  }
+
+  function drawSnapshotPlots() {
+    const snapshots = Array.isArray(reportData.snapshots) ? reportData.snapshots : [];
+    const dxMm = Number(reportData.dx || 0) * 1000.0;
+
+    snapshots.forEach((snap, idx) => {
+      const cureDiv = `report_step_cure_${idx}`;
+      const tempDiv = `report_step_temp_${idx}`;
+      const alphaRaw = snap.alpha_snapshot;
+      const tempRaw = snap.temp_snapshot_c;
+
+      if (Number(reportData.dim || 0) === 1) {
+        const alphaVec = toNumericArray(alphaRaw).map((v) => v * 100.0);
+        const tempVec = toNumericArray(tempRaw);
+        const n = Math.max(alphaVec.length, tempVec.length);
+        const x = Array.from({ length: n }, (_, i) => dxMm > 0 ? i * dxMm : i);
+
+        Plotly.react(cureDiv, [
+          { x, y: alphaVec, mode: 'lines+markers', name: 'cura (%)', line: { color: '#1d4ed8' } },
+        ], {
+          title: `Step ${snap.step} - cura 1D`,
+          xaxis: { title: dxMm > 0 ? 'posicao (mm)' : 'indice' },
+          yaxis: { title: 'cura (%)', range: [0, 100] },
+        }, { responsive: true, displaylogo: false });
+
+        Plotly.react(tempDiv, [
+          { x, y: tempVec, mode: 'lines+markers', name: 'temperatura (C)', line: { color: '#16a34a' } },
+        ], {
+          title: `Step ${snap.step} - temperatura 1D`,
+          xaxis: { title: dxMm > 0 ? 'posicao (mm)' : 'indice' },
+          yaxis: { title: 'temperatura (C)' },
+        }, { responsive: true, displaylogo: false });
+        return;
+      }
+
+      let alphaMat = alphaRaw;
+      let tempMat = tempRaw;
+      if (Number(reportData.dim || 0) >= 3) {
+        alphaMat = slice3dMiddle(alphaRaw);
+        tempMat = slice3dMiddle(tempRaw);
+      }
+
+      const alphaPct = (Array.isArray(alphaMat) ? alphaMat : []).map((row) =>
+        (Array.isArray(row) ? row : []).map((v) => Number(v) * 100.0)
+      );
+      const tempC = (Array.isArray(tempMat) ? tempMat : []).map((row) =>
+        (Array.isArray(row) ? row : []).map((v) => Number(v))
+      );
+
+      Plotly.react(cureDiv, [{
+        z: alphaPct,
+        type: 'heatmap',
+        zmin: 0,
+        zmax: 100,
+        colorscale: [[0, '#0b4fa2'], [1, '#c62828']],
+        colorbar: { title: 'cura (%)' },
+      }], {
+        title: `Step ${snap.step} - mapa de cura`,
+        xaxis: { title: 'x' },
+        yaxis: { title: 'y' },
+      }, { responsive: true, displaylogo: false });
+
+      Plotly.react(tempDiv, [{
+        z: tempC,
+        type: 'heatmap',
+        colorscale: [[0, '#22c55e'], [0.5, '#facc15'], [1, '#f97316']],
+        colorbar: { title: 'temperatura (C)' },
+      }], {
+        title: `Step ${snap.step} - mapa de temperatura`,
+        xaxis: { title: 'x' },
+        yaxis: { title: 'y' },
+      }, { responsive: true, displaylogo: false });
+    });
+  }
+
+  buildCurvePlots();
+  drawSnapshotPlots();
+</script>
+{% endblock %}

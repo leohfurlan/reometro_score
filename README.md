@@ -226,3 +226,49 @@ Example payload:
   "cure_completion_rule": "alpha_practical_0_99"
 }
 ```
+
+## Recalibracao automatica (EDO vs Pinheiro)
+
+Novo pipeline completo em:
+- `services/reometry_dataset_service.py`
+- `services/kinetic_calibration_pipeline_service.py`
+
+Exemplo de dataset JSON:
+```json
+[
+  {
+    "curve_id": "C1",
+    "temperature_K": 423.15,
+    "time": [0, 10, 20, 30],
+    "torque": [2.1, 2.4, 3.3, 4.8]
+  },
+  {
+    "curve_id": "C2",
+    "temperature_K": 443.15,
+    "time": [0, 10, 20, 30],
+    "torque": [2.0, 2.8, 4.1, 5.7]
+  }
+]
+```
+
+Execucao:
+```python
+from services.kinetic_calibration_pipeline_service import run_kinetic_recalibration_pipeline
+
+result = run_kinetic_recalibration_pipeline(
+    dataset_path="data/reometry_dataset.json",
+    report_path="reports/kinetic_fit_report.html",
+    reference_temperature_k=433.15,
+)
+print(result["best_model_family"])
+print(result["report_path"])
+```
+
+O modo `model_family = "auto"` agora compara:
+- `edo_order_n_v1`
+- `pinheiro_sigmoidal_teq_v1`
+
+e seleciona automaticamente o melhor por:
+- RMSE_alpha
+- erro medio absoluto em T90
+- penalidade de estabilidade de parametros

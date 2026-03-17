@@ -2,11 +2,12 @@ import json
 import threading
 import time
 import uuid
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
@@ -26,6 +27,7 @@ from services.kinetic_model_service import (
     SUPPORTED_MODEL_FAMILIES,
     SUPPORTED_CURE_COMPLETION_RULES,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
 )
 from services.engine_registry import (
     ENGINE_AXISYMMETRIC_FIPY as ENGINE_AXISYMMETRIC_FIPY_REGISTRY,
@@ -66,13 +68,33 @@ _REOMETRIA_OUT_DIR = Path("data/out")
 
 
 def _safe_float(value, default=None):
+    if isinstance(value, np.ndarray):
+        if value.size != 1:
+            return default
+        value = value.reshape(-1)[0]
+    elif isinstance(value, (list, tuple)):
+        if len(value) != 1:
+            return default
+        value = value[0]
+
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return default
-    if not np.isfinite(numeric):
+    finite_flag = np.isfinite(numeric)
+    if not bool(finite_flag):
         return default
     return float(numeric)
+
+
+def _round_two_decimals(value):
+    numeric = _safe_float(value, default=None)
+    if numeric is None:
+        return None
+    try:
+        return float(Decimal(str(numeric)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
+        return float(numeric)
 
 
 def _safe_datetime_from_iso(value):
@@ -443,6 +465,182 @@ def _serialize_for_json(value):
     return value
 
 
+def _default_three_step_indices(max_idx):
+    max_idx = int(max(_safe_float(max_idx, default=0) or 0, 0))
+    if max_idx <= 0:
+        return [0, 0, 0]
+    if max_idx == 1:
+        return [0, 1, 1]
+    if max_idx == 2:
+        return [0, 1, 2]
+    return [0, max_idx // 2, max_idx]
+
+
+def _parse_three_step_indices(raw_steps, max_idx):
+    max_idx = int(max(_safe_float(max_idx, default=0) or 0, 0))
+    tokens = []
+    if raw_steps is not None:
+        text = str(raw_steps).strip()
+        if text:
+            tokens = [part.strip() for part in text.split(",")]
+
+    selected = []
+    for token in tokens:
+        if len(selected) >= 3:
+            break
+        try:
+            idx = int(float(token))
+        except (TypeError, ValueError):
+            continue
+        idx = int(np.clip(idx, 0, max_idx))
+        if idx not in selected:
+            selected.append(idx)
+
+    defaults = _default_three_step_indices(max_idx)
+    if len(selected) < 3:
+        candidate_pool = defaults + list(range(max_idx + 1))
+        for idx in candidate_pool:
+            if idx not in selected:
+                selected.append(idx)
+            if len(selected) >= 3:
+                break
+
+    while len(selected) < 3:
+        selected.append(defaults[min(len(selected), 2)])
+
+    return selected[:3]
+
+
+def _extract_fit_parameters_for_report(fit_payload):
+    payload = fit_payload if isinstance(fit_payload, dict) else {}
+    family = str(payload.get("model_family") or "").strip().lower()
+    params_block = payload.get("model_parameters")
+    params_block = params_block if isinstance(params_block, dict) else {}
+
+    ordered_keys = []
+    if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+        ordered_keys = ["Av1", "Av2", "Ev", "X", "Ar", "Er"]
+    else:
+        ordered_keys = ["k0", "k_ref", "Ea", "n"]
+
+    rows = []
+    seen = set()
+    for key in ordered_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        if key in params_block:
+            value = params_block.get(key)
+            numeric = _round_two_decimals(value)
+            rows.append({"name": key, "value": value if numeric is None else numeric})
+            continue
+        if key in payload:
+            value = payload.get(key)
+            numeric = _round_two_decimals(value)
+            rows.append({"name": key, "value": value if numeric is None else numeric})
+
+    if not rows:
+        for key, value in params_block.items():
+            numeric = _round_two_decimals(value)
+            rows.append({"name": str(key), "value": value if numeric is None else numeric})
+    return rows
+
+
+def _extract_fit_curves_for_report(fit_payload):
+    payload = fit_payload if isinstance(fit_payload, dict) else {}
+    curves = payload.get("curves")
+    if not isinstance(curves, list):
+        return []
+
+    rows = []
+    for curve in curves:
+        if not isinstance(curve, dict):
+            continue
+        tempo_raw = curve.get("tempo")
+        torque_raw = curve.get("torque")
+        torque_model_raw = curve.get("torque_model")
+        t_rel_raw = curve.get("t_rel")
+        alpha_raw = curve.get("alpha")
+        alpha_model_raw = curve.get("alpha_model")
+        rows.append(
+            {
+                "COD_ENSAIO": curve.get("COD_ENSAIO"),
+                "T_C": _safe_float(curve.get("T_C"), default=None),
+                "tempo": _serialize_for_json(np.asarray(tempo_raw if tempo_raw is not None else [], dtype=float)),
+                "torque": _serialize_for_json(np.asarray(torque_raw if torque_raw is not None else [], dtype=float)),
+                "torque_model": _serialize_for_json(
+                    np.asarray(torque_model_raw if torque_model_raw is not None else [], dtype=float)
+                ),
+                "t_rel": _serialize_for_json(np.asarray(t_rel_raw if t_rel_raw is not None else [], dtype=float)),
+                "alpha": _serialize_for_json(np.asarray(alpha_raw if alpha_raw is not None else [], dtype=float)),
+                "alpha_model": _serialize_for_json(
+                    np.asarray(alpha_model_raw if alpha_model_raw is not None else [], dtype=float)
+                ),
+                "ML": _safe_float(curve.get("ML"), default=None),
+                "MH": _safe_float(curve.get("MH"), default=None),
+            }
+        )
+    return rows
+
+
+def _build_simulation_report_payload(sim, fit_payload, selected_steps):
+    sim_safe = sim if isinstance(sim, dict) else {}
+    fit_safe = fit_payload if isinstance(fit_payload, dict) else {}
+
+    times_raw = sim_safe.get("times")
+    t_snaps_raw = sim_safe.get("t_snaps")
+    alpha_snaps_raw = sim_safe.get("alpha_snaps")
+    times = np.asarray(times_raw if times_raw is not None else [], dtype=float).reshape(-1)
+    t_snaps = np.asarray(t_snaps_raw if t_snaps_raw is not None else [], dtype=float)
+    alpha_snaps = np.asarray(alpha_snaps_raw if alpha_snaps_raw is not None else [], dtype=float)
+
+    snapshot_rows = []
+    for raw_step in selected_steps:
+        step_idx = int(np.clip(int(raw_step), 0, max(len(times) - 1, 0)))
+        time_s = float(times[step_idx]) if len(times) else 0.0
+
+        alpha_snapshot = np.asarray([], dtype=float)
+        if alpha_snaps.ndim >= 1 and alpha_snaps.shape[0] > step_idx:
+            alpha_snapshot = np.asarray(alpha_snaps[step_idx], dtype=float)
+
+        temp_snapshot_c = np.asarray([], dtype=float)
+        if t_snaps.ndim >= 1 and t_snaps.shape[0] > step_idx:
+            temp_snapshot_c = np.asarray(t_snaps[step_idx], dtype=float) - 273.15
+
+        snapshot_rows.append(
+            {
+                "step": int(step_idx),
+                "time_s": float(time_s),
+                "alpha_snapshot": _serialize_for_json(alpha_snapshot),
+                "temp_snapshot_c": _serialize_for_json(temp_snapshot_c),
+            }
+        )
+
+    metadata = fit_safe.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    report_payload = {
+        "sim_id": str(sim_safe.get("sim_id") or ""),
+        "fit_id": str(sim_safe.get("fit_id") or fit_safe.get("fit_id") or ""),
+        "engine": str(sim_safe.get("engine") or "--"),
+        "engine_status": str(sim_safe.get("engine_status") or "--"),
+        "mode": str(sim_safe.get("mode") or "--"),
+        "dim": int(_safe_float(sim_safe.get("dim"), default=0) or 0),
+        "shape": _serialize_for_json(np.asarray(sim_safe.get("shape") or [], dtype=int)),
+        "dx": _safe_float(sim_safe.get("dx"), default=None),
+        "times": _serialize_for_json(times),
+        "selected_steps": [int(item["step"]) for item in snapshot_rows],
+        "snapshots": snapshot_rows,
+        "fit_model_family": str(fit_safe.get("model_family") or "--"),
+        "fit_model_version": str(fit_safe.get("model_version") or "--"),
+        "fit_method": str(fit_safe.get("fit_method") or "--"),
+        "fit_parameters": _extract_fit_parameters_for_report(fit_safe),
+        "fit_curves": _extract_fit_curves_for_report(fit_safe),
+        "fit_observacoes": str(metadata.get("observacoes") or ""),
+        "fit_titulo": str(metadata.get("titulo") or ""),
+    }
+    return report_payload
+
+
 def _run_simulation_with_engine(fit_payload, sim_params, progress_callback=None, cancel_checker=None):
     common_args = (
         fit_payload,
@@ -737,8 +935,48 @@ def reometria_fit_update(fit_id):
         return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
 
     family = str(payload_current.get("model_family") or DEFAULT_KINETIC_MODEL_FAMILY).strip().lower()
-    kinetic_key = "k0" if family == MODEL_FAMILY_EDO_ORDER_N_V1 else "k_ref"
+    if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+        updates = {}
+        for key in ("Av1", "Av2", "Ev", "X", "Ar", "Er"):
+            value = parse_float_locale(data.get(key), default=None)
+            if value is None:
+                return jsonify({"success": False, "message": f"Parametro {key} invalido."}), 400
+            rounded = _round_two_decimals(value)
+            updates[key] = float(value if rounded is None else rounded)
 
+        if updates["Av1"] <= 0 or updates["Av2"] <= 0:
+            return jsonify({"success": False, "message": "Av1 e Av2 devem ser positivos."}), 400
+        if not (0.0 < updates["X"] < 1.0):
+            return jsonify({"success": False, "message": "X deve estar no intervalo (0, 1)."}), 400
+        if updates["Ar"] < 0:
+            return jsonify({"success": False, "message": "Ar nao pode ser negativo."}), 400
+
+        payload = update_fit_parameters(fit_id, parameter_updates=updates)
+        if not payload:
+            return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "Parametros atualizados com sucesso.",
+                "fit_id": payload.get("fit_id"),
+                "model_family": payload.get("model_family"),
+                "model_version": payload.get("model_version"),
+                "reference_temperature_K": _safe_float(payload.get("reference_temperature_K"), default=None),
+                "cure_completion_rule": payload.get("cure_completion_rule"),
+                "Av1": float(_round_two_decimals(payload.get("Av1")) or 0.0),
+                "Av2": float(_round_two_decimals(payload.get("Av2")) or 0.0),
+                "Ev": float(_round_two_decimals(payload.get("Ev")) or 0.0),
+                "X": float(_round_two_decimals(payload.get("X")) or 0.0),
+                "Ar": float(_round_two_decimals(payload.get("Ar")) or 0.0),
+                "Er": float(_round_two_decimals(payload.get("Er")) or 0.0),
+                "calibration_stage_selected": payload.get("calibration_stage_selected"),
+                "identifiability": payload.get("identifiability"),
+                "alerts": payload.get("alerts") or [],
+            }
+        )
+
+    kinetic_key = "k0" if family == MODEL_FAMILY_EDO_ORDER_N_V1 else "k_ref"
     k_value = parse_float_locale(data.get(kinetic_key), default=None)
     if k_value is None:
         k_value = parse_float_locale(data.get("k0"), default=None)
@@ -944,3 +1182,53 @@ def reometria_simulate_view(sim_id):
     sim = normalize_simulation_output(sim, engine=(engine_used or ENGINE_EMPIRICAL_V1))
     serializable = _serialize_for_json(sim)
     return render_template("reometria/sim_view.html", sim=sim, sim_json=json.dumps(serializable))
+
+
+@reometria_bp.route("/reometria/simulate/export/<sim_id>")
+@login_required
+def reometria_simulate_export(sim_id):
+    engine_hint = request.args.get("engine", ENGINE_EMPIRICAL_V1)
+    sim, engine_used = _load_simulation_with_engine(sim_id, engine_hint=engine_hint)
+    if not sim:
+        flash("Simulacao nao encontrada.", "danger")
+        return redirect(url_for("reometria.reometria_fit"))
+
+    sim_norm = normalize_simulation_output(sim, engine=(engine_used or ENGINE_EMPIRICAL_V1))
+    fit_payload = load_fit_payload(sim_norm.get("fit_id")) if sim_norm.get("fit_id") else None
+    export_bundle = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "simulation": _serialize_for_json(sim_norm),
+        "fit": _serialize_for_json(fit_payload) if isinstance(fit_payload, dict) else None,
+    }
+    body = json.dumps(export_bundle, ensure_ascii=False, indent=2)
+    filename = f"reometria_sim_{sim_id}.json"
+    return Response(
+        body,
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@reometria_bp.route("/reometria/simulate/report/<sim_id>")
+@login_required
+def reometria_simulate_report(sim_id):
+    engine_hint = request.args.get("engine", ENGINE_EMPIRICAL_V1)
+    sim, engine_used = _load_simulation_with_engine(sim_id, engine_hint=engine_hint)
+    if not sim:
+        flash("Simulacao nao encontrada.", "danger")
+        return redirect(url_for("reometria.reometria_fit"))
+
+    sim_norm = normalize_simulation_output(sim, engine=(engine_used or ENGINE_EMPIRICAL_V1))
+    fit_id = str(sim_norm.get("fit_id") or "").strip()
+    fit_payload = load_fit_payload(fit_id) if fit_id else {}
+
+    times_raw = sim_norm.get("times")
+    times_arr = np.asarray(times_raw if times_raw is not None else [], dtype=float).reshape(-1)
+    max_idx = max(int(times_arr.size - 1), 0)
+    selected_steps = _parse_three_step_indices(request.args.get("steps"), max_idx=max_idx)
+    report_payload = _build_simulation_report_payload(sim_norm, fit_payload, selected_steps)
+    return render_template(
+        "reometria/sim_report.html",
+        report=report_payload,
+        report_json=json.dumps(_serialize_for_json(report_payload), ensure_ascii=False),
+    )

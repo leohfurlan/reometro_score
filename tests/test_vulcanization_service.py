@@ -221,3 +221,43 @@ def test_load_simulation_normalized_exposes_unified_schema(tmp_path, monkeypatch
     assert "alpha_c" in sim
     assert "alpha_r" in sim
     assert "heat_source" in sim
+
+
+def test_leroy_model_simulation_exposes_alpha_v_and_unstable_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "OUT_DIR", tmp_path)
+    fit_payload = {
+        "fit_id": "fit_leroy",
+        "model_family": "leroy2013_continuous_v1",
+        "model_parameters": {
+            "Av1": 0.015,
+            "Av2": 0.050,
+            "Ev": 90000.0,
+            "X": 0.62,
+            "Ar": 1.0,
+            "Er": 125000.0,
+        },
+    }
+    sim_id, _ = vs.run_simulation(
+        fit_payload=fit_payload,
+        mode="prensa",
+        dim=1,
+        shape_raw="24",
+        dx=0.001,
+        dt=2.0,
+        t_end=300.0,
+        mold_temp_c=185.0,
+        init_temp_c=25.0,
+        ramp_rate=0.0,
+        snapshot_every=10,
+    )
+    sim = vs.load_simulation(sim_id)
+
+    alpha_v = np.asarray(sim["alpha_v_snaps"], dtype=float)
+    alpha_unstable = np.asarray(sim["alpha_unstable_snaps"], dtype=float)
+    alpha_total = np.asarray(sim["alpha_snaps"], dtype=float)
+
+    assert alpha_v.shape == alpha_total.shape
+    assert alpha_unstable.shape == alpha_total.shape
+    assert np.all(np.diff(np.mean(alpha_v, axis=1)) >= -1e-8)
+    assert float(np.min(alpha_total)) >= 0.0
+    assert float(np.max(alpha_total)) <= 1.0

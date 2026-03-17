@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -88,6 +89,25 @@ def test_fit_synthetic_isothermal_pinheiro_sigmoidal_teq():
     assert fit["fit_method"] == "least_squares"
     assert fit["k_ref"] > 0.0
     assert abs(fit["n"] - true_params["n"]) < 0.35
+
+
+def test_fit_auto_selects_best_model_for_pinheiro_synthetic():
+    rng = np.random.default_rng(20260317)
+    reference_temperature_k = 433.15
+    true_params = {"k_ref": 1.5e-4, "Ea": 76000.0, "n": 2.0}
+    curves = _build_synthetic_curves(rng, true_params, reference_temperature_k)
+
+    fit = kms.fit_model_parameters(
+        curves,
+        model_family=kms.MODEL_FAMILY_AUTO,
+        reference_temperature_k=reference_temperature_k,
+    )
+
+    assert fit["success"] is True
+    assert fit["requested_model_family"] == kms.MODEL_FAMILY_AUTO
+    assert fit["model_family"] == kms.MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1
+    assert fit["auto_selected_model_family"] == kms.MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1
+    assert "auto_model_selection" in fit
 
 
 def test_nonisothermal_equivalent_time_and_alpha_are_monotonic():
@@ -241,3 +261,193 @@ def test_txx_metrics_include_t30_t50_t90_t95_t99():
 
     assert {0.30, 0.50, 0.90, 0.95, 0.99}.issubset(targets)
     assert any(row["error_s"] is not None for row in rows)
+
+
+def _build_leroy_synthetic_curves():
+    params = {
+        "Av1": 0.010,
+        "Av2": 0.045,
+        "Ev": 90000.0,
+        "X": 0.68,
+        "Ar": 0.25,
+        "Er": 135000.0,
+    }
+    curves = []
+    for idx, temp_c in enumerate([155.0, 170.0, 185.0], start=1):
+        time = np.linspace(0.0, 900.0, 361, dtype=float)
+        temp_k = np.full_like(time, fill_value=temp_c + 273.15, dtype=float)
+        states = kms.integrate_leroy2013_states(time, temp_k, params)
+        alpha = np.asarray(states["alpha_total"], dtype=float)
+        curves.append(
+            {
+                "COD_ENSAIO": idx,
+                "T_C": float(temp_c),
+                "T_K": float(temp_c + 273.15),
+                "t_rel": time,
+                "alpha": np.clip(alpha + 0.002 * np.sin(time / 40.0), 0.0, 1.0),
+            }
+        )
+    return curves
+
+
+def test_leroy2013_integration_monotonic_and_bounded():
+    params = {
+        "Av1": 0.012,
+        "Av2": 0.040,
+        "Ev": 90000.0,
+        "X": 0.65,
+        "Ar": 0.15,
+        "Er": 130000.0,
+    }
+    time = np.linspace(0.0, 1200.0, 601, dtype=float)
+    temp = np.full_like(time, fill_value=453.15, dtype=float)
+    states = kms.integrate_leroy2013_states(time, temp, params)
+
+    alpha_v = np.asarray(states["alpha_v"], dtype=float)
+    alpha_total = np.asarray(states["alpha_total"], dtype=float)
+    assert np.all(np.diff(alpha_v) >= -1e-10)
+    assert float(np.min(alpha_total)) >= 0.0
+    assert float(np.max(alpha_total)) <= 1.0
+
+
+def test_leroy2013_reversion_possible_at_high_temperature():
+    params = {
+        "Av1": 5000.0,
+        "Av2": 7000.0,
+        "Ev": 42000.0,
+        "X": 0.40,
+        "Ar": 1.0e6,
+        "Er": 85000.0,
+    }
+    time = np.linspace(0.0, 1800.0, 901, dtype=float)
+    temp = np.full_like(time, fill_value=483.15, dtype=float)
+    states = kms.integrate_leroy2013_states(time, temp, params)
+    alpha_total = np.asarray(states["alpha_total"], dtype=float)
+
+    assert float(np.max(alpha_total)) > float(alpha_total[-1]) + 1e-3
+
+
+def test_leroy2013_hierarchical_seed_stage1_stage2_pipeline():
+    curves = _build_leroy_synthetic_curves()
+    seed = kms.fit_leroy2013_isothermal_seed(curves)
+    assert seed["success"] is True
+    assert len(seed["seed_rows"]) == len(curves)
+
+    stage1 = kms.fit_leroy2013_global_stage1(curves, seed_statistics=seed["seed_statistics"])
+    assert stage1["success"] is True
+    assert stage1["calibration_stage"] == "stage1"
+
+    stage2 = kms.fit_leroy2013_global_stage2(curves, stage1_result=stage1)
+    assert stage2["calibration_stage_selected"] in {"stage1", "stage2_ev", "stage2_ev_er"}
+
+    fit = kms.fit_model_parameters(curves, model_family=kms.MODEL_FAMILY_LEROY2013_CONTINUOUS_V1)
+    assert fit["success"] is True
+    assert fit["calibration_strategy"] == "hierarchical_v1"
+    assert fit["calibration_stage_selected"] in {"stage1", "stage2_ev", "stage2_ev_er"}
+    assert "identifiability" in fit
+
+
+def test_leroy2013_stage2_fallback_with_insufficient_temperature_span():
+    curves = _build_leroy_synthetic_curves()[:2]
+    seed = kms.fit_leroy2013_isothermal_seed(curves)
+    stage1 = kms.fit_leroy2013_global_stage1(curves, seed_statistics=seed["seed_statistics"])
+    stage2 = kms.fit_leroy2013_global_stage2(curves, stage1_result=stage1)
+
+    assert stage2["calibration_stage_selected"] == "stage1"
+
+
+def test_identifiability_flags_high_correlation_and_bounds():
+    jac_col = np.linspace(0.1, 1.0, 40)
+    jac = np.column_stack([jac_col, jac_col * 0.999999])
+    lsq = SimpleNamespace(x=np.asarray([0.999, 0.001], dtype=float), jac=jac)
+    ident = kms.evaluate_parameter_identifiability(
+        lsq,
+        ["p1", "p2"],
+        bounds=(np.asarray([0.0, 0.0]), np.asarray([1.0, 1.0])),
+    )
+
+    assert ident["status"] in {"warning", "poor"}
+    assert len(ident["high_correlation_pairs"]) >= 1
+    assert len(ident["parameters_near_bounds"]) >= 1
+
+
+def test_leroy_av2_bound_extended_to_40000():
+    params = kms.extract_model_parameters(
+        {
+            "model_family": kms.MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
+            "model_parameters": {
+                "Av1": 1.0,
+                "Av2": 999999.0,
+                "Ev": 90000.0,
+                "X": 0.6,
+                "Ar": 0.1,
+                "Er": 140000.0,
+            },
+        },
+        model_family=kms.MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
+    )
+    assert abs(float(params["Av2"]) - 40000.0) < 1e-9
+
+
+def test_saved_leroy_fit_payload_round_trip_preserves_hierarchical_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(ks, "OUT_DIR", tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "fit_id": "fit_leroy_roundtrip",
+        "created_at": "2026-03-17T12:00:00",
+        "success": True,
+        "message": "ok",
+        "model_family": "leroy2013_continuous_v1",
+        "model_version": "v1",
+        "fit_method": "least_squares",
+        "reference_temperature_K": 433.15,
+        "model_parameters": {
+            "Av1": 0.012,
+            "Av2": 0.042,
+            "Ev": 90000.0,
+            "X": 0.66,
+            "Ar": 0.25,
+            "Er": 130000.0,
+        },
+        "Av1": 0.012,
+        "Av2": 0.042,
+        "Ev": 90000.0,
+        "X": 0.66,
+        "Ar": 0.25,
+        "Er": 130000.0,
+        "calibration_strategy": "hierarchical_v1",
+        "calibration_stage_selected": "stage2_ev",
+        "seed_statistics": {"Av1_median": 0.011, "Av2_median": 0.041, "X_median": 0.65, "Ar_median": 0.2},
+        "identifiability": {
+            "status": "warning",
+            "parameters_near_bounds": [],
+            "high_correlation_pairs": [],
+            "condition_indicator": 1e8,
+        },
+        "ensaios": [{"COD_ENSAIO": 1, "T_C": 170.0, "T_K": 443.15}],
+        "curves": [
+            {
+                "COD_ENSAIO": 1,
+                "T_C": 170.0,
+                "T_K": 443.15,
+                "ML": 1.0,
+                "MH": 5.0,
+                "tempo": np.linspace(0.0, 300.0, 61).tolist(),
+                "torque": np.linspace(1.0, 4.8, 61).tolist(),
+                "t_rel": np.linspace(0.0, 300.0, 61).tolist(),
+                "alpha": np.linspace(0.0, 0.95, 61).tolist(),
+            }
+        ],
+    }
+
+    ks.save_fit_payload(payload)
+    loaded = ks.load_fit_payload("fit_leroy_roundtrip")
+
+    assert loaded["model_family"] == "leroy2013_continuous_v1"
+    assert loaded["calibration_strategy"] == "hierarchical_v1"
+    assert loaded["calibration_stage_selected"] == "stage2_ev"
+    assert "seed_statistics" in loaded
+    assert "identifiability" in loaded
+    assert "alpha_v_model" in loaded["curves"][0]
+    assert "alpha_unstable_model" in loaded["curves"][0]

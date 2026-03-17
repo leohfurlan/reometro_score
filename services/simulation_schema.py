@@ -46,6 +46,7 @@ OPTIONAL_FIELDS = (
     "clip_events_count",
     "nan_recovery_events",
     "numerical_warnings",
+    "alpha_unstable_snaps",
 )
 
 
@@ -196,6 +197,7 @@ def normalize_simulation_output(raw_payload, *, engine):
     alpha_snaps = _to_numpy(payload.get("alpha_snaps"), np.float32)
     alpha_c_snaps = _to_numpy(payload.get("alpha_c_snaps"), np.float32)
     alpha_r_snaps = _to_numpy(payload.get("alpha_r_snaps"), np.float32)
+    alpha_unstable_snaps = _to_numpy(payload.get("alpha_unstable_snaps"), np.float32)
 
     if alpha_snaps.size == 0 and alpha_c_snaps.size > 0:
         if alpha_r_snaps.size == 0:
@@ -208,6 +210,8 @@ def normalize_simulation_output(raw_payload, *, engine):
         alpha_r_snaps = np.zeros_like(alpha_c_snaps, dtype=np.float32)
     if alpha_snaps.size == 0:
         alpha_snaps = np.clip(alpha_c_snaps - alpha_r_snaps, 0.0, 1.0).astype(np.float32, copy=False)
+    if alpha_unstable_snaps.size == 0:
+        alpha_unstable_snaps = np.clip(alpha_c_snaps - alpha_snaps, 0.0, 1.0).astype(np.float32, copy=False)
 
     heat_source_snaps = _to_numpy(payload.get("heat_source_snaps", payload.get("q_source_snaps")), np.float32)
     if heat_source_snaps.size == 0:
@@ -332,10 +336,12 @@ def normalize_simulation_output(raw_payload, *, engine):
             "temperature_snapshots": t_snaps,
             "alpha_c_snaps": alpha_c_snaps,
             "alpha_r_snaps": alpha_r_snaps,
+            "alpha_unstable_snaps": alpha_unstable_snaps,
             "alpha_snaps": alpha_snaps,
             "heat_source_snaps": heat_source_snaps,
             "alpha_c": alpha_c_snaps,
             "alpha_r": alpha_r_snaps,
+            "alpha_unstable": alpha_unstable_snaps,
             "alpha": alpha_snaps,
             "heat_source": heat_source_snaps,
             "metrics": metrics,

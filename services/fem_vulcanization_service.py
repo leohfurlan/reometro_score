@@ -19,7 +19,11 @@ from services.thermo_solver import (
     RHO_RUBBER,
     reaction_heat_source,
 )
-from services.kinetic_model_service import extract_model_parameters, normalize_model_family
+from services.kinetic_model_service import (
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
+    extract_model_parameters,
+    normalize_model_family,
+)
 
 try:
     from fipy import CellVariable, CylindricalGrid2D, DiffusionTerm, TransientTerm
@@ -74,14 +78,26 @@ def _build_kinetics(config):
     family = normalize_model_family(fit_payload.get("model_family"))
     fit_params = extract_model_parameters(fit_payload, model_family=family)
 
-    if fit_params.get("k0") is not None:
-        merged["Ac"] = float(fit_params["k0"])
-    elif fit_params.get("k_ref") is not None:
-        merged["Ac"] = float(fit_params["k_ref"])
-    if fit_params.get("Ea") is not None:
-        merged["Eac"] = float(fit_params["Ea"])
-    if fit_params.get("n") is not None:
-        merged["Nn"] = float(fit_params["n"])
+    if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+        av1 = float(max(fit_params.get("Av1", merged["Ac"]), 0.0))
+        av2 = float(max(fit_params.get("Av2", 0.0), 0.0))
+        merged["Ac"] = av1
+        merged["Eac"] = float(max(fit_params.get("Ev", merged["Eac"]), 0.0))
+        merged["Kn"] = float(np.clip(av2 / max(av1, 1e-12), 0.0, 1000.0))
+        merged["Nn"] = 2.0
+        merged["Ar"] = float(max(fit_params.get("Ar", merged["Ar"]), 0.0))
+        merged["Ear"] = float(max(fit_params.get("Er", merged["Ear"]), 0.0))
+        merged["Kx"] = 1.0
+        merged["Nx"] = 1.0
+    else:
+        if fit_params.get("k0") is not None:
+            merged["Ac"] = float(fit_params["k0"])
+        elif fit_params.get("k_ref") is not None:
+            merged["Ac"] = float(fit_params["k_ref"])
+        if fit_params.get("Ea") is not None:
+            merged["Eac"] = float(fit_params["Ea"])
+        if fit_params.get("n") is not None:
+            merged["Nn"] = float(fit_params["n"])
 
     for key in merged:
         if key in kinetics_params and kinetics_params[key] is not None:
@@ -150,6 +166,11 @@ def run_fem_simulation(config):
 
     cfg = _validated_config(config)
     kinetics = _build_kinetics(cfg)
+    fit_payload = dict(cfg.get("fit_payload") or {})
+    model_family = normalize_model_family(fit_payload.get("model_family"))
+    fit_params = extract_model_parameters(fit_payload, model_family=model_family)
+    use_leroy = model_family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1
+    leroy_x = float(np.clip(fit_params.get("X", 0.7), 1e-4, 1.0 - 1e-4))
     process_cfg = ProcessThermalConfig(
         mold_temperature_c=float(cfg["mold_temp_c"]),
         ambient_temperature_c=float(cfg["ambient_temperature_c"]),
@@ -193,6 +214,7 @@ def run_fem_simulation(config):
     t_snaps = []
     alpha_c_snaps = []
     alpha_r_snaps = []
+    alpha_unstable_snaps = []
     alpha_snaps = []
     q_source_snaps = []
     process_state_over_time = []
@@ -253,17 +275,24 @@ def run_fem_simulation(config):
             t_snaps.append(np.asarray(temp_k.value, dtype=np.float32).copy())
             alpha_c_snaps.append(np.asarray(alpha_c, dtype=np.float32).copy())
             alpha_r_snaps.append(np.asarray(alpha_r, dtype=np.float32).copy())
+            if use_leroy:
+                alpha_unstable = np.clip(((1.0 - leroy_x) * alpha_c) - alpha_r, 0.0, 1.0)
+            else:
+                alpha_unstable = np.zeros_like(alpha, dtype=float)
+            alpha_unstable_snaps.append(np.asarray(alpha_unstable, dtype=np.float32).copy())
             alpha_snaps.append(np.asarray(alpha, dtype=np.float32).copy())
             q_source_snaps.append(np.asarray(q_source_vals, dtype=np.float32).copy())
             process_state_over_time.append(process_sm.state.value)
 
     return {
+        "model_family": model_family,
         "solver_family": "fipy_axisymmetric_2d",
         "geometry": "axisymmetric_cylindrical_section",
         "times": np.asarray(times, dtype=np.float64),
         "t_snaps": np.asarray(t_snaps, dtype=np.float32),
         "alpha_c_snaps": np.asarray(alpha_c_snaps, dtype=np.float32),
         "alpha_r_snaps": np.asarray(alpha_r_snaps, dtype=np.float32),
+        "alpha_unstable_snaps": np.asarray(alpha_unstable_snaps, dtype=np.float32),
         "alpha_snaps": np.asarray(alpha_snaps, dtype=np.float32),
         "heat_source_snaps": np.asarray(q_source_snaps, dtype=np.float32),
         "process_state_over_time": np.asarray(process_state_over_time, dtype="<U16"),

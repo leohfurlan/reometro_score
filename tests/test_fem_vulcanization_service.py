@@ -77,3 +77,25 @@ def test_run_fem_simulation_normalized_exposes_engine_and_schema():
     assert sim["engine_status"] == "prototype"
     assert sim["geometry_type"] == "axisymmetric_cylindrical_section"
     assert "temperature_snapshots" in sim
+
+
+def test_run_fem_simulation_with_leroy_payload_exposes_alpha_unstable():
+    cfg = _base_config()
+    cfg["kinetics_params"] = {}
+    cfg["fit_payload"] = {
+        "model_family": "leroy2013_continuous_v1",
+        "model_parameters": {
+            "Av1": 0.012,
+            "Av2": 0.040,
+            "Ev": 90000.0,
+            "X": 0.65,
+            "Ar": 0.20,
+            "Er": 130000.0,
+        },
+    }
+
+    sim = run_fem_simulation(cfg)
+
+    assert sim["model_family"] == "leroy2013_continuous_v1"
+    assert "alpha_unstable_snaps" in sim
+    assert np.asarray(sim["alpha_unstable_snaps"]).shape == np.asarray(sim["alpha_snaps"]).shape

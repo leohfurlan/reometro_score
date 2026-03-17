@@ -4,6 +4,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 from flask import Blueprint, Flask
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -237,6 +238,88 @@ def test_reometria_fit_update_accepts_k0_for_edo(monkeypatch):
     assert abs(float(data["n"]) - 1.3) < 1e-9
 
 
+def test_reometria_fit_update_accepts_leroy_parameters(monkeypatch):
+    app = _create_test_app()
+    current_payload = {
+        "fit_id": "fit_update_leroy",
+        "model_family": "leroy2013_continuous_v1",
+        "Av1": 0.01,
+        "Av2": 0.04,
+        "Ev": 90000.0,
+        "X": 0.65,
+        "Ar": 0.20,
+        "Er": 140000.0,
+        "calibration_stage_selected": "stage1",
+        "identifiability": {"status": "warning"},
+        "alerts": ["identifiability_warning"],
+    }
+
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(current_payload))
+
+    def _update_fit_parameters(_fit_id, *args, **kwargs):
+        out = dict(current_payload)
+        updates = dict(kwargs.get("parameter_updates") or {})
+        out.update(updates)
+        return out
+
+    monkeypatch.setattr(rr, "update_fit_parameters", _update_fit_parameters)
+
+    client = app.test_client()
+    response = client.post(
+        "/reometria/fit/update/fit_update_leroy",
+        json={
+            "Av1": 0.015,
+            "Av2": 0.050,
+            "Ev": 92000.0,
+            "X": 0.70,
+            "Ar": 0.25,
+            "Er": 150000.0,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert abs(float(data["Av1"]) - 0.02) < 1e-12
+    assert abs(float(data["Av2"]) - 0.050) < 1e-12
+    assert abs(float(data["Ev"]) - 92000.0) < 1e-9
+    assert abs(float(data["X"]) - 0.70) < 1e-12
+    assert abs(float(data["Ar"]) - 0.25) < 1e-12
+    assert abs(float(data["Er"]) - 150000.0) < 1e-9
+
+
+def test_reometria_fit_result_renders_leroy_without_legacy_parameters(monkeypatch):
+    app = _create_test_app()
+    payload = _base_payload()
+    payload.update(
+        {
+            "fit_id": "fit_result_leroy",
+            "model_family": "leroy2013_continuous_v1",
+            "Av1": 0.01,
+            "Av2": 0.04,
+            "Ev": 90000.0,
+            "X": 0.65,
+            "Ar": 0.20,
+            "Er": 140000.0,
+            "calibration_stage_selected": "stage1",
+        }
+    )
+    payload.pop("Ea", None)
+    payload.pop("n", None)
+    payload.pop("k0", None)
+    payload.pop("k_ref", None)
+
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(payload))
+    monkeypatch.setattr(rr, "build_alpha_time_comparison", lambda _payload: [])
+    monkeypatch.setattr(rr, "list_simulations_by_fit", lambda _fit_id: [])
+
+    client = app.test_client()
+    response = client.get("/reometria/fit/result/fit_result_leroy")
+
+    assert response.status_code == 200
+    assert b"leroy2013_continuous_v1" in response.data
+
+
 def test_list_simulations_by_fit_returns_empty_list(tmp_path, monkeypatch):
     monkeypatch.setattr(rr, "_REOMETRIA_OUT_DIR", tmp_path)
     assert rr.list_simulations_by_fit("fit_any") == []
@@ -417,6 +500,19 @@ def test_reometria_fit_renders_history_section(monkeypatch):
     assert "Abrir Relatorio" in body
 
 
+def test_reometria_fit_form_lists_leroy_model_option(monkeypatch):
+    app = _create_test_app()
+    monkeypatch.setattr(rr, "list_ensaios_for_fit", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(rr, "list_fit_reports", lambda **_kwargs: [])
+
+    client = app.test_client()
+    response = client.get("/reometria/fit")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'value="leroy2013_continuous_v1"' in body
+
+
 def test_fit_result_renders_empty_simulation_state(monkeypatch):
     app = _create_test_app()
     payload = _base_payload()
@@ -463,3 +559,113 @@ def test_fit_result_renders_simulation_rows(monkeypatch):
     assert response.status_code == 200
     assert "20260310151515_new22222" in body
     assert "Visualizar Resultados" in body
+
+
+def _sample_simulation_payload(sim_id="20260317144831_ef9ca559", fit_id="fit_test"):
+    return {
+        "sim_id": sim_id,
+        "fit_id": fit_id,
+        "engine": rr.ENGINE_EMPIRICAL_V1,
+        "engine_status": "stable",
+        "mode": "prensa",
+        "dim": 2,
+        "shape": [3, 3],
+        "dx": 0.001,
+        "times": [0.0, 30.0, 60.0, 90.0, 120.0],
+        "t_snaps": [
+            [[300.0, 300.0, 300.0], [300.0, 300.0, 300.0], [300.0, 300.0, 300.0]],
+            [[320.0, 322.0, 324.0], [321.0, 323.0, 325.0], [322.0, 324.0, 326.0]],
+            [[330.0, 332.0, 334.0], [331.0, 333.0, 335.0], [332.0, 334.0, 336.0]],
+            [[340.0, 342.0, 344.0], [341.0, 343.0, 345.0], [342.0, 344.0, 346.0]],
+            [[350.0, 352.0, 354.0], [351.0, 353.0, 355.0], [352.0, 354.0, 356.0]],
+        ],
+        "alpha_snaps": [
+            [[0.01, 0.02, 0.03], [0.02, 0.03, 0.04], [0.03, 0.04, 0.05]],
+            [[0.10, 0.12, 0.14], [0.11, 0.13, 0.15], [0.12, 0.14, 0.16]],
+            [[0.22, 0.24, 0.26], [0.23, 0.25, 0.27], [0.24, 0.26, 0.28]],
+            [[0.34, 0.36, 0.38], [0.35, 0.37, 0.39], [0.36, 0.38, 0.40]],
+            [[0.44, 0.46, 0.48], [0.45, 0.47, 0.49], [0.46, 0.48, 0.50]],
+        ],
+    }
+
+
+def test_reometria_simulate_view_renders_report_actions(monkeypatch):
+    app = _create_test_app()
+    sim_payload = _sample_simulation_payload()
+
+    monkeypatch.setattr(rr, "_load_simulation_with_engine", lambda _sim_id, engine_hint=None: (dict(sim_payload), rr.ENGINE_EMPIRICAL_V1))
+    monkeypatch.setattr(rr, "normalize_simulation_output", lambda payload, engine: payload)
+
+    client = app.test_client()
+    response = client.get("/reometria/simulate/view/20260317144831_ef9ca559")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Salvar simulacao (JSON)" in body
+    assert "Gerar relatorio com steps selecionados" in body
+    assert 'id="report_step_1"' in body
+    assert "/reometria/simulate/report/20260317144831_ef9ca559" in body
+
+
+def test_reometria_simulate_export_returns_json_attachment(monkeypatch):
+    app = _create_test_app()
+    sim_payload = _sample_simulation_payload()
+    fit_payload = {"fit_id": "fit_test", "model_family": "edo_order_n_v1", "Ea": 80000.0, "n": 1.2}
+
+    monkeypatch.setattr(rr, "_load_simulation_with_engine", lambda _sim_id, engine_hint=None: (dict(sim_payload), rr.ENGINE_EMPIRICAL_V1))
+    monkeypatch.setattr(rr, "normalize_simulation_output", lambda payload, engine: payload)
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(fit_payload))
+
+    client = app.test_client()
+    response = client.get("/reometria/simulate/export/20260317144831_ef9ca559")
+
+    assert response.status_code == 200
+    assert "attachment; filename=\"reometria_sim_20260317144831_ef9ca559.json\"" in response.headers.get("Content-Disposition", "")
+    exported = json.loads(response.get_data(as_text=True))
+    assert exported["simulation"]["sim_id"] == "20260317144831_ef9ca559"
+    assert exported["fit"]["fit_id"] == "fit_test"
+
+
+def test_reometria_simulate_report_renders_selected_steps_and_fit_data(monkeypatch):
+    app = _create_test_app()
+    sim_payload = _sample_simulation_payload()
+    fit_payload = {
+        "fit_id": "fit_test",
+        "model_family": "leroy2013_continuous_v1",
+        "fit_method": "least_squares",
+        "model_version": "v1",
+        "Av1": 0.01,
+        "Av2": 0.04,
+        "Ev": 90000.0,
+        "X": 0.65,
+        "Ar": 0.20,
+        "Er": 140000.0,
+        "metadata": {"titulo": "Estudo Report", "observacoes": "Observacao tecnica do fit"},
+        "curves": [
+            {
+                "COD_ENSAIO": 123,
+                "T_C": 170.0,
+                "tempo": [0.0, 10.0, 20.0],
+                "torque": [1.0, 2.0, 3.0],
+                "t_rel": [0.0, 10.0, 20.0],
+                "alpha": [0.0, 0.4, 0.8],
+                "alpha_model": [0.0, 0.45, 0.82],
+                "ML": 1.0,
+                "MH": np.asarray([4.0, 4.2], dtype=float),
+            }
+        ],
+    }
+
+    monkeypatch.setattr(rr, "_load_simulation_with_engine", lambda _sim_id, engine_hint=None: (dict(sim_payload), rr.ENGINE_EMPIRICAL_V1))
+    monkeypatch.setattr(rr, "normalize_simulation_output", lambda payload, engine: payload)
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(fit_payload))
+
+    client = app.test_client()
+    response = client.get("/reometria/simulate/report/20260317144831_ef9ca559?steps=0,2,4")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Relatorio de Simulacao 20260317144831_ef9ca559" in body
+    assert "Observacao tecnica do fit" in body
+    assert "report_alpha_curves" in body
+    assert "report_step_cure_0" in body

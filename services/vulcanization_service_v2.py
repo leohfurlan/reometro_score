@@ -24,7 +24,11 @@ from services.thermo_solver import (
     reaction_heat_source,
     thermal_increment_from_source,
 )
-from services.kinetic_model_service import extract_model_parameters, normalize_model_family
+from services.kinetic_model_service import (
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
+    extract_model_parameters,
+    normalize_model_family,
+)
 
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -169,9 +173,9 @@ def _snapshot_plan(shape, dim, steps, snapshot_every):
         return indices
 
     def _estimated_bytes(current_shape, index_count):
-        # Stored fields: temperature, alpha_c, alpha_r, alpha, heat_source, induction_progress.
+        # Stored fields: temperature, alpha_c, alpha_r, alpha_unstable, alpha, heat_source, induction_progress.
         cells = int(np.prod(current_shape, dtype=np.int64))
-        return cells * index_count * 6 * np.dtype(np.float32).itemsize
+        return cells * index_count * 7 * np.dtype(np.float32).itemsize
 
     stored_shape = _stored_shape_for_stride(stride)
     snapshot_every_store = base_every
@@ -826,14 +830,26 @@ def _build_kinetics(fit_payload, kinetics_params):
     if isinstance(fit_payload, dict):
         family = normalize_model_family(fit_payload.get("model_family"))
         params = extract_model_parameters(fit_payload, model_family=family)
-        if params.get("k0") is not None:
-            merged["Ac"] = float(params["k0"])
-        elif params.get("k_ref") is not None:
-            merged["Ac"] = float(params["k_ref"])
-        if params.get("Ea") is not None:
-            merged["Eac"] = float(params["Ea"])
-        if params.get("n") is not None:
-            merged["Nn"] = float(params["n"])
+        if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+            av1 = float(max(_safe_float(params.get("Av1"), default=merged["Ac"]), 0.0))
+            av2 = float(max(_safe_float(params.get("Av2"), default=0.0), 0.0))
+            merged["Ac"] = av1
+            merged["Eac"] = float(max(_safe_float(params.get("Ev"), default=merged["Eac"]), 0.0))
+            merged["Kn"] = float(np.clip(av2 / max(av1, 1e-12), 0.0, 1000.0))
+            merged["Nn"] = 2.0
+            merged["Ar"] = float(max(_safe_float(params.get("Ar"), default=merged["Ar"]), 0.0))
+            merged["Ear"] = float(max(_safe_float(params.get("Er"), default=merged["Ear"]), 0.0))
+            merged["Kx"] = 1.0
+            merged["Nx"] = 1.0
+        else:
+            if params.get("k0") is not None:
+                merged["Ac"] = float(params["k0"])
+            elif params.get("k_ref") is not None:
+                merged["Ac"] = float(params["k_ref"])
+            if params.get("Ea") is not None:
+                merged["Eac"] = float(params["Ea"])
+            if params.get("n") is not None:
+                merged["Nn"] = float(params["n"])
 
     if isinstance(kinetics_params, MechanisticKineticsParams):
         merged.update(asdict(kinetics_params))
@@ -875,6 +891,8 @@ def save_simulation_v2(
     lambda_rubber,
     qv,
     exotherm_enabled,
+    alpha_unstable_snaps=None,
+    model_family=None,
     metrics=None,
     numerical_warnings=None,
     induction_confidence="low",
@@ -919,10 +937,15 @@ def save_simulation_v2(
         dx=float(dx),
         dt=float(dt),
         t_end=float(t_end),
+        model_family=np.array(str(model_family or ""), dtype="<U64"),
         times=np.asarray(times, dtype=np.float64),
         t_snaps=np.asarray(t_snaps, dtype=np.float32),
         alpha_c_snaps=np.asarray(alpha_c_snaps, dtype=np.float32),
         alpha_r_snaps=np.asarray(alpha_r_snaps, dtype=np.float32),
+        alpha_unstable_snaps=np.asarray(
+            alpha_unstable_snaps if alpha_unstable_snaps is not None else np.zeros_like(alpha_snaps),
+            dtype=np.float32,
+        ),
         alpha_snaps=np.asarray(alpha_snaps, dtype=np.float32),
         heat_source_snaps=np.asarray(heat_source_snaps, dtype=np.float32),
         induction_progress_snaps=np.asarray(
@@ -1001,6 +1024,9 @@ def run_simulation_v2(
     e_ind_val = float(induction_info["E_ind"])
     alpha_diff = lambda_val / (rho_val * cp_val)
     use_imex_diffusion = str(thermal_integration_mode or "imex").lower() != "explicit"
+    model_family = normalize_model_family((fit_payload or {}).get("model_family"))
+    use_leroy_kinetics = model_family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1
+    leroy_params = extract_model_parameters(fit_payload or {}, model_family=model_family)
     kinetics = _build_kinetics(fit_payload, kinetics_params)
     process_config = ProcessThermalConfig(
         mold_temperature_c=float(mold_temp_c),
@@ -1100,6 +1126,17 @@ def run_simulation_v2(
         "alpha_initial",
         step=0,
     ).astype(np.float32, copy=False)
+    leroy_av1 = float(max(_safe_float(leroy_params.get("Av1"), default=0.0), 0.0))
+    leroy_av2 = float(max(_safe_float(leroy_params.get("Av2"), default=0.0), 0.0))
+    leroy_ev = float(max(_safe_float(leroy_params.get("Ev"), default=0.0), 0.0))
+    leroy_x = float(np.clip(_safe_float(leroy_params.get("X"), default=0.7), 1e-4, 1.0 - 1e-4))
+    leroy_ar = float(max(_safe_float(leroy_params.get("Ar"), default=0.0), 0.0))
+    leroy_er = float(max(_safe_float(leroy_params.get("Er"), default=0.0), 0.0))
+    alpha_unstable_field = np.clip(
+        ((1.0 - leroy_x) * np.asarray(alpha_c_field, dtype=float)) - np.asarray(alpha_r_field, dtype=float),
+        0.0,
+        1.0,
+    ).astype(np.float32, copy=False)
     q_source_field = np.zeros(shape, dtype=np.float32)
     induction_progress_field = np.zeros(shape, dtype=np.float32)
 
@@ -1116,6 +1153,7 @@ def run_simulation_v2(
     t_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     alpha_c_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     alpha_r_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
+    alpha_unstable_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     alpha_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     heat_source_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
     induction_progress_snaps = np.empty((store_count, *plan["stored_shape"]), dtype=np.float32)
@@ -1143,8 +1181,27 @@ def run_simulation_v2(
             else:
                 substeps_diffusion, _ = _substep_config(dt_step, alpha_diff, dx, dim)
 
-            pred_cure_rate = kinetics.cure_rate(T=t_field, alpha_c=np.asarray(alpha_c_field, dtype=float))
-            pred_reversion_rate = kinetics.reversion_rate(T=t_field, alpha_r=np.asarray(alpha_r_field, dtype=float))
+            if use_leroy_kinetics:
+                temp_pred = np.maximum(np.asarray(t_field, dtype=float), 1.0)
+                alpha_c_pred = np.asarray(alpha_c_field, dtype=float)
+                pred_cure_rate = (
+                    np.maximum(leroy_av1 + (leroy_av2 * alpha_c_pred), 0.0)
+                    * np.exp(np.clip(-leroy_ev / (R_GAS * temp_pred), -700.0, 700.0))
+                    * np.square(np.maximum(1.0 - alpha_c_pred, 0.0))
+                )
+                alpha_unstable_pred = np.clip(
+                    ((1.0 - leroy_x) * alpha_c_pred) - np.asarray(alpha_r_field, dtype=float),
+                    0.0,
+                    1.0,
+                )
+                pred_reversion_rate = (
+                    np.maximum(leroy_ar, 0.0)
+                    * np.exp(np.clip(-leroy_er / (R_GAS * temp_pred), -700.0, 700.0))
+                    * alpha_unstable_pred
+                )
+            else:
+                pred_cure_rate = kinetics.cure_rate(T=t_field, alpha_c=np.asarray(alpha_c_field, dtype=float))
+                pred_reversion_rate = kinetics.reversion_rate(T=t_field, alpha_r=np.asarray(alpha_r_field, dtype=float))
             max_pred_rate = max(
                 float(np.max(np.asarray(pred_cure_rate, dtype=float))),
                 float(np.max(np.asarray(pred_reversion_rate, dtype=float))),
@@ -1229,8 +1286,26 @@ def run_simulation_v2(
 
                 # Semi-implicit damping for cure/reversion rates:
                 # explicit rates are divided by a local saturation factor tied to remaining capacity.
-                cure_rate_now = kinetics.cure_rate(T=t_field, alpha_c=alpha_c_prev)
-                reversion_rate_now = kinetics.reversion_rate(T=t_field, alpha_r=alpha_r_prev)
+                if use_leroy_kinetics:
+                    temp_safe = np.maximum(np.asarray(t_field, dtype=float), 1.0)
+                    cure_rate_now = (
+                        np.maximum(leroy_av1 + (leroy_av2 * alpha_c_prev), 0.0)
+                        * np.exp(np.clip(-leroy_ev / (R_GAS * temp_safe), -700.0, 700.0))
+                        * np.square(np.maximum(1.0 - alpha_c_prev, 0.0))
+                    )
+                    alpha_unstable_prev = np.clip(
+                        ((1.0 - leroy_x) * alpha_c_prev) - alpha_r_prev,
+                        0.0,
+                        1.0,
+                    )
+                    reversion_rate_now = (
+                        np.maximum(leroy_ar, 0.0)
+                        * np.exp(np.clip(-leroy_er / (R_GAS * temp_safe), -700.0, 700.0))
+                        * alpha_unstable_prev
+                    )
+                else:
+                    cure_rate_now = kinetics.cure_rate(T=t_field, alpha_c=alpha_c_prev)
+                    reversion_rate_now = kinetics.reversion_rate(T=t_field, alpha_r=alpha_r_prev)
                 cure_capacity = np.maximum(1.0 - alpha_c_prev, 1e-6)
                 reversion_capacity = np.maximum(1.0 - alpha_r_prev, 1e-6)
                 delta_alpha_c = (cure_rate_now * dt_inner) / (
@@ -1245,6 +1320,8 @@ def run_simulation_v2(
 
                 alpha_c_next = np.where(induction_unlocked, alpha_c_next, alpha_c_prev)
                 alpha_r_next = np.minimum(alpha_r_next, alpha_c_next)
+                if use_leroy_kinetics:
+                    alpha_r_next = np.minimum(alpha_r_next, (1.0 - leroy_x) * alpha_c_next)
                 alpha_next = _clip_with_diagnostics(
                     alpha_c_next - alpha_r_next,
                     0.0,
@@ -1370,6 +1447,11 @@ def run_simulation_v2(
                     "alpha_state",
                     step=step,
                 ).astype(np.float32, copy=False)
+                alpha_unstable_field = np.clip(
+                    ((1.0 - leroy_x) * np.asarray(alpha_c_field, dtype=float)) - np.asarray(alpha_r_field, dtype=float),
+                    0.0,
+                    1.0,
+                ).astype(np.float32, copy=False)
                 process_sm.update(mean_alpha=float(np.mean(alpha_field)), t_now=t_sub)
 
             step_clip_events = int(numerical_diagnostics["clip_events_count"] - step_clip_start)
@@ -1450,6 +1532,7 @@ def run_simulation_v2(
             t_snaps[store_pos] = t_field[store_slices].astype(np.float32, copy=False)
             alpha_c_snaps[store_pos] = alpha_c_field[store_slices].astype(np.float32, copy=False)
             alpha_r_snaps[store_pos] = alpha_r_field[store_slices].astype(np.float32, copy=False)
+            alpha_unstable_snaps[store_pos] = alpha_unstable_field[store_slices].astype(np.float32, copy=False)
             alpha_snaps[store_pos] = alpha_field[store_slices].astype(np.float32, copy=False)
             heat_source_snaps[store_pos] = q_source_field[store_slices].astype(np.float32, copy=False)
             induction_progress_snaps[store_pos] = induction_progress_field[store_slices].astype(np.float32, copy=False)
@@ -1540,6 +1623,9 @@ def run_simulation_v2(
     )
 
     metrics_payload = {
+        "kinetic_model_family": model_family,
+        "leroy_state_fields": bool(use_leroy_kinetics),
+        "leroy_x_stable": float(leroy_x) if use_leroy_kinetics else None,
         "thermal_integration_mode": "imex_diffusion" if use_imex_diffusion else "explicit_split",
         "substeps_total": int(stiffness_track["total_substeps"]),
         "substeps_max_per_step": int(stiffness_track["max_substeps_per_step"]),
@@ -1603,6 +1689,7 @@ def run_simulation_v2(
         t_snaps=t_snaps,
         alpha_c_snaps=alpha_c_snaps,
         alpha_r_snaps=alpha_r_snaps,
+        alpha_unstable_snaps=alpha_unstable_snaps,
         alpha_snaps=alpha_snaps,
         heat_source_snaps=heat_source_snaps,
         induction_progress_snaps=induction_progress_snaps,
@@ -1616,6 +1703,7 @@ def run_simulation_v2(
         A_ind=a_ind_val,
         E_ind=e_ind_val,
         exotherm_enabled=bool(exotherm_enabled),
+        model_family=model_family,
         metrics=metrics_payload,
         numerical_warnings=numerical_diagnostics["numerical_warnings"],
         induction_confidence=induction_confidence_runtime,
@@ -1644,10 +1732,14 @@ def load_simulation_v2(sim_id):
     store_stride = int(d["store_stride"]) if "store_stride" in files else 1
     snapshot_every_source = int(d["snapshot_every_source"]) if "snapshot_every_source" in files else 20
     snapshot_every_store = int(d["snapshot_every_store"]) if "snapshot_every_store" in files else snapshot_every_source
+    model_family = str(d["model_family"]) if "model_family" in files else ""
 
     alpha_snaps = d["alpha_snaps"]
     alpha_c_snaps = d["alpha_c_snaps"] if "alpha_c_snaps" in files else alpha_snaps
     alpha_r_snaps = d["alpha_r_snaps"] if "alpha_r_snaps" in files else np.zeros_like(alpha_snaps)
+    alpha_unstable_snaps = (
+        d["alpha_unstable_snaps"] if "alpha_unstable_snaps" in files else np.clip(alpha_c_snaps - alpha_snaps, 0.0, 1.0)
+    )
     heat_source_snaps = d["heat_source_snaps"] if "heat_source_snaps" in files else np.zeros_like(alpha_snaps)
     induction_progress_snaps = (
         d["induction_progress_snaps"] if "induction_progress_snaps" in files else np.zeros_like(alpha_snaps)
@@ -1755,6 +1847,7 @@ def load_simulation_v2(sim_id):
         "store_stride": store_stride,
         "snapshot_every_source": snapshot_every_source,
         "snapshot_every_store": snapshot_every_store,
+        "model_family": model_family,
         "dx": float(d["dx"]) * float(store_stride),
         "dx_compute": float(d["dx"]),
         "dt": float(d["dt"]),
@@ -1763,6 +1856,7 @@ def load_simulation_v2(sim_id):
         "t_snaps": d["t_snaps"],
         "alpha_c_snaps": alpha_c_snaps,
         "alpha_r_snaps": alpha_r_snaps,
+        "alpha_unstable_snaps": alpha_unstable_snaps,
         "alpha_snaps": alpha_snaps,
         "heat_source_snaps": heat_source_snaps,
         "induction_progress_snaps": induction_progress_snaps,

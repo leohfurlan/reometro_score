@@ -19,14 +19,18 @@ from services.kinetic_model_service import (
     crossing_or_nearest_time,
     estimate_cure_completion_time,
     extract_model_parameters,
+    first_crossing_time,
     fit_model_parameters,
     normalize_cure_completion_rule,
     normalize_fit_method,
     normalize_model_family,
     predict_alpha,
+    predict_alpha_leroy2013,
     torque_from_alpha,
     update_model_parameters,
+    MODEL_FAMILY_AUTO,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
 )
@@ -42,9 +46,15 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 ALPHA_COMPARE_TARGETS_DEFAULT = [0.10, 0.20, 0.50, 0.90]
 
 MODEL_EXPRESSIONS = {
+    MODEL_FAMILY_AUTO: "auto_compare(edo_order_n_v1, pinheiro_sigmoidal_teq_v1)",
     MODEL_FAMILY_EDO_ORDER_N_V1: "dalpha/dt = k(T) * (1 - alpha)^n",
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1: "alpha = (k(T) * t^n) / (1 + k(T) * t^n)",
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1: "alpha = (k_ref * t_eq(t)^n) / (1 + k_ref * t_eq(t)^n)",
+    MODEL_FAMILY_LEROY2013_CONTINUOUS_V1: (
+        "d(alpha_v)/dt=(Av1+Av2*alpha_v)*exp(-Ev/(R*T))*(1-alpha_v)^2; "
+        "d(alpha_unstable)/dt=(1-X)*d(alpha_v)/dt-Ar*exp(-Er/(R*T))*alpha_unstable; "
+        "alpha_total=X*alpha_v+alpha_unstable"
+    ),
 }
 
 INDUCTION_MODEL_VERSION = 2
@@ -153,6 +163,95 @@ def _curve_temperature_profile_k(curve, t_rel):
     return np.maximum(out, 1.0)
 
 
+def _estimate_scorch_time_approx(t_rel, torque, time_floor_s=10.0):
+    time = np.asarray(t_rel, dtype=float)
+    tq = np.asarray(torque, dtype=float)
+    size = min(time.size, tq.size)
+    if size < 3:
+        return None
+
+    time = np.maximum.accumulate(np.maximum(time[:size], 0.0))
+    tq = tq[:size]
+    start_idx = int(np.searchsorted(time, float(max(time_floor_s, 0.0)), side="left"))
+    start_idx = int(np.clip(start_idx, 0, size - 1))
+    sub = tq[start_idx:]
+    if sub.size == 0:
+        return None
+    idx_local = int(np.argmin(sub))
+    idx = start_idx + idx_local
+    return float(time[idx])
+
+
+def _extract_curve_markers(curve):
+    t_rel_raw = curve.get("t_rel")
+    torque_raw = curve.get("torque")
+    alpha_raw = curve.get("alpha")
+    t_rel = np.asarray(t_rel_raw if t_rel_raw is not None else [], dtype=float)
+    torque = np.asarray(torque_raw if torque_raw is not None else [], dtype=float)
+    alpha = np.asarray(alpha_raw if alpha_raw is not None else [], dtype=float)
+    size = min(t_rel.size, torque.size, alpha.size)
+    if size < 3:
+        return {
+            "T10_s": None,
+            "T30_s": None,
+            "T50_s": None,
+            "T90_s": None,
+            "T95_s": None,
+            "T99_s": None,
+            "scorch_time_s": None,
+            "torque_max_observed": None,
+            "regions": {},
+            "reversion_detected": False,
+        }
+
+    t_rel = np.maximum.accumulate(np.maximum(t_rel[:size], 0.0))
+    torque = torque[:size]
+    alpha = np.clip(alpha[:size], 0.0, 1.0)
+
+    markers = {
+        "T10_s": first_crossing_time(t_rel, alpha, 0.10),
+        "T30_s": first_crossing_time(t_rel, alpha, 0.30),
+        "T50_s": first_crossing_time(t_rel, alpha, 0.50),
+        "T90_s": first_crossing_time(t_rel, alpha, 0.90),
+        "T95_s": first_crossing_time(t_rel, alpha, 0.95),
+        "T99_s": first_crossing_time(t_rel, alpha, 0.99),
+        "scorch_time_s": _estimate_scorch_time_approx(t_rel, torque, time_floor_s=8.0),
+        "torque_max_observed": float(np.max(torque)),
+    }
+
+    torque_peak_idx = int(np.argmax(torque))
+    tail_count = int(np.clip(round(size * 0.15), 5, max(size, 5)))
+    tail_mean = float(np.mean(torque[-tail_count:]))
+    drop_from_peak = float(torque[torque_peak_idx] - tail_mean)
+
+    induction_end_s = markers["T10_s"]
+    growth_start_s = markers["T10_s"]
+    growth_end_s = markers["T90_s"]
+    reversion_start_s = float(t_rel[torque_peak_idx]) if drop_from_peak > 0.03 else None
+
+    markers["regions"] = {
+        "induction": {"start_s": float(t_rel[0]), "end_s": induction_end_s},
+        "growth": {"start_s": growth_start_s, "end_s": growth_end_s},
+        "possible_reversion": {"start_s": reversion_start_s, "end_s": float(t_rel[-1]) if reversion_start_s is not None else None},
+    }
+    markers["reversion_detected"] = bool(reversion_start_s is not None)
+    markers["reversion_drop_torque"] = drop_from_peak if reversion_start_s is not None else 0.0
+    return markers
+
+
+def extract_experimental_markers(curves):
+    out = {}
+    for curve in curves or []:
+        code = curve.get("COD_ENSAIO")
+        out[code] = _extract_curve_markers(curve)
+    return out
+
+
+def _attach_curve_markers(curves):
+    for curve in curves or []:
+        curve["markers"] = _extract_curve_markers(curve)
+
+
 def _rebuild_curve_predictions(payload):
     family = normalize_model_family(payload.get("model_family"))
     params = extract_model_parameters(payload, model_family=family)
@@ -169,7 +268,31 @@ def _rebuild_curve_predictions(payload):
             continue
 
         temp_k_profile = _curve_temperature_profile_k(curve, t_rel)
-        if legacy_arrhenius_mode and family == MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1:
+        if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+            states = predict_alpha_leroy2013(
+                time_s=t_rel,
+                temperature_k=temp_k_profile,
+                params=params,
+                return_states=True,
+            )
+            alpha_total = states.get("alpha_total")
+            alpha_v = states.get("alpha_v")
+            alpha_stable = states.get("alpha_stable")
+            alpha_unstable = states.get("alpha_unstable")
+
+            alpha_model = np.clip(np.asarray(alpha_total if alpha_total is not None else [], dtype=float), 0.0, 1.0)
+            curve["alpha_v_model"] = np.clip(np.asarray(alpha_v if alpha_v is not None else [], dtype=float), 0.0, 1.0).tolist()
+            curve["alpha_stable_model"] = np.clip(
+                np.asarray(alpha_stable if alpha_stable is not None else [], dtype=float),
+                0.0,
+                1.0,
+            ).tolist()
+            curve["alpha_unstable_model"] = np.clip(
+                np.asarray(alpha_unstable if alpha_unstable is not None else [], dtype=float),
+                0.0,
+                1.0,
+            ).tolist()
+        elif legacy_arrhenius_mode and family == MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1:
             k0 = float(max(_safe_float(payload.get("k0"), default=params.get("k_ref", 1e-8)), 1e-300))
             ea = float(max(params.get("Ea", 0.0), 0.0))
             n = float(np.clip(params.get("n", 1.2), 0.2, 12.0))
@@ -208,6 +331,11 @@ def _rebuild_curve_predictions(payload):
         else:
             curve.pop("t_eq", None)
 
+        if family != MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+            curve.pop("alpha_v_model", None)
+            curve.pop("alpha_stable_model", None)
+            curve.pop("alpha_unstable_model", None)
+
 
 def _build_txx_summary(curve_metrics):
     by_target = {}
@@ -244,6 +372,10 @@ def _compute_payload_metrics(payload):
     alpha_residuals = []
     torque_residuals = []
     curve_metrics = []
+    scorch_errors = []
+    peak_errors = []
+    plateau_errors = []
+    reversion_errors = []
 
     for curve in curves:
         t_rel = np.asarray(curve.get("t_rel") or [], dtype=float)
@@ -277,8 +409,51 @@ def _compute_payload_metrics(payload):
             t_rel,
             alpha_model,
             cure_completion_rule=cure_rule,
-            n_value=params.get("n"),
+            n_value=params.get("n", params.get("X")),
         )
+
+        markers = dict(curve.get("markers") or {})
+        if not markers:
+            markers = _extract_curve_markers(curve)
+
+        scorch_real_s = _safe_float(markers.get("scorch_time_s"), default=None)
+        scorch_model_s = None
+        if torque_size > 0:
+            scorch_model_s = _estimate_scorch_time_approx(
+                t_rel[:torque_size],
+                torque_model[:torque_size],
+                time_floor_s=8.0,
+            )
+        if scorch_model_s is None:
+            scorch_model_s = first_crossing_time(t_rel, alpha_model, 0.02)
+        scorch_error_s = (
+            float(scorch_model_s - scorch_real_s)
+            if scorch_real_s is not None and scorch_model_s is not None
+            else None
+        )
+        if scorch_error_s is not None and np.isfinite(float(scorch_error_s)):
+            scorch_errors.append(float(scorch_error_s))
+
+        peak_error = None
+        plateau_error = None
+        reversion_error = None
+        if torque_size > 0:
+            torque_real_i = torque_real[:torque_size]
+            torque_model_i = torque_model[:torque_size]
+            peak_error = float(np.max(torque_model_i) - np.max(torque_real_i))
+
+            tail_count = int(np.clip(round(torque_size * 0.15), 5, max(torque_size, 5)))
+            plateau_real = float(np.mean(torque_real_i[-tail_count:]))
+            plateau_model = float(np.mean(torque_model_i[-tail_count:]))
+            plateau_error = float(plateau_model - plateau_real)
+
+            reversion_real = float(np.max(torque_real_i) - plateau_real)
+            reversion_model = float(np.max(torque_model_i) - plateau_model)
+            reversion_error = float(reversion_model - reversion_real)
+
+            peak_errors.append(peak_error)
+            plateau_errors.append(plateau_error)
+            reversion_errors.append(reversion_error)
 
         curve_metrics.append(
             {
@@ -298,6 +473,13 @@ def _compute_payload_metrics(payload):
                     if completion_real_s is not None and completion_model_s is not None
                     else None
                 ),
+                "scorch_real_s": float(scorch_real_s) if scorch_real_s is not None else None,
+                "scorch_model_s": float(scorch_model_s) if scorch_model_s is not None else None,
+                "scorch_error_s": float(scorch_error_s) if scorch_error_s is not None else None,
+                "peak_error_torque": peak_error,
+                "plateau_error_torque": plateau_error,
+                "reversion_error_torque": reversion_error,
+                "markers": markers,
             }
         )
 
@@ -315,6 +497,31 @@ def _compute_payload_metrics(payload):
         "curve_metrics": curve_metrics,
         "txx_summary": _build_txx_summary(curve_metrics),
         "cure_completion_rule": cure_rule,
+        "scorch_mae_s": (
+            float(np.mean(np.abs(np.asarray(scorch_errors, dtype=float))))
+            if scorch_errors
+            else None
+        ),
+        "scorch_rmse_s": (
+            float(np.sqrt(np.mean(np.square(np.asarray(scorch_errors, dtype=float)))))
+            if scorch_errors
+            else None
+        ),
+        "peak_error_mae": (
+            float(np.mean(np.abs(np.asarray(peak_errors, dtype=float))))
+            if peak_errors
+            else None
+        ),
+        "plateau_error_mae": (
+            float(np.mean(np.abs(np.asarray(plateau_errors, dtype=float))))
+            if plateau_errors
+            else None
+        ),
+        "reversion_error_mae": (
+            float(np.mean(np.abs(np.asarray(reversion_errors, dtype=float))))
+            if reversion_errors
+            else None
+        ),
     }
 
 
@@ -322,6 +529,7 @@ def _normalize_fit_payload_model(payload):
     changed = False
 
     family = str(payload.get("model_family") or "").strip().lower()
+    requested_family = str(payload.get("requested_model_family") or "").strip().lower()
     legacy_arrhenius_mode = bool(payload.get("legacy_arrhenius_mode"))
     if family:
         family = normalize_model_family(family)
@@ -360,6 +568,7 @@ def _normalize_fit_payload_model(payload):
     params = extract_model_parameters(payload, model_family=family)
 
     payload["model_family"] = family
+    payload["requested_model_family"] = normalize_model_family(requested_family or family)
     payload["model_version"] = model_version
     payload["fit_method"] = fit_method
     payload["reference_temperature_K"] = float(ref_k)
@@ -370,14 +579,26 @@ def _normalize_fit_payload_model(payload):
     payload["kinetic_model_version"] = 3
     payload["kinetic_model_expression"] = MODEL_EXPRESSIONS.get(family)
 
-    payload["Ea"] = float(params.get("Ea", 0.0))
-    payload["n"] = float(params.get("n", 0.0))
+    if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+        for key in ("Av1", "Av2", "Ev", "X", "Ar", "Er"):
+            payload[key] = float(params.get(key, 0.0))
+        payload.pop("k0", None)
+        payload.pop("k_ref", None)
+        payload.pop("Ea", None)
+        payload.pop("n", None)
+        if not payload.get("calibration_strategy"):
+            payload["calibration_strategy"] = "hierarchical_v1"
+        if not payload.get("calibration_stage_selected"):
+            payload["calibration_stage_selected"] = "stage1"
+    else:
+        payload["Ea"] = float(params.get("Ea", 0.0))
+        payload["n"] = float(params.get("n", 0.0))
 
     if family == MODEL_FAMILY_EDO_ORDER_N_V1:
         payload["k0"] = float(params.get("k0", params.get("k_ref", 0.0)))
         if "k_ref" in payload:
             payload.pop("k_ref", None)
-    else:
+    elif family != MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
         payload["k_ref"] = float(params.get("k_ref", params.get("k", 0.0)))
         # Compatibility alias for existing consumers.
         payload["k0"] = float(payload["k_ref"])
@@ -561,6 +782,7 @@ def _serialize_curves_for_payload(curves):
                 "torque": np.asarray(c["torque"], dtype=float).tolist(),
                 "t_rel": np.asarray(c["t_rel"], dtype=float).tolist(),
                 "alpha": np.asarray(c["alpha"], dtype=float).tolist(),
+                "markers": dict(c.get("markers") or {}),
             }
         )
     return serialized
@@ -576,6 +798,7 @@ def run_fit(
 ):
     rows = get_curve_points(cod_ensaios)
     curves = _group_curves(rows)
+    _attach_curve_markers(curves)
 
     if reference_temperature_k is None and curves:
         reference_temperature_k = float(np.median([float(c["T_K"]) for c in curves]))
@@ -601,6 +824,7 @@ def run_fit(
         "created_at": datetime.utcnow().isoformat(),
         **result,
         "model_family": model_family_norm,
+        "requested_model_family": normalize_model_family(result.get("requested_model_family") or model_family),
         "model_version": str(result.get("model_version") or DEFAULT_MODEL_VERSION),
         "fit_method": fit_method_norm,
         "reference_temperature_K": float(max(ref_k, 1.0)),
@@ -621,9 +845,14 @@ def run_fit(
             {"COD_ENSAIO": c["COD_ENSAIO"], "T_C": c["T_C"], "T_K": c["T_K"]}
             for c in curves
         ],
+        "experimental_markers": extract_experimental_markers(curves),
         "curves": _serialize_curves_for_payload(curves),
         "legacy_arrhenius_mode": False,
     }
+    if result.get("auto_model_selection") is not None:
+        payload["auto_model_selection"] = result.get("auto_model_selection")
+    if result.get("auto_selected_model_family") is not None:
+        payload["auto_selected_model_family"] = result.get("auto_selected_model_family")
 
     payload, _ = _normalize_fit_payload_model(payload)
 
@@ -650,6 +879,12 @@ def load_fit_payload(fit_id):
         payload = json.load(f)
 
     payload, migrated = _normalize_fit_payload_model(payload)
+    curves = payload.get("curves") or []
+    if curves and any(not isinstance((curve or {}).get("markers"), dict) for curve in curves):
+        _attach_curve_markers(curves)
+        payload["experimental_markers"] = extract_experimental_markers(curves)
+        migrated = True
+
     if payload.get("success"):
         _rebuild_curve_predictions(payload)
         _compute_payload_metrics(payload)
@@ -660,21 +895,36 @@ def load_fit_payload(fit_id):
     return payload
 
 
-def update_fit_parameters(fit_id, k_value, ea, n):
+def update_fit_parameters(fit_id, k_value=None, ea=None, n=None, parameter_updates=None):
     payload = load_fit_payload(fit_id)
     if not payload:
         return None
 
     family = normalize_model_family(payload.get("model_family"))
-    if family == MODEL_FAMILY_EDO_ORDER_N_V1:
-        k_safe = float(np.clip(float(k_value), 1e-12, 1e8))
+    if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+        updates = {}
+        for key in ("Av1", "Av2", "Ev", "X", "Ar", "Er"):
+            numeric = _safe_float((parameter_updates or {}).get(key), default=None)
+            if numeric is not None:
+                updates[key] = float(numeric)
+        if not updates:
+            if k_value is not None:
+                updates["Av1"] = float(k_value)
+            if ea is not None:
+                updates["Ev"] = float(ea)
+            if n is not None:
+                updates["X"] = float(n)
+        payload = update_model_parameters(payload, parameter_updates=updates)
     else:
-        k_safe = float(np.clip(float(k_value), 1e-12, 1e8))
+        if family == MODEL_FAMILY_EDO_ORDER_N_V1:
+            k_safe = float(np.clip(float(k_value), 1e-12, 1e8))
+        else:
+            k_safe = float(np.clip(float(k_value), 1e-12, 1e8))
 
-    ea_safe = float(np.clip(float(ea), 0.0, 350000.0))
-    n_safe = float(np.clip(float(n), 0.2, 12.0))
+        ea_safe = float(np.clip(float(ea), 0.0, 350000.0))
+        n_safe = float(np.clip(float(n), 0.2, 12.0))
+        payload = update_model_parameters(payload, k_value=k_safe, ea=ea_safe, n=n_safe)
 
-    payload = update_model_parameters(payload, k_value=k_safe, ea=ea_safe, n=n_safe)
     payload["updated_at"] = datetime.utcnow().isoformat()
 
     payload, _ = _normalize_fit_payload_model(payload)
