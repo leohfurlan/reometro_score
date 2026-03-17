@@ -225,3 +225,56 @@ def test_run_fit_leroy_persists_hierarchical_metadata_and_states(monkeypatch):
     assert "seed_statistics" in payload
     assert "alpha_v_model" in payload["curves"][0]
     assert "alpha_unstable_model" in payload["curves"][0]
+
+
+def test_run_fit_kamal_persists_marching_reversion_parameters(monkeypatch):
+    curves = [
+        _mock_curve(901, 150.0, scorch_time_s=20.0),
+        _mock_curve(902, 170.0, scorch_time_s=12.0),
+        _mock_curve(903, 185.0, scorch_time_s=8.0),
+    ]
+
+    monkeypatch.setattr(ks, "get_curve_points", lambda _ids: [])
+    monkeypatch.setattr(ks, "_group_curves", lambda _rows: curves)
+    monkeypatch.setattr(
+        ks,
+        "fit_model_parameters",
+        lambda **_kwargs: {
+            "success": True,
+            "message": "kamal fit mocked",
+            "model_family": "kamal_sourour_expanded_v1",
+            "model_version": "v1",
+            "fit_method": "least_squares",
+            "reference_temperature_K": 433.15,
+            "model_parameters": {
+                "k1": 0.003,
+                "k2": 0.008,
+                "k_ref": 0.003,
+                "k0": 0.003,
+                "Ea": 79000.0,
+                "m": 1.2,
+                "n": 1.5,
+                "k_march": 0.03,
+                "k_rev": 0.02,
+                "beta_rev": 0.01,
+            },
+            "k1": 0.003,
+            "k2": 0.008,
+            "Ea": 79000.0,
+            "m": 1.2,
+            "n": 1.5,
+            "k_march": 0.03,
+            "k_rev": 0.02,
+            "beta_rev": 0.01,
+            "rmse_alpha": 0.05,
+        },
+    )
+
+    payload = ks.run_fit([901, 902, 903], model_family="kamal_sourour_expanded_v1")
+
+    assert payload["model_family"] == "kamal_sourour_expanded_v1"
+    assert abs(float(payload["k1"]) - 0.003) < 1e-12
+    assert abs(float(payload["k2"]) - 0.008) < 1e-12
+    assert abs(float(payload["k_march"]) - 0.03) < 1e-12
+    assert abs(float(payload["k_rev"]) - 0.02) < 1e-12
+    assert "torque_model" in payload["curves"][0]

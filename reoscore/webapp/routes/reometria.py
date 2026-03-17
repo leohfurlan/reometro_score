@@ -27,6 +27,7 @@ from services.kinetic_model_service import (
     SUPPORTED_MODEL_FAMILIES,
     SUPPORTED_CURE_COMPLETION_RULES,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
     MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
 )
 from services.engine_registry import (
@@ -520,6 +521,8 @@ def _extract_fit_parameters_for_report(fit_payload):
     ordered_keys = []
     if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
         ordered_keys = ["Av1", "Av2", "Ev", "X", "Ar", "Er"]
+    elif family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        ordered_keys = ["k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"]
     else:
         ordered_keys = ["k0", "k_ref", "Ea", "n"]
 
@@ -973,6 +976,45 @@ def reometria_fit_update(fit_id):
                 "calibration_stage_selected": payload.get("calibration_stage_selected"),
                 "identifiability": payload.get("identifiability"),
                 "alerts": payload.get("alerts") or [],
+            }
+        )
+
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        updates = {}
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+            value = parse_float_locale(data.get(key), default=None)
+            if value is None:
+                return jsonify({"success": False, "message": f"Parametro {key} invalido."}), 400
+            updates[key] = float(value)
+
+        if updates["k1"] <= 0.0 or updates["k2"] <= 0.0:
+            return jsonify({"success": False, "message": "k1 e k2 devem ser positivos."}), 400
+        if updates["k_march"] < 0.0:
+            return jsonify({"success": False, "message": "k_march nao pode ser negativo."}), 400
+        if updates["k_rev"] < 0.0:
+            return jsonify({"success": False, "message": "k_rev nao pode ser negativo."}), 400
+
+        payload = update_fit_parameters(fit_id, parameter_updates=updates)
+        if not payload:
+            return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "Parametros Kamal-Sourour atualizados com sucesso.",
+                "fit_id": payload.get("fit_id"),
+                "model_family": payload.get("model_family"),
+                "model_version": payload.get("model_version"),
+                "reference_temperature_K": _safe_float(payload.get("reference_temperature_K"), default=None),
+                "cure_completion_rule": payload.get("cure_completion_rule"),
+                "k1": float(_safe_float(payload.get("k1"), default=0.0)),
+                "k2": float(_safe_float(payload.get("k2"), default=0.0)),
+                "Ea": float(_safe_float(payload.get("Ea"), default=0.0)),
+                "m": float(_safe_float(payload.get("m"), default=0.0)),
+                "n": float(_safe_float(payload.get("n"), default=0.0)),
+                "k_march": float(_safe_float(payload.get("k_march"), default=0.0)),
+                "k_rev": float(_safe_float(payload.get("k_rev"), default=0.0)),
+                "beta_rev": float(_safe_float(payload.get("beta_rev"), default=0.0)),
             }
         )
 

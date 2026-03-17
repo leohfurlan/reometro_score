@@ -8,6 +8,7 @@ def test_fit_result_template_supports_model_family_switch_in_js():
     assert "if (modelFamily === 'edo_order_n_v1')" in content
     assert "if (modelFamily === 'pinheiro_sigmoidal_v1')" in content
     assert "pinheiro_sigmoidal_teq_v1" in content
+    assert "kamal_sourour_expanded_v1" in content
     assert "isLeroyModel" in content
     assert "saveLeroyParams" in content
     assert "const tEq = tNum * Math.exp(factorExponent);" in content

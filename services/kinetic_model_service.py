@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
+from scipy.integrate import odeint
 from scipy.optimize import least_squares
 
 R_GAS = 8.314462618
@@ -11,6 +12,8 @@ MODEL_FAMILY_EDO_ORDER_N_V1 = "edo_order_n_v1"
 MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1 = "pinheiro_sigmoidal_v1"
 MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1 = "pinheiro_sigmoidal_teq_v1"
 MODEL_FAMILY_LEROY2013_CONTINUOUS_V1 = "leroy2013_continuous_v1"
+MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1 = "kamal_sourour_expanded_v1"
+MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_ALIAS = "kamal_sourour_expanded"
 MODEL_FAMILY_AUTO = "auto"
 
 AUTO_COMPARE_MODEL_FAMILIES = (
@@ -24,6 +27,7 @@ SUPPORTED_MODEL_FAMILIES = (
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
     MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
+    MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
 )
 
 DEFAULT_MODEL_FAMILY = MODEL_FAMILY_EDO_ORDER_N_V1
@@ -48,6 +52,16 @@ LEROY2013_FIT_BOUNDS = {
 LEROY2013_STAGE2_MIN_TEMPS = 3
 LEROY2013_STAGE2_MIN_SPAN_K = 12.0
 LEROY2013_REGULARIZATION_SCALE = 1e-4
+KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS = {
+    "k1": (1e-12, 1e4),
+    "k2": (1e-12, 1e4),
+    "Ea": (30000.0, 120000.0),
+    "m": (0.1, 3.0),
+    "n": (0.5, 3.0),
+    "k_march": (0.0, 0.5),
+    "k_rev": (0.0, 0.5),
+    "beta_rev": (1e-6, 0.5),
+}
 
 CURE_COMPLETION_RULE_ALPHA_099 = "alpha_practical_0_99"
 CURE_COMPLETION_RULE_ALPHA_098 = "alpha_practical_0_98"
@@ -97,8 +111,21 @@ def _round_leroy_params(params):
     return rounded
 
 
+def _round_kamal_params(params):
+    rounded = {}
+    for key, value in dict(params or {}).items():
+        numeric = _safe_float(value, default=None)
+        if numeric is None:
+            continue
+        r = _round_half_up(numeric, decimals=PARAM_DECIMALS)
+        rounded[key] = float(numeric if r is None else r)
+    return rounded
+
+
 def normalize_model_family(model_family):
     token = str(model_family or "").strip().lower()
+    if token == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_ALIAS:
+        return MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1
     if token in SUPPORTED_MODEL_FAMILIES:
         return token
     return DEFAULT_MODEL_FAMILY
@@ -285,6 +312,210 @@ def _leroy2013_arrhenius(temp_k, activation_energy):
     ea_val = float(max(_safe_float(activation_energy, default=0.0), 0.0))
     exponent = np.clip(-(ea_val / R_GAS) / temp_safe, -700.0, 700.0)
     return np.exp(exponent)
+
+
+def _kamal_sourour_param_defaults():
+    return {
+        "k1": 1e-4,
+        "k2": 8e-4,
+        "Ea": 80000.0,
+        "m": 1.2,
+        "n": 1.4,
+        "k_march": 0.0,
+        "k_rev": 0.0,
+        "beta_rev": 0.01,
+    }
+
+
+def _kamal_sourour_sanitize_params(params):
+    raw = dict(params or {})
+    defaults = _kamal_sourour_param_defaults()
+
+    k1_alias = _safe_float(
+        raw.get("k1"),
+        default=_safe_float(raw.get("k_ref", raw.get("k0", raw.get("k"))), default=None),
+    )
+    k2_alias = _safe_float(raw.get("k2"), default=_safe_float(raw.get("k_ref", raw.get("k0")), default=None))
+    if k1_alias is not None:
+        raw["k1"] = k1_alias
+    if k2_alias is not None:
+        raw["k2"] = k2_alias
+
+    out = {}
+    for key, default in defaults.items():
+        lo, hi = KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS[key]
+        numeric = _safe_float(raw.get(key), default=default)
+        if numeric is None:
+            numeric = default
+        out[key] = float(np.clip(float(numeric), float(lo), float(hi)))
+
+    out["k_ref"] = float(out["k1"])
+    out["k0"] = float(out["k1"])
+    out["k"] = float(out["k1"])
+    return out
+
+
+class KamalSourourExpandedEngine:
+    """
+    Expanded Kamal-Sourour cure model for rheometry curves.
+
+    Equations:
+    - d(alpha)/dt = a_T(T) * (k1 + k2 * alpha^m) * (1 - alpha)^n
+    - S(t) = ML + (MH - ML) * alpha(t) + (k_march * t) - R(t)
+    - R(t) = k_rev * (1 - exp(-beta_rev * t))
+
+    where a_T(T) is the Arrhenius factor relative to reference temperature.
+    """
+
+    @staticmethod
+    def _rate(alpha: float, temp_k: float, params: Dict[str, float], reference_temperature_k: float) -> float:
+        alpha_val = float(np.clip(alpha, 0.0, 1.0))
+        temp_val = float(max(temp_k, 1.0))
+        factor = float(
+            arrhenius_reference_factor(
+                np.asarray([temp_val], dtype=float),
+                ea=params["Ea"],
+                reference_temperature_k=reference_temperature_k,
+            )[0]
+        )
+        cure_term = params["k1"] + (params["k2"] * (max(alpha_val, 0.0) ** params["m"]))
+        unreacted = max(1.0 - alpha_val, 0.0) ** params["n"]
+        return float(max(factor * cure_term * unreacted, 0.0))
+
+    @staticmethod
+    def _integrate_fallback(
+        time: np.ndarray,
+        temp: np.ndarray,
+        params: Dict[str, float],
+        reference_temperature_k: float,
+    ) -> np.ndarray:
+        size = int(time.size)
+        alpha = np.zeros((size,), dtype=float)
+        alpha[0] = 0.0
+        for i in range(1, size):
+            dt = max(float(time[i] - time[i - 1]), 0.0)
+            if dt <= 0.0:
+                alpha[i] = alpha[i - 1]
+                continue
+            av = float(alpha[i - 1])
+            # Explicit integration fallback with conservative substepping.
+            substeps = int(np.clip(math.ceil(dt / 0.25), 1, 128))
+            dt_inner = dt / float(substeps)
+            temp_i = float(temp[i])
+            for _ in range(substeps):
+                rate = KamalSourourExpandedEngine._rate(av, temp_i, params, reference_temperature_k)
+                av = min(1.0, av + (rate * dt_inner))
+            alpha[i] = av
+        return np.maximum.accumulate(np.clip(alpha, 0.0, 1.0))
+
+    @staticmethod
+    def integrate_alpha(
+        time_s: Sequence[float],
+        temperature_k: Sequence[float],
+        params: Dict[str, float],
+        *,
+        reference_temperature_k: float = DEFAULT_REFERENCE_TEMPERATURE_K,
+    ) -> np.ndarray:
+        time, temp = _prepare_time_temperature(time_s, temperature_k)
+        size = int(time.size)
+        if size == 0:
+            return np.asarray([], dtype=float)
+        if size == 1:
+            return np.asarray([0.0], dtype=float)
+
+        p = _kamal_sourour_sanitize_params(params)
+        ref_k = _safe_ref_temp(reference_temperature_k)
+
+        # odeint requires strictly increasing time points.
+        unique_mask = np.concatenate(([True], np.diff(time) > 1e-12))
+        time_unique = time[unique_mask]
+        temp_unique = temp[unique_mask]
+        if time_unique.size <= 1:
+            alpha_unique = np.asarray([0.0], dtype=float)
+        else:
+
+            def _rhs(alpha_state, t_scalar):
+                alpha_val = float(np.asarray(alpha_state, dtype=float).reshape(-1)[0])
+                temp_val = float(np.interp(float(t_scalar), time_unique, temp_unique))
+                return KamalSourourExpandedEngine._rate(alpha_val, temp_val, p, ref_k)
+
+            try:
+                alpha_unique = np.asarray(
+                    odeint(
+                        _rhs,
+                        np.asarray([0.0], dtype=float),
+                        np.asarray(time_unique, dtype=float),
+                        hmax=float(max(np.max(np.diff(time_unique)), 1e-3)),
+                        mxstep=6000,
+                    ),
+                    dtype=float,
+                ).reshape(-1)
+                if alpha_unique.size != time_unique.size or not np.isfinite(alpha_unique).all():
+                    raise ValueError("odeint returned non-finite Kamal-Sourour trajectory")
+            except Exception:
+                alpha_unique = KamalSourourExpandedEngine._integrate_fallback(
+                    time_unique,
+                    temp_unique,
+                    p,
+                    ref_k,
+                )
+
+        alpha_unique = np.maximum.accumulate(np.clip(alpha_unique, 0.0, 1.0))
+        alpha = np.interp(time, time_unique, alpha_unique)
+        return np.maximum.accumulate(np.clip(alpha, 0.0, 1.0))
+
+    @staticmethod
+    def compute_torque(
+        time_s: Sequence[float],
+        alpha: Sequence[float],
+        m_min: float,
+        m_max: float,
+        params: Dict[str, float],
+    ) -> np.ndarray:
+        p = _kamal_sourour_sanitize_params(params)
+        time = np.maximum(np.asarray(time_s, dtype=float), 0.0)
+        alpha_vec = np.clip(np.asarray(alpha, dtype=float), 0.0, 1.0)
+        size = min(time.size, alpha_vec.size)
+        if size == 0:
+            return np.asarray([], dtype=float)
+        time = time[:size]
+        alpha_vec = alpha_vec[:size]
+
+        baseline = float(m_min) + (alpha_vec * (float(m_max) - float(m_min)))
+        march = float(p["k_march"]) * time
+        reversion = float(p["k_rev"]) * (1.0 - np.exp(-float(p["beta_rev"]) * time))
+        return baseline + march - reversion
+
+
+def predict_alpha_kamal_sourour_expanded(
+    time_s: Sequence[float],
+    temperature_k: Sequence[float],
+    params: Dict[str, float],
+    *,
+    reference_temperature_k: float = DEFAULT_REFERENCE_TEMPERATURE_K,
+) -> np.ndarray:
+    return KamalSourourExpandedEngine.integrate_alpha(
+        time_s=time_s,
+        temperature_k=temperature_k,
+        params=params,
+        reference_temperature_k=reference_temperature_k,
+    )
+
+
+def torque_from_alpha_kamal_sourour_expanded(
+    alpha: Sequence[float],
+    time_s: Sequence[float],
+    m_min: float,
+    m_max: float,
+    params: Dict[str, float],
+) -> np.ndarray:
+    return KamalSourourExpandedEngine.compute_torque(
+        time_s=time_s,
+        alpha=alpha,
+        m_min=m_min,
+        m_max=m_max,
+        params=params,
+    )
 
 
 def integrate_leroy2013_states(
@@ -536,6 +767,13 @@ def predict_alpha_isothermal(
             temperature_k=temperature_k,
             params=params,
         )
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        return predict_alpha_kamal_sourour_expanded(
+            time_s=time_s,
+            temperature_k=temperature_k,
+            params=params,
+            reference_temperature_k=reference_temperature_k,
+        )
 
     p = dict(params or {})
     n = float(np.clip(_safe_float(p.get("n"), default=1.2), 0.2, 12.0))
@@ -584,6 +822,13 @@ def predict_alpha_nonisothermal(
             time_s=time_s,
             temperature_k=temperature_k,
             params=params,
+        )
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        return predict_alpha_kamal_sourour_expanded(
+            time_s=time_s,
+            temperature_k=temperature_k,
+            params=params,
+            reference_temperature_k=reference_temperature_k,
         )
 
     p = dict(params or {})
@@ -665,6 +910,10 @@ def _extract_curve_training_data(curve):
 
     t = np.maximum.accumulate(np.maximum(t[:size], 0.0))
     alpha = np.clip(alpha[:size], 0.0, 1.0)
+    torque = np.asarray(curve.get("torque") if curve.get("torque") is not None else [], dtype=float)
+    torque = torque[:size] if torque.size else np.asarray([], dtype=float)
+    ml = _safe_float(curve.get("ML"), default=None)
+    mh = _safe_float(curve.get("MH"), default=None)
 
     temp_profile = curve.get("temp_k_profile")
     if temp_profile is None:
@@ -684,6 +933,9 @@ def _extract_curve_training_data(curve):
         "time_s": t,
         "alpha_real": alpha,
         "temperature_k": temp_k,
+        "torque_real": torque,
+        "ML": ml,
+        "MH": mh,
         "markers": dict(curve.get("markers") or {}),
     }
 
@@ -784,6 +1036,46 @@ def _k_guess_from_t50(curves_data, model_family, reference_temperature_k, ea_gue
     if not k_guesses:
         return 1e-4
     return float(np.clip(np.median(np.asarray(k_guesses, dtype=float)), 1e-12, 1e8))
+
+
+def _kamal_guess_tail_slope(curves_data):
+    slopes = []
+    for curve in curves_data:
+        torque = np.asarray(curve.get("torque_real"), dtype=float)
+        time = np.asarray(curve.get("time_s"), dtype=float)
+        size = min(torque.size, time.size)
+        if size < 6:
+            continue
+
+        tail_size = int(np.clip(round(size * 0.25), 6, size))
+        t_tail = time[-tail_size:]
+        y_tail = torque[-tail_size:]
+        if np.ptp(t_tail) <= 1e-9:
+            continue
+        slope, _ = np.polyfit(t_tail, y_tail, deg=1)
+        if np.isfinite(float(slope)):
+            slopes.append(float(slope))
+
+    if not slopes:
+        return 0.0
+    return float(np.clip(np.median(np.asarray(slopes, dtype=float)), 0.0, KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_march"][1]))
+
+
+def _kamal_guess_reversion(curves_data):
+    drops = []
+    for curve in curves_data:
+        torque = np.asarray(curve.get("torque_real"), dtype=float)
+        if torque.size < 8:
+            continue
+        tail_size = int(np.clip(round(torque.size * 0.18), 5, torque.size))
+        tail_mean = float(np.mean(torque[-tail_size:]))
+        drop = float(np.max(torque) - tail_mean)
+        if np.isfinite(drop) and drop > 0.0:
+            drops.append(drop)
+
+    if not drops:
+        return 0.0
+    return float(np.clip(np.median(np.asarray(drops, dtype=float)), 0.0, KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][1]))
 
 
 def _prepare_training_curves(curves):
@@ -1366,6 +1658,188 @@ def _fit_model_parameters_single_family(curves_data, family, reference_temperatu
     family = _predict_model_family(family)
     reference_temperature_k = _safe_ref_temp(reference_temperature_k)
 
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        ea0 = 70000.0
+        n0 = 1.4
+        m0 = 1.2
+        k1_guess = _k_guess_from_t50(
+            curves_data,
+            model_family=family,
+            reference_temperature_k=reference_temperature_k,
+            ea_guess=ea0,
+            n_guess=n0,
+        )
+        k2_guess = max(k1_guess * 1.8, 1e-12)
+        k_march_guess = _kamal_guess_tail_slope(curves_data)
+        k_rev_guess = _kamal_guess_reversion(curves_data)
+        beta_rev_fixed = _kamal_sourour_param_defaults()["beta_rev"]
+
+        p0 = np.asarray(
+            [
+                math.log(max(k1_guess, 1e-12)),
+                math.log(max(k2_guess, 1e-12)),
+                ea0,
+                m0,
+                n0,
+                k_march_guess,
+                k_rev_guess,
+            ],
+            dtype=float,
+        )
+        lb = np.asarray(
+            [
+                math.log(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k1"][0]),
+                math.log(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k2"][0]),
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["Ea"][0],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["m"][0],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["n"][0],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_march"][0],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][0],
+            ],
+            dtype=float,
+        )
+        ub = np.asarray(
+            [
+                math.log(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k1"][1]),
+                math.log(KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k2"][1]),
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["Ea"][1],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["m"][1],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["n"][1],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_march"][1],
+                KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS["k_rev"][1],
+            ],
+            dtype=float,
+        )
+
+        def _compose_params(p_vec):
+            raw = {
+                "k1": float(math.exp(float(p_vec[0]))),
+                "k2": float(math.exp(float(p_vec[1]))),
+                "Ea": float(p_vec[2]),
+                "m": float(p_vec[3]),
+                "n": float(p_vec[4]),
+                "k_march": float(p_vec[5]),
+                "k_rev": float(p_vec[6]),
+                "beta_rev": float(beta_rev_fixed),
+            }
+            return _kamal_sourour_sanitize_params(raw)
+
+        def residuals_kamal(p_vec):
+            params = _compose_params(p_vec)
+            blocks = []
+            for curve in curves_data:
+                pred_alpha = np.asarray(
+                    predict_alpha(
+                        time_s=curve["time_s"],
+                        temperature_k=curve["temperature_k"],
+                        params=params,
+                        model_family=family,
+                        reference_temperature_k=reference_temperature_k,
+                    ),
+                    dtype=float,
+                )
+                real_alpha = np.asarray(curve["alpha_real"], dtype=float)
+                size = min(pred_alpha.size, real_alpha.size, curve["time_s"].size)
+                if size <= 0:
+                    continue
+
+                alpha_res = pred_alpha[:size] - real_alpha[:size]
+                blocks.append(alpha_res)
+
+                torque_real = np.asarray(curve.get("torque_real"), dtype=float)
+                ml = _safe_float(curve.get("ML"), default=None)
+                mh = _safe_float(curve.get("MH"), default=None)
+                torque_size = min(size, torque_real.size)
+                if torque_size > 0 and ml is not None and mh is not None:
+                    time_seg = np.asarray(curve["time_s"][:torque_size], dtype=float)
+                    torque_model = torque_from_alpha_kamal_sourour_expanded(
+                        alpha=pred_alpha[:torque_size],
+                        time_s=time_seg,
+                        m_min=ml,
+                        m_max=mh,
+                        params=params,
+                    )
+                    torque_err = np.asarray(torque_model, dtype=float) - torque_real[:torque_size]
+                    span = max(abs(float(mh) - float(ml)), 1e-6)
+                    tail_den = max(float(time_seg[-1]) if time_seg.size else 0.0, 1e-6)
+                    tail_weight = 1.0 + (0.75 * (time_seg / tail_den))
+                    blocks.append(0.8 * ((torque_err / span) * tail_weight))
+
+            if not blocks:
+                return np.asarray([], dtype=float)
+            return np.concatenate(blocks)
+
+        result = least_squares(
+            residuals_kamal,
+            p0,
+            bounds=(lb, ub),
+            method="trf",
+            max_nfev=7000,
+        )
+        params_opt = _round_kamal_params(_compose_params(result.x))
+
+        alpha_residuals = []
+        torque_residuals = []
+        for curve in curves_data:
+            pred_alpha = np.asarray(
+                predict_alpha(
+                    time_s=curve["time_s"],
+                    temperature_k=curve["temperature_k"],
+                    params=params_opt,
+                    model_family=family,
+                    reference_temperature_k=reference_temperature_k,
+                ),
+                dtype=float,
+            )
+            real_alpha = np.asarray(curve["alpha_real"], dtype=float)
+            size = min(pred_alpha.size, real_alpha.size, curve["time_s"].size)
+            if size <= 0:
+                continue
+            alpha_residuals.append(pred_alpha[:size] - real_alpha[:size])
+
+            torque_real = np.asarray(curve.get("torque_real"), dtype=float)
+            ml = _safe_float(curve.get("ML"), default=None)
+            mh = _safe_float(curve.get("MH"), default=None)
+            torque_size = min(size, torque_real.size)
+            if torque_size > 0 and ml is not None and mh is not None:
+                torque_model = torque_from_alpha_kamal_sourour_expanded(
+                    alpha=pred_alpha[:torque_size],
+                    time_s=curve["time_s"][:torque_size],
+                    m_min=ml,
+                    m_max=mh,
+                    params=params_opt,
+                )
+                torque_residuals.append(np.asarray(torque_model, dtype=float) - torque_real[:torque_size])
+
+        alpha_vec = np.concatenate(alpha_residuals) if alpha_residuals else np.asarray([], dtype=float)
+        torque_vec = np.concatenate(torque_residuals) if torque_residuals else np.asarray([], dtype=float)
+        rmse_alpha = float(np.sqrt(np.mean(np.square(alpha_vec)))) if alpha_vec.size else float("nan")
+        rmse_torque = float(np.sqrt(np.mean(np.square(torque_vec)))) if torque_vec.size else None
+
+        return {
+            "success": bool(result.success),
+            "message": str(result.message),
+            "fit_method": fit_method_norm,
+            "model_family": family,
+            "model_version": DEFAULT_MODEL_VERSION,
+            "reference_temperature_K": float(reference_temperature_k),
+            "model_parameters": params_opt,
+            "k1": float(params_opt["k1"]),
+            "k2": float(params_opt["k2"]),
+            "k_ref": float(params_opt["k_ref"]),
+            "k0": float(params_opt["k0"]),
+            "Ea": float(params_opt["Ea"]),
+            "m": float(params_opt["m"]),
+            "n": float(params_opt["n"]),
+            "k_march": float(params_opt["k_march"]),
+            "k_rev": float(params_opt["k_rev"]),
+            "beta_rev": float(params_opt["beta_rev"]),
+            "rmse_alpha": rmse_alpha,
+            "rmse_torque": rmse_torque,
+            "nfev": int(result.nfev),
+            "cost": float(result.cost),
+        }
+
     ea0 = 70000.0
     n0 = 1.5
 
@@ -1497,7 +1971,46 @@ def _candidate_alpha_metrics(curves_data, family, params, reference_temperature_
 
 
 def _fit_stability_penalty(fit_result):
+    family = normalize_model_family((fit_result or {}).get("model_family"))
     params = dict((fit_result or {}).get("model_parameters") or {})
+
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        ea = _safe_float(params.get("Ea"), default=None)
+        m_val = _safe_float(params.get("m"), default=None)
+        n_val = _safe_float(params.get("n"), default=None)
+        k1 = _safe_float(params.get("k1", params.get("k_ref", params.get("k0"))), default=None)
+        k2 = _safe_float(params.get("k2"), default=None)
+        k_march = _safe_float(params.get("k_march"), default=None)
+        if (
+            ea is None
+            or m_val is None
+            or n_val is None
+            or k1 is None
+            or k2 is None
+            or k1 <= 0.0
+            or k2 <= 0.0
+            or k_march is None
+        ):
+            return float("inf")
+
+        penalty = 0.0
+        for key, value in (
+            ("Ea", ea),
+            ("m", m_val),
+            ("n", n_val),
+            ("k_march", k_march),
+        ):
+            lo, hi = KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS[key]
+            span = max(float(hi - lo), 1e-12)
+            margin = 0.02 * span
+            if value <= (lo + margin) or value >= (hi - margin):
+                penalty += 1.0
+        if not np.isfinite(math.log(max(k1, 1e-300))):
+            penalty += 2.0
+        if not np.isfinite(math.log(max(k2, 1e-300))):
+            penalty += 2.0
+        return penalty
+
     ea = _safe_float(params.get("Ea"), default=None)
     n = _safe_float(params.get("n"), default=None)
     k = _safe_float(params.get("k_ref", params.get("k0")), default=None)
@@ -1875,6 +2388,31 @@ def extract_model_parameters(payload, model_family=None):
     family = _resolve_payload_family(payload, model_family=model_family)
     raw = dict((payload or {}).get("model_parameters") or {})
 
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        kamal_raw = {}
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+            val = _safe_float(raw.get(key), default=None)
+            if val is None:
+                val = _safe_float((payload or {}).get(key), default=None)
+            if val is not None:
+                kamal_raw[key] = float(val)
+
+        if "k1" not in kamal_raw:
+            k1_alias = _safe_float(raw.get("k_ref"), default=None)
+            if k1_alias is None:
+                k1_alias = _safe_float(raw.get("k0"), default=_safe_float((payload or {}).get("k_ref"), default=None))
+            if k1_alias is not None:
+                kamal_raw["k1"] = float(k1_alias)
+
+        if "k2" not in kamal_raw:
+            k2_alias = _safe_float(raw.get("k2"), default=_safe_float((payload or {}).get("k2"), default=None))
+            if k2_alias is None:
+                k2_alias = _safe_float(raw.get("k_ref"), default=None)
+            if k2_alias is not None:
+                kamal_raw["k2"] = float(k2_alias)
+
+        return _round_kamal_params(_kamal_sourour_sanitize_params(kamal_raw))
+
     if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
         leroy_raw = {}
         for key in ("Av1", "Av2", "Ev", "X", "Ar", "Er"):
@@ -1935,6 +2473,29 @@ def update_model_parameters(payload, *, k_value=None, ea=None, n=None, parameter
     updates = dict(parameter_updates or {})
 
     out = dict(payload or {})
+
+    if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        if not updates:
+            if k_value is not None:
+                updates["k1"] = k_value
+                updates.setdefault("k2", k_value)
+            if ea is not None:
+                updates["Ea"] = ea
+            if n is not None:
+                updates["n"] = n
+
+        merged = dict(params)
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+            if key in updates:
+                numeric = _safe_float(updates.get(key), default=None)
+                if numeric is not None:
+                    merged[key] = float(numeric)
+
+        merged = _round_kamal_params(_kamal_sourour_sanitize_params(merged))
+        out["model_parameters"] = merged
+        for key, value in merged.items():
+            out[key] = float(value)
+        return out
 
     if family == MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
         if not updates:
@@ -2009,6 +2570,8 @@ __all__ = [
     "MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1",
     "MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1",
     "MODEL_FAMILY_LEROY2013_CONTINUOUS_V1",
+    "MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1",
+    "MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_ALIAS",
     "AUTO_COMPARE_MODEL_FAMILIES",
     "SUPPORTED_MODEL_FAMILIES",
     "DEFAULT_MODEL_FAMILY",
@@ -2021,6 +2584,7 @@ __all__ = [
     "LEROY2013_EV_FIXED_DEFAULT",
     "LEROY2013_ER_FIXED_DEFAULT",
     "LEROY2013_FIT_BOUNDS",
+    "KAMAL_SOUROUR_EXPANDED_FIT_BOUNDS",
     "CURE_COMPLETION_RULE_ALPHA_099",
     "CURE_COMPLETION_RULE_ALPHA_098",
     "CURE_COMPLETION_RULE_PINHEIRO_LINEAR_TAIL",
@@ -2040,6 +2604,9 @@ __all__ = [
     "compute_equivalent_time",
     "integrate_leroy2013_states",
     "predict_alpha_leroy2013",
+    "KamalSourourExpandedEngine",
+    "predict_alpha_kamal_sourour_expanded",
+    "torque_from_alpha_kamal_sourour_expanded",
     "predict_alpha_isothermal",
     "predict_alpha_nonisothermal",
     "predict_alpha",

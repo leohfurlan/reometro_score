@@ -9,9 +9,10 @@
 {% set model_family = payload.get('model_family', 'edo_order_n_v1') %}
 {% set requested_model_family = payload.get('requested_model_family', model_family) %}
 {% set is_leroy_model = model_family == 'leroy2013_continuous_v1' %}
-{% set kinetic_key = 'k0' if model_family == 'edo_order_n_v1' else ('k_ref' if not is_leroy_model else 'Av1') %}
-{% set kinetic_label = 'k0' if model_family == 'edo_order_n_v1' else ('k_ref' if not is_leroy_model else 'Av1') %}
-{% set kinetic_value = payload.get(kinetic_key) if payload.get(kinetic_key) is not none else payload.get('k0', payload.get('k_ref', payload.get('Av1', 0))) %}
+{% set is_kamal_model = model_family == 'kamal_sourour_expanded_v1' %}
+{% set kinetic_key = 'k0' if model_family == 'edo_order_n_v1' else ('k1' if is_kamal_model else ('k_ref' if not is_leroy_model else 'Av1')) %}
+{% set kinetic_label = 'k0' if model_family == 'edo_order_n_v1' else ('k1' if is_kamal_model else ('k_ref' if not is_leroy_model else 'Av1')) %}
+{% set kinetic_value = payload.get(kinetic_key) if payload.get(kinetic_key) is not none else payload.get('k0', payload.get('k_ref', payload.get('k1', payload.get('Av1', 0)))) %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <style>
   .param-value { font-size: 1.1rem; font-weight: 600; }
@@ -94,6 +95,10 @@
             <div>\( x(t) = k(T)t^n \)</div>
             <div>\( \alpha(t) = \frac{x}{1+x} \)</div>
             <div>\( k(T) = k_{ref}\exp\left[-\frac{E_a}{R}\left(\frac{1}{T}-\frac{1}{T_{ref}}\right)\right] \)</div>
+          {% elif is_kamal_model %}
+            <div>\( \frac{d\alpha}{dt} = (k_1 + k_2\alpha^m)(1-\alpha)^n \)</div>
+            <div>\( S(t)=M_L + (M_H-M_L)\alpha + k_{march}t - R(t) \)</div>
+            <div>\( R(t)=k_{rev}\left(1-e^{-\beta_{rev}t}\right) \)</div>
           {% else %}
             <div>\( t_{eq}(t,T) = t\exp\left[-\frac{E_a}{R}\left(\frac{1}{T}-\frac{1}{T_{ref}}\right)\right] \)</div>
             <div>\( x(t_{eq}) = k_{ref}t_{eq}^n \)</div>
@@ -101,7 +106,21 @@
           {% endif %}
         </div>
       </div>
-      {% if not is_leroy_model %}
+      {% if is_kamal_model %}
+        <div class="col-12">
+          <div class="alert alert-secondary border mb-2">
+            <div><b>k1:</b> {{ '%.2e'|format(payload.get('k1', 0) or 0) }}</div>
+            <div><b>k2:</b> {{ '%.2e'|format(payload.get('k2', 0) or 0) }}</div>
+            <div><b>Ea:</b> {{ '%.2f'|format(payload.get('Ea', 0) or 0) }} J/mol</div>
+            <div><b>m:</b> {{ '%.2f'|format(payload.get('m', 0) or 0) }}</div>
+            <div><b>n:</b> {{ '%.2f'|format(payload.get('n', 0) or 0) }}</div>
+            <div><b>k_march:</b> {{ '%.4f'|format(payload.get('k_march', 0) or 0) }}</div>
+            <div><b>k_rev:</b> {{ '%.4f'|format(payload.get('k_rev', 0) or 0) }}</div>
+            <div><b>beta_rev:</b> {{ '%.4f'|format(payload.get('beta_rev', 0) or 0) }}</div>
+            <small class="text-muted">Ajuste visual de parametros no front-end indisponivel para este modelo (edite via endpoint de update).</small>
+          </div>
+        </div>
+      {% elif not is_leroy_model %}
         <div class="col-lg-4">
           <div class="card h-100">
             <div class="card-body">
@@ -210,7 +229,7 @@
       {% endif %}
     </div>
 
-    {% if not is_leroy_model %}
+    {% if not is_leroy_model and not is_kamal_model %}
       <div class="d-none mb-3" id="paramActions">
         <button type="button" class="btn btn-success btn-sm" id="saveParamChanges">Salvar alteracoes</button>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelParamChanges">Cancelar alteracoes</button>
@@ -396,6 +415,7 @@
   const updateMetaUrl = {{ url_for('reometria.reometria_fit_update_meta', fit_id=payload.fit_id)|tojson }};
   const modelFamily = {{ model_family|tojson }};
   const isLeroyModel = (modelFamily === 'leroy2013_continuous_v1');
+  const isKamalModel = (modelFamily === 'kamal_sourour_expanded_v1');
   const kineticKey = {{ kinetic_key|tojson }};
   const kineticLabel = {{ kinetic_label|tojson }};
   const referenceTemperatureK = Number({{ (payload.get('reference_temperature_K', 433.15))|tojson }});
@@ -532,14 +552,46 @@
       .filter((value) => Number.isFinite(value));
   }
 
+  function interpLinear(xData, yData, xQuery) {
+    const size = Math.min(xData.length, yData.length);
+    if (size === 0) return 0.0;
+    if (size === 1) return Number(yData[0]);
+
+    const x = Number(xQuery);
+    if (x <= xData[0]) return Number(yData[0]);
+    if (x >= xData[size - 1]) return Number(yData[size - 1]);
+
+    let lo = 0;
+    let hi = size - 1;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (xData[mid] <= x) lo = mid;
+      else hi = mid;
+    }
+
+    const x0 = Number(xData[lo]);
+    const x1 = Number(xData[hi]);
+    const y0 = Number(yData[lo]);
+    const y1 = Number(yData[hi]);
+    if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1) || x1 <= x0) {
+      return Number(y0);
+    }
+    const frac = (x - x0) / (x1 - x0);
+    return y0 + (frac * (y1 - y0));
+  }
+
   function normalizeCurve(curve) {
     const tRel = toNumericArray(curve.t_rel);
     const alpha = toNumericArray(curve.alpha);
+    const alphaModel = toNumericArray(curve.alpha_model);
     const tempo = toNumericArray(curve.tempo);
     const torque = toNumericArray(curve.torque);
+    const torqueModel = toNumericArray(curve.torque_model);
     const tempProfile = toNumericArray(curve.temp_k_profile);
     const pairedLen = Math.min(tRel.length, alpha.length);
     const torqueLen = Math.min(tempo.length, torque.length);
+    const alphaModelLen = Math.min(tRel.length, alphaModel.length);
+    const torqueModelLen = Math.min(tempo.length || tRel.length, torqueModel.length);
     return {
       ...curve,
       T_C: Number(curve.T_C),
@@ -548,8 +600,10 @@
       MH: Number(curve.MH),
       t_rel: tRel.slice(0, pairedLen),
       alpha: alpha.slice(0, pairedLen),
+      alpha_model: alphaModel.slice(0, alphaModelLen),
       tempo: tempo.slice(0, torqueLen),
       torque: torque.slice(0, torqueLen),
+      torque_model: torqueModel.slice(0, torqueModelLen),
       temp_k_profile: tempProfile,
     };
   }
@@ -861,6 +915,17 @@
       const states = integrateLeroyStatesForCurve(curve, timeline);
       return toNumericArray(states.alpha_total);
     }
+    if (isKamalModel) {
+      const alphaModelStored = toNumericArray(curve.alpha_model);
+      if (alphaModelStored.length === curve.t_rel.length && curve.t_rel.length >= 2) {
+        return timeline.map((tValue) => {
+          const tNum = Number(tValue);
+          if (!Number.isFinite(tNum)) return 0.0;
+          return clamp(interpLinear(curve.t_rel, alphaModelStored, Math.max(tNum, 0.0)), 0.0, 1.0);
+        });
+      }
+      return timeline.map(() => 0.0);
+    }
 
     const tempK = Math.max((Number.isFinite(curve.T_C) ? curve.T_C : 0) + 273.15, 1.0);
     const n = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
@@ -1002,16 +1067,31 @@
     const traces = [];
     curves.forEach((curve, idx) => {
       const color = palette[idx % palette.length];
+      const torqueTime = curve.tempo.length ? curve.tempo : curve.t_rel;
       traces.push({
-        x: curve.tempo,
+        x: torqueTime,
         y: curve.torque,
         mode: 'lines',
         name: `torque real ${curve.COD_ENSAIO}`,
         line: { color, width: 2 },
       });
 
+      if (isKamalModel) {
+        const torqueModelStored = toNumericArray(curve.torque_model);
+        const size = Math.min(torqueTime.length, torqueModelStored.length);
+        if (size > 0) {
+          traces.push({
+            x: torqueTime.slice(0, size),
+            y: torqueModelStored.slice(0, size),
+            mode: 'lines',
+            name: `torque modelo ${curve.COD_ENSAIO}`,
+            line: { color, width: 2, dash: 'dot' },
+          });
+          return;
+        }
+      }
+
       const mlMh = estimateMlMh(curve);
-      const torqueTime = curve.tempo.length ? curve.tempo : curve.t_rel;
       if (mlMh && torqueTime.length) {
         const alphaModelAtTorqueTime = computeAlphaModelForTimeline(curve, torqueTime);
         const torqueModel = alphaModelAtTorqueTime.map((alphaVal) => mlMh.ml + (clamp(alphaVal, 0.0, 1.0) * (mlMh.mh - mlMh.ml)));
@@ -1077,11 +1157,11 @@
   }
 
   function refreshUiAndCharts() {
-    if (!isLeroyModel) {
+    if (!isLeroyModel && !isKamalModel) {
       updateParamDisplays();
       syncControlValuesFromState();
       updateActionButtons();
-    } else {
+    } else if (isLeroyModel) {
       syncLeroyControlValuesFromState();
     }
     drawAlphaChart();
@@ -1250,7 +1330,7 @@
     refreshUiAndCharts();
   }
 
-  if (!isLeroyModel) {
+  if (!isLeroyModel && !isKamalModel) {
     document.querySelectorAll('.param-edit-btn').forEach((button) => {
       button.addEventListener('click', () => {
         const param = button.dataset.param;
@@ -1282,6 +1362,8 @@
       cancelLeroyBtn.addEventListener('click', cancelLeroyChanges);
     }
     bindLeroyControls();
+    refreshUiAndCharts();
+  } else if (isKamalModel) {
     refreshUiAndCharts();
   } else {
     if (saveBtn) saveBtn.addEventListener('click', saveChanges);

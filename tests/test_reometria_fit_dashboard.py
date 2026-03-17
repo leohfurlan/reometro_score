@@ -288,6 +288,59 @@ def test_reometria_fit_update_accepts_leroy_parameters(monkeypatch):
     assert abs(float(data["Er"]) - 150000.0) < 1e-9
 
 
+def test_reometria_fit_update_accepts_kamal_parameters(monkeypatch):
+    app = _create_test_app()
+    current_payload = {
+        "fit_id": "fit_update_kamal",
+        "model_family": "kamal_sourour_expanded_v1",
+        "k1": 0.002,
+        "k2": 0.006,
+        "Ea": 78000.0,
+        "m": 1.2,
+        "n": 1.4,
+        "k_march": 0.02,
+        "k_rev": 0.03,
+        "beta_rev": 0.01,
+    }
+
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(current_payload))
+
+    def _update_fit_parameters(_fit_id, *args, **kwargs):
+        out = dict(current_payload)
+        updates = dict(kwargs.get("parameter_updates") or {})
+        out.update(updates)
+        return out
+
+    monkeypatch.setattr(rr, "update_fit_parameters", _update_fit_parameters)
+
+    client = app.test_client()
+    response = client.post(
+        "/reometria/fit/update/fit_update_kamal",
+        json={
+            "k1": 0.003,
+            "k2": 0.008,
+            "Ea": 79000.0,
+            "m": 1.4,
+            "n": 1.6,
+            "k_march": 0.03,
+            "k_rev": 0.02,
+            "beta_rev": 0.02,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert abs(float(data["k1"]) - 0.003) < 1e-12
+    assert abs(float(data["k2"]) - 0.008) < 1e-12
+    assert abs(float(data["Ea"]) - 79000.0) < 1e-9
+    assert abs(float(data["m"]) - 1.4) < 1e-12
+    assert abs(float(data["n"]) - 1.6) < 1e-12
+    assert abs(float(data["k_march"]) - 0.03) < 1e-12
+    assert abs(float(data["k_rev"]) - 0.02) < 1e-12
+    assert abs(float(data["beta_rev"]) - 0.02) < 1e-12
+
+
 def test_reometria_fit_result_renders_leroy_without_legacy_parameters(monkeypatch):
     app = _create_test_app()
     payload = _base_payload()
@@ -511,6 +564,7 @@ def test_reometria_fit_form_lists_leroy_model_option(monkeypatch):
 
     assert response.status_code == 200
     assert 'value="leroy2013_continuous_v1"' in body
+    assert 'value="kamal_sourour_expanded_v1"' in body
 
 
 def test_fit_result_renders_empty_simulation_state(monkeypatch):

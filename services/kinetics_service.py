@@ -26,10 +26,12 @@ from services.kinetic_model_service import (
     normalize_model_family,
     predict_alpha,
     predict_alpha_leroy2013,
+    torque_from_alpha_kamal_sourour_expanded,
     torque_from_alpha,
     update_model_parameters,
     MODEL_FAMILY_AUTO,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
     MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
@@ -50,6 +52,10 @@ MODEL_EXPRESSIONS = {
     MODEL_FAMILY_EDO_ORDER_N_V1: "dalpha/dt = k(T) * (1 - alpha)^n",
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1: "alpha = (k(T) * t^n) / (1 + k(T) * t^n)",
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1: "alpha = (k_ref * t_eq(t)^n) / (1 + k_ref * t_eq(t)^n)",
+    MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1: (
+        "dalpha/dt = (k1 + k2*alpha^m) * (1-alpha)^n; "
+        "S(t)=ML + (MH-ML)*alpha + k_march*t - k_rev*(1-exp(-beta_rev*t))"
+    ),
     MODEL_FAMILY_LEROY2013_CONTINUOUS_V1: (
         "d(alpha_v)/dt=(Av1+Av2*alpha_v)*exp(-Ev/(R*T))*(1-alpha_v)^2; "
         "d(alpha_unstable)/dt=(1-X)*d(alpha_v)/dt-Ar*exp(-Er/(R*T))*alpha_unstable; "
@@ -316,7 +322,16 @@ def _rebuild_curve_predictions(payload):
         ml = _safe_float(curve.get("ML"), default=None)
         mh = _safe_float(curve.get("MH"), default=None)
         if ml is not None and mh is not None:
-            curve["torque_model"] = torque_from_alpha(alpha_model, ml, mh).tolist()
+            if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+                curve["torque_model"] = torque_from_alpha_kamal_sourour_expanded(
+                    alpha=alpha_model,
+                    time_s=t_rel,
+                    m_min=ml,
+                    m_max=mh,
+                    params=params,
+                ).tolist()
+            else:
+                curve["torque_model"] = torque_from_alpha(alpha_model, ml, mh).tolist()
         else:
             curve.pop("torque_model", None)
 
@@ -586,10 +601,21 @@ def _normalize_fit_payload_model(payload):
         payload.pop("k_ref", None)
         payload.pop("Ea", None)
         payload.pop("n", None)
+        payload.pop("k1", None)
+        payload.pop("k2", None)
+        payload.pop("m", None)
+        payload.pop("k_march", None)
+        payload.pop("k_rev", None)
+        payload.pop("beta_rev", None)
         if not payload.get("calibration_strategy"):
             payload["calibration_strategy"] = "hierarchical_v1"
         if not payload.get("calibration_stage_selected"):
             payload["calibration_stage_selected"] = "stage1"
+    elif family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+            payload[key] = float(params.get(key, 0.0))
+        payload["k_ref"] = float(params.get("k_ref", params.get("k1", 0.0)))
+        payload["k0"] = float(params.get("k0", params.get("k1", 0.0)))
     else:
         payload["Ea"] = float(params.get("Ea", 0.0))
         payload["n"] = float(params.get("n", 0.0))
@@ -598,7 +624,7 @@ def _normalize_fit_payload_model(payload):
         payload["k0"] = float(params.get("k0", params.get("k_ref", 0.0)))
         if "k_ref" in payload:
             payload.pop("k_ref", None)
-    elif family != MODEL_FAMILY_LEROY2013_CONTINUOUS_V1:
+    elif family not in (MODEL_FAMILY_LEROY2013_CONTINUOUS_V1, MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1):
         payload["k_ref"] = float(params.get("k_ref", params.get("k", 0.0)))
         # Compatibility alias for existing consumers.
         payload["k0"] = float(payload["k_ref"])
@@ -914,6 +940,21 @@ def update_fit_parameters(fit_id, k_value=None, ea=None, n=None, parameter_updat
                 updates["Ev"] = float(ea)
             if n is not None:
                 updates["X"] = float(n)
+        payload = update_model_parameters(payload, parameter_updates=updates)
+    elif family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+        updates = {}
+        for key in ("k1", "k2", "Ea", "m", "n", "k_march", "k_rev", "beta_rev"):
+            numeric = _safe_float((parameter_updates or {}).get(key), default=None)
+            if numeric is not None:
+                updates[key] = float(numeric)
+        if not updates:
+            if k_value is not None:
+                updates["k1"] = float(k_value)
+                updates["k2"] = float(k_value)
+            if ea is not None:
+                updates["Ea"] = float(ea)
+            if n is not None:
+                updates["n"] = float(n)
         payload = update_model_parameters(payload, parameter_updates=updates)
     else:
         if family == MODEL_FAMILY_EDO_ORDER_N_V1:

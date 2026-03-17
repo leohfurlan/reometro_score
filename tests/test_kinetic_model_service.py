@@ -40,6 +40,47 @@ def _build_synthetic_curves(rng, params, reference_temperature_k):
     return curves
 
 
+def _build_kamal_synthetic_curves(rng, params, reference_temperature_k):
+    curves = []
+    temps_c = [155.0, 170.0, 185.0]
+    for idx, temp_c in enumerate(temps_c, start=1):
+        time = np.linspace(0.0, 900.0, 451, dtype=float)
+        temp_k = np.full_like(time, fill_value=temp_c + 273.15)
+        alpha_clean = kms.predict_alpha_nonisothermal(
+            time_s=time,
+            temperature_k=temp_k,
+            params=params,
+            model_family=kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
+            reference_temperature_k=reference_temperature_k,
+        )
+        alpha_noisy = np.clip(alpha_clean + rng.normal(0.0, 0.003, size=alpha_clean.shape), 0.0, 1.0)
+        ml = 2.0
+        mh = 6.4
+        torque_clean = kms.torque_from_alpha_kamal_sourour_expanded(
+            alpha=alpha_noisy,
+            time_s=time,
+            m_min=ml,
+            m_max=mh,
+            params=params,
+        )
+        torque_noisy = torque_clean + rng.normal(0.0, 0.01, size=torque_clean.shape)
+
+        curves.append(
+            {
+                "COD_ENSAIO": idx,
+                "T_C": float(temp_c),
+                "T_K": float(temp_c + 273.15),
+                "t_rel": time,
+                "tempo": time,
+                "torque": torque_noisy,
+                "ML": float(ml),
+                "MH": float(mh),
+                "alpha": kms.alpha_from_torque(torque_noisy, ml, mh),
+            }
+        )
+    return curves
+
+
 def test_default_model_family_is_edo_order_n_v1():
     assert kms.DEFAULT_MODEL_FAMILY == kms.MODEL_FAMILY_EDO_ORDER_N_V1
 
@@ -55,6 +96,55 @@ def test_torque_alpha_roundtrip():
     assert np.all(alpha >= 0.0)
     assert np.all(alpha <= 1.0)
     assert np.allclose(torque_back, torque, atol=1e-12)
+
+
+def test_normalize_model_family_accepts_kamal_alias():
+    assert kms.normalize_model_family("kamal_sourour_expanded") == kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1
+
+
+def test_kamal_nonisothermal_prediction_is_bounded_and_monotonic():
+    params = {
+        "k1": 0.0025,
+        "k2": 0.006,
+        "Ea": 76000.0,
+        "m": 1.2,
+        "n": 1.45,
+        "k_march": 0.03,
+        "k_rev": 0.04,
+        "beta_rev": 0.012,
+    }
+    time = np.linspace(0.0, 600.0, 601, dtype=float)
+    temp_k = np.linspace(413.15, 453.15, 601, dtype=float)
+    alpha = kms.predict_alpha_nonisothermal(
+        time_s=time,
+        temperature_k=temp_k,
+        params=params,
+        model_family=kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
+        reference_temperature_k=433.15,
+    )
+    assert np.isfinite(alpha).all()
+    assert float(np.min(alpha)) >= 0.0
+    assert float(np.max(alpha)) <= 1.0
+    assert np.all(np.diff(alpha) >= -1e-10)
+
+
+def test_kamal_torque_model_applies_marching_and_reversion():
+    params = {
+        "k1": 0.002,
+        "k2": 0.006,
+        "Ea": 78000.0,
+        "m": 1.0,
+        "n": 1.3,
+        "k_march": 0.05,
+        "k_rev": 0.20,
+        "beta_rev": 0.01,
+    }
+    time = np.linspace(0.0, 400.0, 401, dtype=float)
+    alpha = np.linspace(0.0, 0.95, 401, dtype=float)
+    torque = kms.torque_from_alpha_kamal_sourour_expanded(alpha, time, 2.0, 6.0, params)
+    linear_only = kms.torque_from_alpha(alpha, 2.0, 6.0)
+    assert torque.shape == linear_only.shape
+    assert float(torque[-1]) != pytest.approx(float(linear_only[-1]), rel=1e-9, abs=1e-9)
 
 
 def test_arrhenius_reference_factor_direction_vs_reference_temperature():
@@ -89,6 +179,37 @@ def test_fit_synthetic_isothermal_pinheiro_sigmoidal_teq():
     assert fit["fit_method"] == "least_squares"
     assert fit["k_ref"] > 0.0
     assert abs(fit["n"] - true_params["n"]) < 0.35
+
+
+def test_fit_synthetic_kamal_sourour_expanded():
+    rng = np.random.default_rng(2026031701)
+    reference_temperature_k = 433.15
+    true_params = {
+        "k1": 0.0028,
+        "k2": 0.0075,
+        "Ea": 78000.0,
+        "m": 1.20,
+        "n": 1.55,
+        "k_march": 0.035,
+        "k_rev": 0.040,
+        "beta_rev": 0.01,
+    }
+    curves = _build_kamal_synthetic_curves(rng, true_params, reference_temperature_k)
+
+    fit = kms.fit_model_parameters(
+        curves,
+        model_family=kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
+        reference_temperature_k=reference_temperature_k,
+    )
+
+    assert fit["success"] is True
+    assert fit["model_family"] == kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1
+    assert fit["fit_method"] == "least_squares"
+    assert fit["k1"] > 0.0
+    assert fit["k2"] > 0.0
+    assert 0.1 <= float(fit["m"]) <= 3.0
+    assert 0.5 <= float(fit["n"]) <= 3.0
+    assert 0.0 <= float(fit["k_march"]) <= 0.5
 
 
 def test_fit_auto_selects_best_model_for_pinheiro_synthetic():
@@ -387,6 +508,39 @@ def test_leroy_av2_bound_extended_to_40000():
         model_family=kms.MODEL_FAMILY_LEROY2013_CONTINUOUS_V1,
     )
     assert abs(float(params["Av2"]) - 40000.0) < 1e-9
+
+
+def test_extract_and_update_kamal_parameters():
+    payload = {
+        "model_family": kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
+        "model_parameters": {
+            "k1": 0.002,
+            "k2": 0.005,
+            "Ea": 77000.0,
+            "m": 1.1,
+            "n": 1.4,
+            "k_march": 0.02,
+            "k_rev": 0.03,
+            "beta_rev": 0.01,
+        },
+    }
+
+    extracted = kms.extract_model_parameters(payload, model_family=kms.MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1)
+    assert extracted["k1"] > 0.0
+    assert extracted["k2"] > 0.0
+    assert 0.1 <= extracted["m"] <= 3.0
+    assert 0.5 <= extracted["n"] <= 3.0
+    assert 0.0 <= extracted["k_march"] <= 0.5
+
+    updated = kms.update_model_parameters(
+        {
+            **payload,
+            "fit_id": "fit_kamal_update",
+        },
+        parameter_updates={"k_march": 0.04, "m": 1.3},
+    )
+    assert updated["model_parameters"]["k_march"] == pytest.approx(0.04, rel=1e-9, abs=1e-9)
+    assert updated["model_parameters"]["m"] == pytest.approx(1.3, rel=1e-9, abs=1e-9)
 
 
 def test_saved_leroy_fit_payload_round_trip_preserves_hierarchical_fields(tmp_path, monkeypatch):

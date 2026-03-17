@@ -9,6 +9,7 @@ from services.kinetic_model_service import (
     ALPHA_METRIC_TARGETS_DEFAULT,
     AUTO_COMPARE_MODEL_FAMILIES,
     MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1,
     MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
     compare_model_families,
     compute_equivalent_time as compute_equivalent_time_core,
@@ -17,6 +18,7 @@ from services.kinetic_model_service import (
     normalize_model_family,
     predict_alpha,
     predict_alpha_nonisothermal,
+    torque_from_alpha_kamal_sourour_expanded,
     torque_from_alpha,
 )
 from services.reometry_dataset_service import load_reometry_dataset
@@ -265,10 +267,23 @@ def _evaluate_candidate(prepared_dataset, candidate, reference_temperature_k):
         torque_real = torque_real[:size]
         t_rel = np.maximum(time - float(time[0]), 0.0)
 
-        torque_model = np.asarray(
-            torque_from_alpha(alpha_model, curve["ML"], curve["MH"]),
-            dtype=float,
-        )
+        if family == MODEL_FAMILY_KAMAL_SOUROUR_EXPANDED_V1:
+            t_rel_for_torque = np.maximum(time - float(time[0]), 0.0)
+            torque_model = np.asarray(
+                torque_from_alpha_kamal_sourour_expanded(
+                    alpha=alpha_model,
+                    time_s=t_rel_for_torque,
+                    m_min=curve["ML"],
+                    m_max=curve["MH"],
+                    params=params,
+                ),
+                dtype=float,
+            )
+        else:
+            torque_model = np.asarray(
+                torque_from_alpha(alpha_model, curve["ML"], curve["MH"]),
+                dtype=float,
+            )
         torque_model = torque_model[:size]
 
         alpha_err = alpha_model - alpha_real
