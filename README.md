@@ -186,3 +186,43 @@ A nova feature usa a mesma conexão SQL Server já existente em `connection.py`:
 - Official local command for v2 validation suite:
   - `python -m services.run_v2_validation_suite --quick --gate-mode informative --out-dir data/out --report-stem v2_validation_report`
   - Strict gate (optional): `python -m services.run_v2_validation_suite --quick --gate-mode strict --out-dir data/out --report-stem v2_validation_report`
+
+## Reometria kinetic model families
+
+- `edo_order_n_v1` (default)
+  - `dalpha/dt = k(T) * (1 - alpha)^n`
+  - Familia classica por EDO de ordem n (mantida para compatibilidade).
+- `pinheiro_sigmoidal_v1`
+  - `alpha(t) = (k(T) * t^n) / (1 + k(T) * t^n)`
+  - Regime isotermico sigmoidal com `k(T)` referenciado por Arrhenius.
+- `pinheiro_sigmoidal_teq_v1`
+  - `alpha(t) = (k_ref * t_eq(t)^n) / (1 + k_ref * t_eq(t)^n)`
+  - `t_eq(t) = sum(exp(-(Ea/R) * (1/T_i - 1/T_ref)) * dt_i)`
+
+## Consideracoes fisicas do fator Arrhenius
+
+- Equacao de referencia usada no backend e no preview:
+  - `f(T) = exp(-(Ea/R) * (1/T - 1/T_ref))`
+- Interpretacao fisica esperada:
+  - `T > T_ref  -> f(T) > 1` (cura acelera)
+  - `T = T_ref  -> f(T) = 1`
+  - `T < T_ref  -> f(T) < 1` (cura desacelera)
+- No modelo `pinheiro_sigmoidal_teq_v1`, `f(T)` pondera cada `dt` no calculo de `t_eq`.
+
+Saved fit metadata for reproducibility/auditability:
+- `model_family`
+- `model_version`
+- `fit_method`
+- `reference_temperature_K`
+- `cure_completion_rule`
+
+Example payload:
+```json
+{
+  "model_family": "pinheiro_sigmoidal_teq_v1",
+  "model_version": "v1",
+  "fit_method": "least_squares",
+  "reference_temperature_K": 433.15,
+  "cure_completion_rule": "alpha_practical_0_99"
+}
+```

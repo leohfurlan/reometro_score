@@ -85,6 +85,12 @@ def _base_payload():
     return {
         "fit_id": "fit_test",
         "success": True,
+        "model_family": "pinheiro_sigmoidal_teq_v1",
+        "model_version": "v1",
+        "fit_method": "least_squares",
+        "reference_temperature_K": 433.15,
+        "cure_completion_rule": "alpha_practical_0_99",
+        "k_ref": 1e-4,
         "k0": 1e6,
         "Ea": 80000.0,
         "n": 1.2,
@@ -161,6 +167,74 @@ def test_reometria_fit_update_meta_returns_400_for_invalid_json(monkeypatch):
     assert response.status_code == 400
     data = response.get_json()
     assert data["success"] is False
+
+
+def test_reometria_fit_update_accepts_k_ref_for_pinheiro(monkeypatch):
+    app = _create_test_app()
+    current_payload = {
+        "fit_id": "fit_update_pinheiro",
+        "model_family": "pinheiro_sigmoidal_teq_v1",
+        "k_ref": 1.0e-4,
+        "k0": 1.0e-4,
+        "Ea": 8.0e4,
+        "n": 1.2,
+    }
+
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(current_payload))
+
+    def _update_fit_parameters(_fit_id, k_value, ea, n):
+        out = dict(current_payload)
+        out.update({"k_ref": float(k_value), "k0": float(k_value), "Ea": float(ea), "n": float(n)})
+        return out
+
+    monkeypatch.setattr(rr, "update_fit_parameters", _update_fit_parameters)
+
+    client = app.test_client()
+    response = client.post(
+        "/reometria/fit/update/fit_update_pinheiro",
+        json={"k_ref": 2.5e-4, "Ea": 85000.0, "n": 1.5},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert abs(float(data["k_ref"]) - 2.5e-4) < 1e-12
+    assert abs(float(data["k0"]) - 2.5e-4) < 1e-12
+    assert abs(float(data["Ea"]) - 85000.0) < 1e-9
+    assert abs(float(data["n"]) - 1.5) < 1e-9
+
+
+def test_reometria_fit_update_accepts_k0_for_edo(monkeypatch):
+    app = _create_test_app()
+    current_payload = {
+        "fit_id": "fit_update_edo",
+        "model_family": "edo_order_n_v1",
+        "k0": 3.0e-3,
+        "Ea": 7.0e4,
+        "n": 1.0,
+    }
+
+    monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(current_payload))
+
+    def _update_fit_parameters(_fit_id, k_value, ea, n):
+        out = dict(current_payload)
+        out.update({"k0": float(k_value), "Ea": float(ea), "n": float(n)})
+        return out
+
+    monkeypatch.setattr(rr, "update_fit_parameters", _update_fit_parameters)
+
+    client = app.test_client()
+    response = client.post(
+        "/reometria/fit/update/fit_update_edo",
+        json={"k0": 9.0e-3, "Ea": 72000.0, "n": 1.3},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert abs(float(data["k0"]) - 9.0e-3) < 1e-12
+    assert abs(float(data["Ea"]) - 72000.0) < 1e-9
+    assert abs(float(data["n"]) - 1.3) < 1e-9
 
 
 def test_list_simulations_by_fit_returns_empty_list(tmp_path, monkeypatch):

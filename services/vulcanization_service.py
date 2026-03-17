@@ -4,6 +4,16 @@ from pathlib import Path
 import math
 
 import numpy as np
+from services.kinetic_model_service import (
+    DEFAULT_REFERENCE_TEMPERATURE_K,
+    MODEL_FAMILY_EDO_ORDER_N_V1,
+    MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1,
+    MODEL_FAMILY_PINHEIRO_SIGMOIDAL_TEQ_V1,
+    arrhenius_reference_factor,
+    extract_model_parameters,
+    normalize_cure_completion_rule,
+    normalize_model_family,
+)
 
 R_GAS = 8.314462618
 OUT_DIR = Path("data/out")
@@ -196,10 +206,26 @@ def run_simulation(
     steps = int(max(math.ceil(t_end / dt), 1))
     t_field = np.full(shape, init_temp_c + 273.15, dtype=np.float32)
     cure_drive_field = np.zeros(shape, dtype=np.float32)
+    t_eq_field = np.zeros(shape, dtype=np.float32)
+    alpha_field = np.zeros(shape, dtype=np.float32)
 
-    k0 = float(fit_payload["k0"])
-    ea = float(fit_payload["Ea"])
-    n = float(np.clip(fit_payload["n"], 0.5, 12.0))
+    family_raw = (fit_payload or {}).get("model_family")
+    legacy_arrhenius_mode = family_raw is None
+    model_family = (
+        MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1
+        if legacy_arrhenius_mode
+        else normalize_model_family(family_raw)
+    )
+    params = extract_model_parameters(fit_payload or {}, model_family=model_family)
+    reference_temperature_k = float(
+        max(float((fit_payload or {}).get("reference_temperature_K") or DEFAULT_REFERENCE_TEMPERATURE_K), 1.0)
+    )
+    cure_completion_rule = normalize_cure_completion_rule((fit_payload or {}).get("cure_completion_rule"))
+
+    k_ref = float(max(params.get("k_ref", params.get("k0", 1e-8)), 1e-300))
+    k0 = float(max(params.get("k0", params.get("k_ref", 1e-8)), 1e-300))
+    ea = float(max(params.get("Ea", 0.0), 0.0))
+    n = float(np.clip(params.get("n", 1.2), 0.2, 12.0))
 
     if mode == "prensa":
         selected_platen_axis = 0 if platen_axis is None else int(platen_axis)
@@ -239,12 +265,42 @@ def run_simulation(
                 t_field = t_field + alpha_diff * dt_inner * lap
                 _apply_dirichlet_boundaries(t_field, t_bc, axes=heated_axes)
 
-                k_t = np.maximum(k0 * np.exp(-ea / (R_GAS * np.maximum(t_field, 1.0))), 0.0)
+                temp_safe = np.maximum(t_field, 1.0)
                 t_prev_sub = prev_t + (sub_idx * dt_inner)
-                dt_pow_n = max((t_sub ** n) - (t_prev_sub ** n), 0.0)
-                cure_drive_field = cure_drive_field + (k_t * dt_pow_n)
 
-        alpha_field = cure_drive_field / (1.0 + cure_drive_field)
+                if model_family == MODEL_FAMILY_EDO_ORDER_N_V1:
+                    k_t = np.maximum(k0 * np.exp(np.clip(-ea / (R_GAS * temp_safe), -700.0, 700.0)), 0.0)
+                    if abs(n - 1.0) <= 1e-9:
+                        alpha_field = 1.0 - ((1.0 - alpha_field) * np.exp(-k_t * dt_inner))
+                    else:
+                        one_minus = np.maximum(1.0 - alpha_field, 1e-12)
+                        rhs = np.power(one_minus, 1.0 - n) + ((n - 1.0) * k_t * dt_inner)
+                        alpha_field = 1.0 - np.power(np.maximum(rhs, 1e-300), 1.0 / (1.0 - n))
+                    alpha_field = np.clip(alpha_field, 0.0, 1.0)
+                elif model_family == MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1:
+                    if legacy_arrhenius_mode:
+                        k_t = np.maximum(k0 * np.exp(np.clip(-ea / (R_GAS * temp_safe), -700.0, 700.0)), 0.0)
+                    else:
+                        factor = arrhenius_reference_factor(
+                            temp_safe,
+                            ea=ea,
+                            reference_temperature_k=reference_temperature_k,
+                        )
+                        k_t = np.maximum(k_ref * factor, 0.0)
+                    dt_pow_n = max((t_sub ** n) - (t_prev_sub ** n), 0.0)
+                    cure_drive_field = cure_drive_field + (k_t * dt_pow_n)
+                    alpha_field = cure_drive_field / (1.0 + cure_drive_field)
+                else:
+                    shift = arrhenius_reference_factor(
+                        temp_safe,
+                        ea=ea,
+                        reference_temperature_k=reference_temperature_k,
+                    )
+                    t_eq_field = t_eq_field + (shift * dt_inner)
+                    drive = np.maximum(k_ref, 1e-300) * np.power(np.maximum(t_eq_field, 0.0), n)
+                    alpha_field = drive / (1.0 + drive)
+
+        alpha_field = np.clip(alpha_field, 0.0, 1.0)
 
         if store_pos < store_count and step == int(store_indices[store_pos]):
             times[store_pos] = t_now
@@ -279,6 +335,12 @@ def run_simulation(
         dx=dx,
         dt=dt,
         t_end=t_end,
+        model_family=np.array(str(model_family), dtype="<U64"),
+        model_version=np.array(str((fit_payload or {}).get("model_version") or "v1"), dtype="<U16"),
+        fit_method=np.array(str((fit_payload or {}).get("fit_method") or "least_squares"), dtype="<U32"),
+        reference_temperature_k=np.array(float(reference_temperature_k), dtype=np.float64),
+        cure_completion_rule=np.array(str(cure_completion_rule), dtype="<U64"),
+        model_parameters=np.array(dict(params), dtype=object),
         times=times,
         t_snaps=t_snaps,
         alpha_snaps=alpha_snaps,
@@ -299,6 +361,23 @@ def load_simulation(sim_id):
     store_stride = int(d["store_stride"]) if "store_stride" in files else 1
     snapshot_every_source = int(d["snapshot_every_source"]) if "snapshot_every_source" in files else 20
     snapshot_every_store = int(d["snapshot_every_store"]) if "snapshot_every_store" in files else snapshot_every_source
+    model_family = str(d["model_family"]) if "model_family" in files else MODEL_FAMILY_PINHEIRO_SIGMOIDAL_V1
+    model_version = str(d["model_version"]) if "model_version" in files else "v1"
+    fit_method = str(d["fit_method"]) if "fit_method" in files else "least_squares"
+    reference_temperature_k = (
+        float(d["reference_temperature_k"]) if "reference_temperature_k" in files else float(DEFAULT_REFERENCE_TEMPERATURE_K)
+    )
+    cure_completion_rule = (
+        str(d["cure_completion_rule"]) if "cure_completion_rule" in files else "alpha_practical_0_99"
+    )
+    model_parameters = {}
+    if "model_parameters" in files:
+        raw = d["model_parameters"]
+        if isinstance(raw, np.ndarray) and raw.shape == ():
+            try:
+                model_parameters = dict(raw.item() or {})
+            except Exception:
+                model_parameters = {}
 
     return {
         "sim_id": str(d["sim_id"]),
@@ -312,6 +391,12 @@ def load_simulation(sim_id):
         "store_stride": store_stride,
         "snapshot_every_source": snapshot_every_source,
         "snapshot_every_store": snapshot_every_store,
+        "model_family": model_family,
+        "model_version": model_version,
+        "fit_method": fit_method,
+        "reference_temperature_k": reference_temperature_k,
+        "cure_completion_rule": cure_completion_rule,
+        "model_parameters": model_parameters,
         "dx": float(d["dx"]) * float(store_stride),
         "dx_compute": float(d["dx"]),
         "dt": float(d["dt"]),

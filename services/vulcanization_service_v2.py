@@ -24,6 +24,7 @@ from services.thermo_solver import (
     reaction_heat_source,
     thermal_increment_from_source,
 )
+from services.kinetic_model_service import extract_model_parameters, normalize_model_family
 
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -823,12 +824,16 @@ def _build_kinetics(fit_payload, kinetics_params):
     merged = asdict(defaults)
 
     if isinstance(fit_payload, dict):
-        if fit_payload.get("k0") is not None:
-            merged["Ac"] = float(fit_payload["k0"])
-        if fit_payload.get("Ea") is not None:
-            merged["Eac"] = float(fit_payload["Ea"])
-        if fit_payload.get("n") is not None:
-            merged["Nn"] = float(fit_payload["n"])
+        family = normalize_model_family(fit_payload.get("model_family"))
+        params = extract_model_parameters(fit_payload, model_family=family)
+        if params.get("k0") is not None:
+            merged["Ac"] = float(params["k0"])
+        elif params.get("k_ref") is not None:
+            merged["Ac"] = float(params["k_ref"])
+        if params.get("Ea") is not None:
+            merged["Eac"] = float(params["Ea"])
+        if params.get("n") is not None:
+            merged["Nn"] = float(params["n"])
 
     if isinstance(kinetics_params, MechanisticKineticsParams):
         merged.update(asdict(kinetics_params))

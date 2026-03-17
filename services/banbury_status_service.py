@@ -237,7 +237,14 @@ def _iter_registros_planilha(caminho_planilha):
             )
             coluna_hora = _selecionar_coluna(
                 colunas,
-                tokens_obrigatorios=("HORARIO", "LOTE"),
+                candidatos_exatos=(
+                    "HORARIO QUE COMEÇOU O LOTE",
+                    "HORARIO QUE COMECOU O LOTE",
+                    "HORARIO QUE COMEÇO",
+                    "HORARIO QUE COMECO",
+                    "HORARIO",
+                ),
+                tokens_obrigatorios=("HORARIO",),
             )
             coluna_massa = _coluna_massa(colunas)
             coluna_banbury = _selecionar_coluna(

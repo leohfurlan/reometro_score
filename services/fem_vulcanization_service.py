@@ -19,6 +19,7 @@ from services.thermo_solver import (
     RHO_RUBBER,
     reaction_heat_source,
 )
+from services.kinetic_model_service import extract_model_parameters, normalize_model_family
 
 try:
     from fipy import CellVariable, CylindricalGrid2D, DiffusionTerm, TransientTerm
@@ -70,12 +71,17 @@ def _build_kinetics(config):
     kinetics_params = dict(config.get("kinetics_params") or {})
     fit_payload = dict(config.get("fit_payload") or {})
 
-    if fit_payload.get("k0") is not None:
-        merged["Ac"] = float(fit_payload["k0"])
-    if fit_payload.get("Ea") is not None:
-        merged["Eac"] = float(fit_payload["Ea"])
-    if fit_payload.get("n") is not None:
-        merged["Nn"] = float(fit_payload["n"])
+    family = normalize_model_family(fit_payload.get("model_family"))
+    fit_params = extract_model_parameters(fit_payload, model_family=family)
+
+    if fit_params.get("k0") is not None:
+        merged["Ac"] = float(fit_params["k0"])
+    elif fit_params.get("k_ref") is not None:
+        merged["Ac"] = float(fit_params["k_ref"])
+    if fit_params.get("Ea") is not None:
+        merged["Eac"] = float(fit_params["Ea"])
+    if fit_params.get("n") is not None:
+        merged["Nn"] = float(fit_params["n"])
 
     for key in merged:
         if key in kinetics_params and kinetics_params[key] is not None:

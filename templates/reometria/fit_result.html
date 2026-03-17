@@ -6,6 +6,10 @@
   {% set metadata = {} %}
 {% endif %}
 {% set fit_last_update = payload.get('updated_at') or payload.get('created_at') %}
+{% set model_family = payload.get('model_family', 'edo_order_n_v1') %}
+{% set kinetic_key = 'k0' if model_family == 'edo_order_n_v1' else 'k_ref' %}
+{% set kinetic_label = 'k0' if model_family == 'edo_order_n_v1' else 'k_ref' %}
+{% set kinetic_value = payload.get(kinetic_key) if payload.get(kinetic_key) is not none else payload.get('k0', payload.get('k_ref', 0)) %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <style>
   .param-value { font-size: 1.1rem; font-weight: 600; }
@@ -57,19 +61,27 @@
   </div>
   <div class="card-body">
     <div class="row g-3 mb-2">
+      <div class="col-12">
+        <div class="alert alert-light border mb-1">
+          <div><b>Modelo:</b> <code>{{ model_family }}</code> ({{ payload.get('model_version', 'v1') }})</div>
+          <div><b>Fit method:</b> {{ payload.get('fit_method', 'least_squares') }}</div>
+          <div><b>T referencia (K):</b> {{ ('%.2f'|format(payload.get('reference_temperature_K', 433.15))).replace('.', ',') }}</div>
+          <div><b>Regra de cura pratica:</b> <code>{{ payload.get('cure_completion_rule', 'alpha_practical_0_99') }}</code></div>
+        </div>
+      </div>
       <div class="col-lg-4">
         <div class="card h-100">
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-center">
-              <b>k0</b>
-              <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="k0">Slider</button>
+              <b>{{ kinetic_label }}</b>
+              <button type="button" class="btn btn-sm btn-outline-secondary param-edit-btn" data-param="k">Slider</button>
             </div>
-            <div class="param-value" id="display-k0">{{ '%.6e'|format(payload.k0 or 0) }}</div>
-            <div class="param-editor d-none" id="editor-k0">
-              <label for="slider-k0" class="form-label small text-muted mb-1">Ajuste (log10)</label>
-              <input type="range" class="form-range" id="slider-k0" min="-8" max="15" step="0.01">
-              <label for="input-k0" class="form-label small text-muted mb-1">Valor direto</label>
-              <input type="number" class="form-control form-control-sm" id="input-k0" min="1e-8" max="1e15" step="any">
+            <div class="param-value" id="display-k">{{ '%.6e'|format(kinetic_value or 0) }}</div>
+            <div class="param-editor d-none" id="editor-k">
+              <label for="slider-k" class="form-label small text-muted mb-1">Ajuste (log10)</label>
+              <input type="range" class="form-range" id="slider-k" min="-12" max="8" step="0.01">
+              <label for="input-k" class="form-label small text-muted mb-1">Valor direto</label>
+              <input type="number" class="form-control form-control-sm" id="input-k" min="1e-12" max="1e8" step="any">
             </div>
           </div>
         </div>
@@ -115,7 +127,7 @@
     <div class="d-none mb-3" id="paramActions">
       <button type="button" class="btn btn-success btn-sm" id="saveParamChanges">Salvar alteracoes</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelParamChanges">Cancelar alteracoes</button>
-      <small class="text-muted ms-2">As alteracoes atualizam o grafico em tempo real.</small>
+      <small class="text-muted ms-2">As alteracoes atualizam o grafico em tempo real ({{ kinetic_label }}, Ea, n).</small>
     </div>
 
     <div class="row g-3 mb-3">
@@ -284,16 +296,20 @@
   const alphaComparisonSeed = {{ alpha_time_comparison|tojson }};
   const updateUrl = {{ url_for('reometria.reometria_fit_update', fit_id=payload.fit_id)|tojson }};
   const updateMetaUrl = {{ url_for('reometria.reometria_fit_update_meta', fit_id=payload.fit_id)|tojson }};
+  const modelFamily = {{ model_family|tojson }};
+  const kineticKey = {{ kinetic_key|tojson }};
+  const kineticLabel = {{ kinetic_label|tojson }};
+  const referenceTemperatureK = Number({{ (payload.get('reference_temperature_K', 433.15))|tojson }});
   const R_GAS = 8.314462618;
   const LIMITS = {
-    k0: { min: 1e-8, max: 1e15 },
-    Ea: { min: 50000.0, max: 250000.0 },
-    n: { min: 0.5, max: 12.0 },
+    k: { min: 1e-12, max: 1e8 },
+    Ea: { min: 0.0, max: 350000.0 },
+    n: { min: 0.2, max: 12.0 },
   };
 
   const state = {
     original: {
-      k0: Number({{ (payload.k0 if payload.k0 is not none else 1e6)|tojson }}),
+      k: Number({{ (kinetic_value if kinetic_value is not none else 1e-3)|tojson }}),
       Ea: Number({{ (payload.Ea if payload.Ea is not none else 80000.0)|tojson }}),
       n: Number({{ (payload.n if payload.n is not none else 1.2)|tojson }}),
     },
@@ -302,12 +318,12 @@
   state.current = { ...state.original };
 
   const controls = {
-    k0: { slider: document.getElementById('slider-k0'), input: document.getElementById('input-k0') },
+    k: { slider: document.getElementById('slider-k'), input: document.getElementById('input-k') },
     Ea: { slider: document.getElementById('slider-Ea'), input: document.getElementById('input-Ea') },
     n: { slider: document.getElementById('slider-n'), input: document.getElementById('input-n') },
   };
   const displayEls = {
-    k0: document.getElementById('display-k0'),
+    k: document.getElementById('display-k'),
     Ea: document.getElementById('display-Ea'),
     n: document.getElementById('display-n'),
   };
@@ -435,7 +451,7 @@
 
   const modelTimeline = buildModelTimeline();
 
-  function formatK0(value) {
+  function formatK(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
     return num.toExponential(6);
@@ -454,18 +470,18 @@
   }
 
   function updateParamDisplays() {
-    displayEls.k0.textContent = formatK0(state.current.k0);
+    displayEls.k.textContent = formatK(state.current.k);
     displayEls.Ea.textContent = formatEa(state.current.Ea);
     displayEls.n.textContent = formatN(state.current.n);
   }
 
   function syncControlValuesFromState() {
-    const k0Safe = clamp(state.current.k0, LIMITS.k0.min, LIMITS.k0.max);
+    const kSafe = clamp(state.current.k, LIMITS.k.min, LIMITS.k.max);
     const eaSafe = clamp(state.current.Ea, LIMITS.Ea.min, LIMITS.Ea.max);
     const nSafe = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
 
-    controls.k0.slider.value = String(Math.log10(k0Safe));
-    controls.k0.input.value = k0Safe.toExponential(6);
+    controls.k.slider.value = String(Math.log10(kSafe));
+    controls.k.input.value = kSafe.toExponential(6);
 
     controls.Ea.slider.value = String(eaSafe);
     controls.Ea.input.value = eaSafe.toFixed(2);
@@ -475,10 +491,10 @@
   }
 
   function isDirty() {
-    const logK0Current = Math.log10(clamp(state.current.k0, LIMITS.k0.min, LIMITS.k0.max));
-    const logK0Original = Math.log10(clamp(state.original.k0, LIMITS.k0.min, LIMITS.k0.max));
+    const logKCurrent = Math.log10(clamp(state.current.k, LIMITS.k.min, LIMITS.k.max));
+    const logKOriginal = Math.log10(clamp(state.original.k, LIMITS.k.min, LIMITS.k.max));
     return (
-      Math.abs(logK0Current - logK0Original) > 1e-9 ||
+      Math.abs(logKCurrent - logKOriginal) > 1e-9 ||
       Math.abs(state.current.Ea - state.original.Ea) > 1e-6 ||
       Math.abs(state.current.n - state.original.n) > 1e-6
     );
@@ -494,18 +510,49 @@
   function computeAlphaModelForTimeline(curve, timeline) {
     const tempK = Math.max((Number.isFinite(curve.T_C) ? curve.T_C : 0) + 273.15, 1.0);
     const n = clamp(state.current.n, LIMITS.n.min, LIMITS.n.max);
-    const kRaw = state.current.k0 * Math.exp(-state.current.Ea / (R_GAS * tempK));
-    const k_t = Number.isFinite(kRaw) ? Math.max(kRaw, 0.0) : 0.0;
-    const lnK = Math.log(Math.max(k_t, 1e-300));
+    const ea = clamp(state.current.Ea, LIMITS.Ea.min, LIMITS.Ea.max);
+    const k = clamp(state.current.k, LIMITS.k.min, LIMITS.k.max);
+    const tRef = Math.max(Number(referenceTemperatureK) || 1.0, 1.0);
+
+    function logisticFromDrive(drive) {
+      const d = Math.max(Number(drive) || 0.0, 0.0);
+      return d / (1.0 + d);
+    }
 
     return timeline.map((tValue) => {
       const tNum = Number(tValue);
-      if (!Number.isFinite(tNum) || tNum <= 0 || k_t <= 0) return 0.0;
+      if (!Number.isFinite(tNum) || tNum <= 0) return 0.0;
 
-      // Keep JS aligned with the backend model: x = k(T) * t^n.
-      const lnX = lnK + (n * Math.log(Math.max(tNum, 1e-300)));
+      if (modelFamily === 'edo_order_n_v1') {
+        const exponent = clamp(-ea / (R_GAS * tempK), -700.0, 700.0);
+        const k_t = k * Math.exp(exponent);
+        if (k_t <= 0) return 0.0;
+
+        if (Math.abs(n - 1.0) <= 1e-9) {
+          return 1.0 - Math.exp(-k_t * tNum);
+        }
+        const base = Math.max(1.0 + ((n - 1.0) * k_t * tNum), 1e-300);
+        return 1.0 - Math.pow(base, -1.0 / (n - 1.0));
+      }
+
+      if (modelFamily === 'pinheiro_sigmoidal_v1') {
+        // Physical Arrhenius sign: T > T_ref must accelerate cure (factor > 1).
+        const exponent = clamp(-(ea / R_GAS) * ((1.0 / tempK) - (1.0 / tRef)), -700.0, 700.0);
+        const k_t = k * Math.exp(exponent);
+        if (k_t <= 0) return 0.0;
+        const lnX = Math.log(Math.max(k_t, 1e-300)) + (n * Math.log(Math.max(tNum, 1e-300)));
+        const x = Math.exp(clamp(lnX, -700.0, 700.0));
+        return logisticFromDrive(x);
+      }
+
+      // pinheiro_sigmoidal_teq_v1
+      // Same Arrhenius factor used in backend equivalent-time integration.
+      const factorExponent = clamp(-(ea / R_GAS) * ((1.0 / tempK) - (1.0 / tRef)), -700.0, 700.0);
+      const tEq = tNum * Math.exp(factorExponent);
+      if (!Number.isFinite(tEq) || tEq <= 0) return 0.0;
+      const lnX = Math.log(Math.max(k, 1e-300)) + (n * Math.log(Math.max(tEq, 1e-300)));
       const x = Math.exp(clamp(lnX, -700.0, 700.0));
-      return x / (1.0 + x);
+      return logisticFromDrive(x);
     });
   }
 
@@ -672,13 +719,13 @@
   }
 
   function bindControls() {
-    controls.k0.slider.addEventListener('input', () => {
-      const logValue = Number(controls.k0.slider.value);
+    controls.k.slider.addEventListener('input', () => {
+      const logValue = Number(controls.k.slider.value);
       if (!Number.isFinite(logValue)) return;
-      setParamValue('k0', Math.pow(10, logValue));
+      setParamValue('k', Math.pow(10, logValue));
     });
-    controls.k0.input.addEventListener('input', () => setParamValue('k0', controls.k0.input.value));
-    controls.k0.input.addEventListener('change', () => setParamValue('k0', controls.k0.input.value));
+    controls.k.input.addEventListener('input', () => setParamValue('k', controls.k.input.value));
+    controls.k.input.addEventListener('change', () => setParamValue('k', controls.k.input.value));
 
     controls.Ea.slider.addEventListener('input', () => setParamValue('Ea', controls.Ea.slider.value));
     controls.Ea.input.addEventListener('input', () => setParamValue('Ea', controls.Ea.input.value));
@@ -734,7 +781,7 @@
 
   async function saveChanges() {
     if (!isDirty()) return;
-    if (!window.confirm('Confirmar salvamento das alteracoes de k0, Ea e n?')) return;
+    if (!window.confirm(`Confirmar salvamento das alteracoes de ${kineticLabel}, Ea e n?`)) return;
 
     saveBtn.disabled = true;
     cancelBtn.disabled = true;
@@ -743,7 +790,9 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          k0: state.current.k0,
+          [kineticKey]: state.current.k,
+          k0: state.current.k,
+          k_ref: state.current.k,
           Ea: state.current.Ea,
           n: state.current.n,
         }),
@@ -754,7 +803,7 @@
       }
 
       state.original = {
-        k0: Number(data.k0),
+        k: Number(data[kineticKey] ?? data.k_ref ?? data.k0),
         Ea: Number(data.Ea),
         n: Number(data.n),
       };

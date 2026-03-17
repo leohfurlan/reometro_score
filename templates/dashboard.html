@@ -244,7 +244,8 @@
         meta.textContent = manual ? 'Atualizando cards...' : 'Carregando dados do SharePoint...';
 
         try {
-            const response = await fetch(BANBURY_API_URL, {
+            const apiUrl = manual ? `${BANBURY_API_URL}?refresh_online=1` : BANBURY_API_URL;
+            const response = await fetch(apiUrl, {
                 headers: { 'Accept': 'application/json' },
                 cache: 'no-store'
             });
@@ -284,7 +285,8 @@
             });
 
             if (payload.atualizado_em) {
-                meta.textContent = `Atualizado em ${payload.atualizado_em.replace('T', ' ')}`;
+                const sufixo = payload.fonte_online_atualizada ? ' (planilha online)' : '';
+                meta.textContent = `Atualizado em ${payload.atualizado_em.replace('T', ' ')}${sufixo}`;
             } else {
                 meta.textContent = 'Dados de SharePoint atualizados.';
             }

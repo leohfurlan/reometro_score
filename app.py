@@ -573,7 +573,28 @@ def dashboard_home():
 @app.route('/api/dashboard/banbury-status')
 @login_required
 def api_banbury_status():
+    refresh_online = request.args.get('refresh_online', '').strip().lower() in {'1', 'true', 'yes', 'sim'}
+
+    if refresh_online:
+        if not baixar_excel_sharepoint:
+            return jsonify({
+                'status': 'erro',
+                'mensagem': 'Sincronizacao online indisponivel: loader do SharePoint nao configurado.'
+            }), 500
+
+        caminho_online = preparar_planilha_sharepoint(
+            baixar_excel_sharepoint,
+            forcar_download=True,
+        )
+        if not caminho_online:
+            return jsonify({
+                'status': 'erro',
+                'mensagem': 'Falha ao atualizar planilha online no SharePoint.'
+            }), 502
+
     resultado = obter_status_producao_banbury()
+    if refresh_online:
+        resultado['fonte_online_atualizada'] = True
     http_status = 200 if resultado.get('status') == 'ok' else 500
     return jsonify(resultado), http_status
 

@@ -19,6 +19,14 @@ from services.kinetics_service import (
     save_fit_payload,
     update_fit_parameters,
 )
+from services.kinetic_model_service import (
+    DEFAULT_MODEL_FAMILY as DEFAULT_KINETIC_MODEL_FAMILY,
+    DEFAULT_REFERENCE_TEMPERATURE_K,
+    DEFAULT_CURE_COMPLETION_RULE,
+    SUPPORTED_MODEL_FAMILIES,
+    SUPPORTED_CURE_COMPLETION_RULES,
+    MODEL_FAMILY_EDO_ORDER_N_V1,
+)
 from services.engine_registry import (
     ENGINE_AXISYMMETRIC_FIPY as ENGINE_AXISYMMETRIC_FIPY_REGISTRY,
     ENGINE_EMPIRICAL_V1 as ENGINE_EMPIRICAL_V1_REGISTRY,
@@ -322,10 +330,14 @@ def list_fit_reports(date_start=None, date_end=None, q=None, limit=300):
                 continue
 
         rmse_value = _safe_float(payload.get("rmse_alpha"), default=None)
+        rmse_torque = _safe_float(payload.get("rmse_torque"), default=None)
         ensaios_count = len(payload.get("ensaios") or [])
         success = bool(payload.get("success"))
         status = "OK" if success else "Falhou"
         created_at_display = created_at_raw if created_at_raw else created_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        model_family = str(payload.get("model_family") or DEFAULT_KINETIC_MODEL_FAMILY)
+        model_version = str(payload.get("model_version") or "v1")
+        fit_method = str(payload.get("fit_method") or "least_squares")
 
         items.append(
             {
@@ -336,9 +348,13 @@ def list_fit_reports(date_start=None, date_end=None, q=None, limit=300):
                 "created_at": created_at_raw,
                 "created_at_display": created_at_display,
                 "rmse_alpha": rmse_value,
+                "rmse_torque": rmse_torque,
                 "status": status,
                 "success": success,
                 "ensaios_count": ensaios_count,
+                "model_family": model_family,
+                "model_version": model_version,
+                "fit_method": fit_method,
                 "_sort_ts": float(created_dt.timestamp()),
             }
         )
@@ -667,7 +683,27 @@ def reometria_fit_run():
         flash("Selecione pelo menos 2 curvas para o ajuste.", "warning")
         return redirect(url_for("reometria.reometria_fit"))
 
-    payload = run_fit(cod_ensaios)
+    requested_family = str(request.form.get("model_family") or DEFAULT_KINETIC_MODEL_FAMILY).strip().lower()
+    if requested_family not in SUPPORTED_MODEL_FAMILIES:
+        requested_family = DEFAULT_KINETIC_MODEL_FAMILY
+
+    ref_temp_k = parse_float_locale(
+        request.form.get("reference_temperature_k"),
+        default=DEFAULT_REFERENCE_TEMPERATURE_K,
+    )
+    if ref_temp_k is None or ref_temp_k <= 0:
+        ref_temp_k = DEFAULT_REFERENCE_TEMPERATURE_K
+
+    cure_rule = str(request.form.get("cure_completion_rule") or DEFAULT_CURE_COMPLETION_RULE).strip().lower()
+    if cure_rule not in SUPPORTED_CURE_COMPLETION_RULES:
+        cure_rule = DEFAULT_CURE_COMPLETION_RULE
+
+    payload = run_fit(
+        cod_ensaios,
+        model_family=requested_family,
+        reference_temperature_k=ref_temp_k,
+        cure_completion_rule=cure_rule,
+    )
     if not payload.get("success"):
         flash(payload.get("message", "Ajuste falhou."), "danger")
     else:
@@ -696,26 +732,48 @@ def reometria_fit_result(fit_id):
 @login_required
 def reometria_fit_update(fit_id):
     data = request.get_json(silent=True) or {}
+    payload_current = load_fit_payload(fit_id)
+    if not payload_current:
+        return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
 
-    k0 = parse_float_locale(data.get("k0"), default=None)
+    family = str(payload_current.get("model_family") or DEFAULT_KINETIC_MODEL_FAMILY).strip().lower()
+    kinetic_key = "k0" if family == MODEL_FAMILY_EDO_ORDER_N_V1 else "k_ref"
+
+    k_value = parse_float_locale(data.get(kinetic_key), default=None)
+    if k_value is None:
+        k_value = parse_float_locale(data.get("k0"), default=None)
+    if k_value is None:
+        k_value = parse_float_locale(data.get("k_ref"), default=None)
     ea = parse_float_locale(data.get("Ea"), default=None)
     n = parse_float_locale(data.get("n"), default=None)
 
-    if k0 is None or ea is None or n is None:
+    if k_value is None or ea is None or n is None:
         return jsonify({"success": False, "message": "Parametros invalidos para atualizacao."}), 400
-    if k0 <= 0:
-        return jsonify({"success": False, "message": "k0 deve ser positivo."}), 400
+    if k_value <= 0:
+        return jsonify({"success": False, "message": f"{kinetic_key} deve ser positivo."}), 400
 
-    payload = update_fit_parameters(fit_id, k0, ea, n)
+    payload = update_fit_parameters(fit_id, k_value, ea, n)
     if not payload:
         return jsonify({"success": False, "message": "Fit nao encontrado."}), 404
+
+    kinetic_value = _safe_float(payload.get(kinetic_key), default=None)
+    if kinetic_value is None:
+        kinetic_value = _safe_float(payload.get("k_ref"), default=None)
+    if kinetic_value is None:
+        kinetic_value = _safe_float(payload.get("k0"), default=0.0)
 
     return jsonify(
         {
             "success": True,
             "message": "Parametros atualizados com sucesso.",
             "fit_id": payload.get("fit_id"),
-            "k0": float(payload.get("k0", 0.0)),
+            "model_family": payload.get("model_family"),
+            "model_version": payload.get("model_version"),
+            "reference_temperature_K": _safe_float(payload.get("reference_temperature_K"), default=None),
+            "cure_completion_rule": payload.get("cure_completion_rule"),
+            kinetic_key: float(kinetic_value),
+            "k0": float(_safe_float(payload.get("k0"), default=0.0)),
+            "k_ref": float(_safe_float(payload.get("k_ref"), default=_safe_float(payload.get("k0"), default=0.0))),
             "Ea": float(payload.get("Ea", 0.0)),
             "n": float(payload.get("n", 0.0)),
         }

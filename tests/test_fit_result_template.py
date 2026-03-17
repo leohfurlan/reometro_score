@@ -1,9 +1,13 @@
 from pathlib import Path
 
 
-def test_fit_result_template_uses_v2_kinetic_expression():
+def test_fit_result_template_supports_model_family_switch_in_js():
     template_path = Path(__file__).resolve().parents[1] / "templates" / "reometria" / "fit_result.html"
     content = template_path.read_text(encoding="utf-8")
 
-    assert "const lnX = lnK + (n * Math.log(Math.max(tNum, 1e-300)));" in content
-    assert "n * (lnK + Math.log(tSafe))" not in content
+    assert "if (modelFamily === 'edo_order_n_v1')" in content
+    assert "if (modelFamily === 'pinheiro_sigmoidal_v1')" in content
+    assert "pinheiro_sigmoidal_teq_v1" in content
+    assert "const tEq = tNum * Math.exp(factorExponent);" in content
+    assert "((1.0 / tempK) - (1.0 / tRef))" in content
+    assert "((1.0 / tRef) - (1.0 / tempK))" not in content
