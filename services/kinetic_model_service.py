@@ -183,42 +183,119 @@ def torque_from_alpha(alpha, m_min, m_max):
     return float(m_min) + (alpha_arr * (float(m_max) - float(m_min)))
 
 
+def _compress_alpha_series(domain_vec: np.ndarray, alpha_vec: np.ndarray):
+    domain = np.asarray(domain_vec, dtype=float).reshape(-1)
+    alpha = np.asarray(alpha_vec, dtype=float).reshape(-1)
+
+    size = min(domain.size, alpha.size)
+    if size == 0:
+        return np.asarray([], dtype=float), np.asarray([], dtype=float)
+
+    domain = domain[:size]
+    alpha = alpha[:size]
+
+    finite_mask = np.isfinite(domain) & np.isfinite(alpha)
+    domain = domain[finite_mask]
+    alpha = alpha[finite_mask]
+
+    if domain.size == 0:
+        return np.asarray([], dtype=float), np.asarray([], dtype=float)
+
+    order = np.argsort(domain, kind="stable")
+    domain = domain[order]
+    alpha = np.clip(alpha[order], 0.0, 1.0)
+
+    unique_domain = []
+    grouped_alpha = []
+
+    start = 0
+    n = domain.size
+    while start < n:
+        current_t = domain[start]
+        end = start + 1
+        while end < n and abs(domain[end] - current_t) <= 1e-12:
+            end += 1
+
+        alpha_block = alpha[start:end]
+        unique_domain.append(float(current_t))
+        grouped_alpha.append(float(np.median(alpha_block)))
+        start = end
+
+    domain_out = np.asarray(unique_domain, dtype=float)
+    alpha_out = np.asarray(grouped_alpha, dtype=float)
+    alpha_out = np.maximum.accumulate(np.clip(alpha_out, 0.0, 1.0))
+    return domain_out, alpha_out
+
+
 def first_crossing_time(domain_vec: np.ndarray, alpha_vec: np.ndarray, alpha_target: float):
-    domain = np.asarray(domain_vec, dtype=float)
-    alpha = np.asarray(alpha_vec, dtype=float)
+    domain, alpha = _compress_alpha_series(domain_vec, alpha_vec)
     size = min(domain.size, alpha.size)
     if size < 2:
         return None
 
+    target = float(alpha_target)
     for i in range(1, size):
         a0 = float(alpha[i - 1])
         a1 = float(alpha[i])
-        if a0 <= alpha_target <= a1:
+        if a0 <= target <= a1:
             t0 = float(domain[i - 1])
             t1 = float(domain[i])
-            if a1 == a0:
+            if abs(a1 - a0) <= 1e-12:
                 return t1
-            frac = (alpha_target - a0) / (a1 - a0)
+            frac = (target - a0) / (a1 - a0)
             return t0 + frac * (t1 - t0)
     return None
 
 
-def nearest_alpha_time(domain_vec: np.ndarray, alpha_vec: np.ndarray, alpha_target: float):
-    domain = np.asarray(domain_vec, dtype=float)
-    alpha = np.asarray(alpha_vec, dtype=float)
+def nearest_alpha_time(
+    domain_vec: np.ndarray,
+    alpha_vec: np.ndarray,
+    alpha_target: float,
+    nearest_count: int = 5,
+    alpha_window: float = 0.03,
+    reducer: str = "median",
+):
+    domain, alpha = _compress_alpha_series(domain_vec, alpha_vec)
     size = min(domain.size, alpha.size)
     if size == 0:
         return None
 
-    idx = int(np.argmin(np.abs(alpha[:size] - float(alpha_target))))
-    return float(domain[idx])
+    target = float(alpha_target)
+    diffs = np.abs(alpha[:size] - target)
+
+    window_mask = diffs <= float(max(alpha_window, 0.0))
+    candidate_times = domain[:size][window_mask]
+
+    if candidate_times.size == 0:
+        k = int(max(nearest_count, 1))
+        idx = np.argsort(diffs, kind="stable")[:k]
+        candidate_times = domain[idx]
+
+    if candidate_times.size == 0:
+        return None
+
+    candidate_times = np.asarray(candidate_times, dtype=float)
+    candidate_times = candidate_times[np.isfinite(candidate_times)]
+    if candidate_times.size == 0:
+        return None
+
+    if str(reducer or "").strip().lower() == "mean":
+        return float(np.mean(candidate_times))
+    return float(np.median(candidate_times))
 
 
 def crossing_or_nearest_time(domain_vec: np.ndarray, alpha_vec: np.ndarray, alpha_target: float):
     cross = first_crossing_time(domain_vec, alpha_vec, alpha_target)
     if cross is not None:
         return float(cross)
-    return nearest_alpha_time(domain_vec, alpha_vec, alpha_target)
+    return nearest_alpha_time(
+        domain_vec,
+        alpha_vec,
+        alpha_target,
+        nearest_count=5,
+        alpha_window=0.03,
+        reducer="median",
+    )
 
 
 def _prepare_time_temperature(time_s, temperature_k):
@@ -2646,8 +2723,8 @@ def compute_txx_errors(time_vec, alpha_real, alpha_model, targets=None):
 
     out = []
     for target in (targets or ALPHA_METRIC_TARGETS_DEFAULT):
-        t_real = first_crossing_time(time, real, float(target))
-        t_model = first_crossing_time(time, model, float(target))
+        t_real = crossing_or_nearest_time(time, real, float(target))
+        t_model = crossing_or_nearest_time(time, model, float(target))
         out.append(
             {
                 "alpha_target": float(target),

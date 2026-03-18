@@ -215,12 +215,12 @@ def _extract_curve_markers(curve):
     alpha = np.clip(alpha[:size], 0.0, 1.0)
 
     markers = {
-        "T10_s": first_crossing_time(t_rel, alpha, 0.10),
-        "T30_s": first_crossing_time(t_rel, alpha, 0.30),
-        "T50_s": first_crossing_time(t_rel, alpha, 0.50),
-        "T90_s": first_crossing_time(t_rel, alpha, 0.90),
-        "T95_s": first_crossing_time(t_rel, alpha, 0.95),
-        "T99_s": first_crossing_time(t_rel, alpha, 0.99),
+        "T10_s": crossing_or_nearest_time(t_rel, alpha, 0.10),
+        "T30_s": crossing_or_nearest_time(t_rel, alpha, 0.30),
+        "T50_s": crossing_or_nearest_time(t_rel, alpha, 0.50),
+        "T90_s": crossing_or_nearest_time(t_rel, alpha, 0.90),
+        "T95_s": crossing_or_nearest_time(t_rel, alpha, 0.95),
+        "T99_s": crossing_or_nearest_time(t_rel, alpha, 0.99),
         "scorch_time_s": _estimate_scorch_time_approx(t_rel, torque, time_floor_s=8.0),
         "torque_max_observed": float(np.max(torque)),
     }
