@@ -39,6 +39,7 @@ from services.engine_registry import (
     normalize_engine as normalize_engine_registry,
     resolve_engine_for_execution,
 )
+from services.simulation_diagnostics import build_engine_comparison, extract_simulation_diagnostics
 from services.simulation_schema import normalize_simulation_output
 from services.vulcanization_service import (
     load_simulation as load_simulation_v1,
@@ -251,9 +252,10 @@ def list_simulations_by_fit(fit_id):
 
         engine_key = _normalize_engine(simulation.get("engine") or engine_used or engine_hint)
         engine_status = str(simulation.get("engine_status") or get_engine_status(engine_key))
+        diagnostics = extract_simulation_diagnostics(simulation, engine=engine_key)
         mode = str(simulation.get("mode") or "--")
         status = str(simulation.get("status") or "concluida")
-        mold_temp_c = _extract_mold_temp_c(simulation)
+        mold_temp_c = diagnostics.get("mold_temp_c")
 
         created_at_raw = simulation.get("created_at")
         sort_ts = _timestamp_from_created_at(created_at_raw)
@@ -271,9 +273,19 @@ def list_simulations_by_fit(fit_id):
                 "fit_id": sim_fit_id,
                 "engine": engine_key,
                 "engine_status": engine_status,
+                "engine_type": diagnostics.get("engine_type"),
+                "engine_role": diagnostics.get("engine_role"),
                 "mode": mode,
                 "mold_temp_c": mold_temp_c,
                 "status": status,
+                "quality_status": diagnostics.get("quality_status"),
+                "prediction_validity": diagnostics.get("prediction_validity"),
+                "prediction_validity_reason": diagnostics.get("prediction_validity_reason"),
+                "induction_confidence": diagnostics.get("induction_confidence"),
+                "induction_extrapolation_warning": bool(diagnostics.get("induction_extrapolation_warning")),
+                "alpha_mean_final": diagnostics.get("alpha_mean_final"),
+                "process_state_final": diagnostics.get("process_state_final"),
+                "reliability_note": diagnostics.get("reliability_note"),
                 "created_at": created_at_raw,
                 "created_at_display": _to_created_at_display(created_at_raw, sort_ts),
                 "_sort_ts": float(sort_ts or 0.0),
@@ -284,6 +296,38 @@ def list_simulations_by_fit(fit_id):
     for item in results:
         item.pop("_sort_ts", None)
     return results
+
+
+def _build_engine_comparison_for_fit(fit_id, *, current_sim=None):
+    fit_id_target = str(fit_id or "").strip()
+    if not fit_id_target:
+        return build_engine_comparison({})
+
+    simulations = {}
+    if isinstance(current_sim, dict):
+        current_fit_id = str(current_sim.get("fit_id") or "").strip()
+        current_engine = _normalize_engine(current_sim.get("engine"))
+        if current_fit_id == fit_id_target:
+            simulations[current_engine] = current_sim
+
+    for row in list_simulations_by_fit(fit_id_target):
+        engine_key = _normalize_engine(row.get("engine"))
+        if engine_key in simulations:
+            continue
+        sim_id = str(row.get("sim_id") or "").strip()
+        if not sim_id:
+            continue
+        sim_norm, _ = _load_simulation_normalized_with_fallback(sim_id, engine_hint=engine_key)
+        if not isinstance(sim_norm, dict):
+            continue
+        sim_fit_id = str(sim_norm.get("fit_id") or "").strip()
+        if sim_fit_id != fit_id_target:
+            continue
+        simulations[engine_key] = sim_norm
+        if ENGINE_EMPIRICAL_V1 in simulations and ENGINE_THERMO_KINETIC_V2 in simulations:
+            break
+
+    return build_engine_comparison(simulations)
 
 
 def list_fit_reports(date_start=None, date_end=None, q=None, limit=300):
@@ -586,9 +630,10 @@ def _extract_fit_curves_for_report(fit_payload):
     return rows
 
 
-def _build_simulation_report_payload(sim, fit_payload, selected_steps):
+def _build_simulation_report_payload(sim, fit_payload, selected_steps, *, engine_comparison=None):
     sim_safe = sim if isinstance(sim, dict) else {}
     fit_safe = fit_payload if isinstance(fit_payload, dict) else {}
+    diagnostics = extract_simulation_diagnostics(sim_safe, engine=sim_safe.get("engine"))
 
     times_raw = sim_safe.get("times")
     t_snaps_raw = sim_safe.get("t_snaps")
@@ -640,6 +685,18 @@ def _build_simulation_report_payload(sim, fit_payload, selected_steps):
         "fit_curves": _extract_fit_curves_for_report(fit_safe),
         "fit_observacoes": str(metadata.get("observacoes") or ""),
         "fit_titulo": str(metadata.get("titulo") or ""),
+        "engine_type": str(diagnostics.get("engine_type") or "unknown"),
+        "engine_role": str(diagnostics.get("engine_role") or "unknown"),
+        "quality_status": str(diagnostics.get("quality_status") or "healthy"),
+        "prediction_validity": str(diagnostics.get("prediction_validity") or "low_confidence_exploratory"),
+        "prediction_validity_reason": str(diagnostics.get("prediction_validity_reason") or "not_evaluated"),
+        "degraded_mode": str(diagnostics.get("degraded_mode") or "none"),
+        "induction_confidence": str(diagnostics.get("induction_confidence") or "low"),
+        "induction_extrapolation_warning": bool(diagnostics.get("induction_extrapolation_warning")),
+        "alpha_mean_final": diagnostics.get("alpha_mean_final"),
+        "process_state_final": str(diagnostics.get("process_state_final") or "HEATING"),
+        "reliability_note": str(diagnostics.get("reliability_note") or ""),
+        "engine_comparison": engine_comparison if isinstance(engine_comparison, dict) else build_engine_comparison({}),
     }
     return report_payload
 
@@ -841,28 +898,55 @@ def _run_simulation_job(job_id, fit_payload, sim_params):
 @reometria_bp.route("/reometria/fit")
 @login_required
 def reometria_fit():
+    recent_fits = list_fit_reports(limit=5)
+    return render_template(
+        "reometria/fit.html",
+        recent_fits=recent_fits,
+    )
+
+
+def _get_fit_history_filters():
+    return {
+        "fit_date_start": request.args.get("fit_date_start", request.args.get("date_start", "")),
+        "fit_date_end": request.args.get("fit_date_end", request.args.get("date_end", "")),
+        "fit_q": request.args.get("fit_q", request.args.get("q", "")),
+    }
+
+
+def _get_fit_new_filters():
     filters = {
         "date_start": request.args.get("date_start", ""),
         "date_end": request.args.get("date_end", ""),
         "q": request.args.get("q", ""),
     }
-    fit_filters = {
-        "fit_date_start": request.args.get("fit_date_start", ""),
-        "fit_date_end": request.args.get("fit_date_end", ""),
-        "fit_q": request.args.get("fit_q", ""),
-    }
-    ensaios = list_ensaios_for_fit(filters["date_start"] or None, filters["date_end"] or None, filters["q"] or None)
+    return filters
+
+
+@reometria_bp.route("/reometria/fit/history")
+@login_required
+def reometria_fit_history():
+    fit_filters = _get_fit_history_filters()
     fits_history = list_fit_reports(
         date_start=fit_filters["fit_date_start"] or None,
         date_end=fit_filters["fit_date_end"] or None,
         q=fit_filters["fit_q"] or None,
     )
     return render_template(
-        "reometria/fit.html",
-        ensaios=ensaios,
-        filters=filters,
+        "reometria/fit_history.html",
         fit_filters=fit_filters,
         fits_history=fits_history,
+    )
+
+
+@reometria_bp.route("/reometria/fit/new")
+@login_required
+def reometria_fit_new():
+    filters = _get_fit_new_filters()
+    ensaios = list_ensaios_for_fit(filters["date_start"] or None, filters["date_end"] or None, filters["q"] or None)
+    return render_template(
+        "reometria/fit_new.html",
+        ensaios=ensaios,
+        filters=filters,
     )
 
 
@@ -872,7 +956,7 @@ def reometria_fit_preview(cod_ensaio):
     curve = get_preview_curve(cod_ensaio)
     if not curve:
         flash("Curva nao encontrada.", "warning")
-        return redirect(url_for("reometria.reometria_fit"))
+        return redirect(url_for("reometria.reometria_fit_new"))
     return render_template("reometria/preview.html", curve=curve)
 
 
@@ -882,7 +966,7 @@ def reometria_fit_run():
     cod_ensaios = [int(value) for value in request.form.getlist("cod_ensaios") if str(value).strip()]
     if len(cod_ensaios) < 2:
         flash("Selecione pelo menos 2 curvas para o ajuste.", "warning")
-        return redirect(url_for("reometria.reometria_fit"))
+        return redirect(url_for("reometria.reometria_fit_new"))
 
     requested_family = str(request.form.get("model_family") or DEFAULT_KINETIC_MODEL_FAMILY).strip().lower()
     if requested_family not in SUPPORTED_MODEL_FAMILIES:
@@ -1268,7 +1352,13 @@ def reometria_simulate_report(sim_id):
     times_arr = np.asarray(times_raw if times_raw is not None else [], dtype=float).reshape(-1)
     max_idx = max(int(times_arr.size - 1), 0)
     selected_steps = _parse_three_step_indices(request.args.get("steps"), max_idx=max_idx)
-    report_payload = _build_simulation_report_payload(sim_norm, fit_payload, selected_steps)
+    engine_comparison = _build_engine_comparison_for_fit(fit_id, current_sim=sim_norm)
+    report_payload = _build_simulation_report_payload(
+        sim_norm,
+        fit_payload,
+        selected_steps,
+        engine_comparison=engine_comparison,
+    )
     return render_template(
         "reometria/sim_report.html",
         report=report_payload,

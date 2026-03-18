@@ -41,6 +41,18 @@
   }
 </style>
 
+<nav aria-label="breadcrumb" class="mb-3 no-print">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit') }}">Reometria Fit</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_history') }}">Fits executados</a></li>
+    {% if report.fit_id %}
+      <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_result', fit_id=report.fit_id) }}">Fit {{ report.fit_id }}</a></li>
+    {% endif %}
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_simulate_view', sim_id=report.sim_id, engine=report.engine) }}">Simulacao {{ report.sim_id }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Relatorio</li>
+  </ol>
+</nav>
+
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -63,7 +75,25 @@
       <div class="report-meta-card"><b>Modo</b><div>{{ report.mode or '--' }}</div></div>
       <div class="report-meta-card"><b>Dimensao</b><div>{{ report.dim }}</div></div>
       <div class="report-meta-card"><b>Malha</b><div>{{ report.shape }}</div></div>
+      <div class="report-meta-card"><b>Tipo de engine</b><div>{{ report.engine_type or '--' }} / {{ report.engine_role or '--' }}</div></div>
       <div class="report-meta-card"><b>dx (m)</b><div>{{ report.dx if report.dx is not none else '--' }}</div></div>
+      <div class="report-meta-card"><b>quality_status</b><div>{{ report.quality_status or '--' }}</div></div>
+      <div class="report-meta-card"><b>prediction_validity</b><div>{{ report.prediction_validity or '--' }}</div></div>
+      <div class="report-meta-card"><b>prediction_reason</b><div>{{ report.prediction_validity_reason or '--' }}</div></div>
+      <div class="report-meta-card"><b>degraded_mode</b><div>{{ report.get('degraded_mode', '--') }}</div></div>
+      <div class="report-meta-card"><b>induction_confidence</b><div>{{ report.induction_confidence or '--' }}</div></div>
+      <div class="report-meta-card"><b>extrapolation_warning</b><div>{{ 'true' if report.induction_extrapolation_warning else 'false' }}</div></div>
+      <div class="report-meta-card">
+        <b>alpha_mean_final</b>
+        <div>
+          {% if report.alpha_mean_final is number %}
+            {{ ('%.3f'|format(report.alpha_mean_final)).replace('.', ',') }}
+          {% else %}
+            --
+          {% endif %}
+        </div>
+      </div>
+      <div class="report-meta-card"><b>process_state_final</b><div>{{ report.process_state_final or '--' }}</div></div>
       <div class="report-meta-card">
         <b>Steps selecionados</b>
         <div>
@@ -73,9 +103,48 @@
         </div>
       </div>
       <div class="report-meta-card"><b>Titulo do fit</b><div>{{ report.fit_titulo or '--' }}</div></div>
+      <div class="report-meta-card"><b>Observacao</b><div>{{ report.reliability_note or '--' }}</div></div>
     </div>
   </div>
 </div>
+
+{% set comparison = report.engine_comparison if report.engine_comparison is mapping else {} %}
+{% set comparison_rows = comparison.get('rows', []) if comparison is mapping else [] %}
+{% if comparison_rows %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><b>Diagnostico comparativo entre engines</b></div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Metrica</th>
+            <th>empirical_v1</th>
+            <th>thermo_kinetic_v2</th>
+            <th>Delta (v2-v1)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison_rows %}
+          <tr>
+            <td><code>{{ row.key }}</code></td>
+            <td>{{ row.empirical_v1 if row.empirical_v1 is not none else '--' }}</td>
+            <td>{{ row.thermo_kinetic_v2 if row.thermo_kinetic_v2 is not none else '--' }}</td>
+            <td>
+              {% if row.delta_v2_minus_v1 is number %}
+                {{ ('%.3f'|format(row.delta_v2_minus_v1)).replace('.', ',') }}
+              {% else %}
+                --
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-header bg-white"><b>Parametros do fit e observacoes</b></div>

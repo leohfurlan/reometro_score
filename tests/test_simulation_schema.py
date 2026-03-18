@@ -102,6 +102,9 @@ def test_legacy_payload_is_normalized_with_backward_compatible_defaults():
     assert np.asarray(normalized["alpha_r"]).shape == np.asarray(normalized["alpha"]).shape
     assert np.asarray(normalized["heat_source"]).shape == np.asarray(normalized["alpha"]).shape
     assert normalized["geometry_type"] == "cartesian_2d"
+    assert normalized["engine_type"] == "operational"
+    assert normalized["prediction_validity"] == "operational_baseline"
+    assert "reliability_note" in normalized
 
 
 def test_v2_payload_preserves_extended_fields_in_normalized_contract():
@@ -123,6 +126,14 @@ def test_v2_payload_preserves_extended_fields_in_normalized_contract():
     assert normalized["clip_events_count"] == 3
     assert normalized["nan_recovery_events"] == 1
     assert normalized["metrics"]["numerical_warning_count"] == 1
+    assert normalized["engine_type"] == "physical"
+    assert normalized["prediction_validity"] in {
+        "valid_for_prediction",
+        "low_confidence_exploratory",
+        "invalid_for_prediction",
+    }
+    assert "prediction_validity_reason" in normalized
+    assert "degraded_mode" in normalized
 
 
 def test_axisymmetric_payload_exposes_same_minimum_contract():
@@ -130,6 +141,7 @@ def test_axisymmetric_payload_exposes_same_minimum_contract():
 
     assert normalized["engine"] == ENGINE_AXISYMMETRIC_FIPY
     assert normalized["engine_status"] == "prototype"
+    assert normalized["engine_type"] == "physical"
     assert normalized["geometry_type"] == "axisymmetric_cylindrical_section"
     assert normalized["coordinates"]["system"] == "cylindrical_rz"
     assert np.asarray(normalized["alpha_c"]).ndim == 2

@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Fits Executados{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit') }}">Reometria Fit</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Fits executados</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h2 class="mb-0">Fits executados</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('reometria.reometria_fit') }}">Voltar ao hub</a>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('reometria.reometria_fit_new') }}">Novo fit</a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white">
+    <h5 class="mb-0">Historico completo</h5>
+  </div>
+  <div class="card-body">
+    <form method="GET" class="row g-2 mb-3">
+      <div class="col-md-3">
+        <input type="date" class="form-control" name="fit_date_start" value="{{ fit_filters.fit_date_start }}">
+      </div>
+      <div class="col-md-3">
+        <input type="date" class="form-control" name="fit_date_end" value="{{ fit_filters.fit_date_end }}">
+      </div>
+      <div class="col-md-4">
+        <input type="text" class="form-control" name="fit_q" placeholder="Buscar por fit_id, titulo, ensaio..." value="{{ fit_filters.fit_q }}">
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
+      </div>
+    </form>
+    {% set fits = fits_history %}
+    {% include 'reometria/_fit_history_table.html' %}
+  </div>
+</div>
+{% endblock %}

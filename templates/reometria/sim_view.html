@@ -153,8 +153,37 @@
     transition: width 0.16s ease-out;
   }
 </style>
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit') }}">Reometria Fit</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_history') }}">Fits executados</a></li>
+    {% if sim.fit_id %}
+      <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_result', fit_id=sim.fit_id) }}">Fit {{ sim.fit_id }}</a></li>
+    {% endif %}
+    <li class="breadcrumb-item active" aria-current="page">Simulacao {{ sim.sim_id }}</li>
+  </ol>
+</nav>
 <h2>Visualizacao da Simulacao {{ sim.sim_id }}</h2>
-<p><b>Motor:</b> {{ sim.engine }} ({{ sim.engine_status }}) | <b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
+{% set sim_metrics = sim.metrics if sim.metrics is mapping else {} %}
+{% set alpha_mean_final = sim.alpha_mean_final if sim.alpha_mean_final is not none else sim_metrics.get('alpha_mean') %}
+{% set process_state_final = sim.process_state_final if sim.process_state_final is not none else sim.process_state %}
+{% set reliability_note = sim.reliability_note if sim.reliability_note else sim_metrics.get('reliability_note') %}
+<p><b>Motor:</b> {{ sim.engine }} ({{ sim.engine_status }}) | <b>Tipo:</b> {{ sim.engine_type or '--' }} / {{ sim.engine_role or '--' }} | <b>Modo:</b> {{ sim.mode }} | <b>Dim:</b> {{ sim.dim }} | <b>Shape:</b> {{ sim.shape }}</p>
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-3"><b>quality_status</b><div>{{ sim.quality_status or sim_metrics.get('quality_status') or '--' }}</div></div>
+      <div class="col-md-3"><b>prediction_validity</b><div>{{ sim.prediction_validity or sim_metrics.get('prediction_validity') or '--' }}</div></div>
+      <div class="col-md-3"><b>induction_confidence</b><div>{{ sim.induction_confidence or sim_metrics.get('induction_confidence') or '--' }}</div></div>
+      <div class="col-md-3"><b>extrapolation_warning</b><div>{{ 'true' if (sim.induction_extrapolation_warning or sim_metrics.get('induction_extrapolation_warning')) else 'false' }}</div></div>
+      <div class="col-md-3"><b>degraded_mode</b><div>{{ sim.degraded_mode or sim_metrics.get('degraded_mode') or '--' }}</div></div>
+      <div class="col-md-9"><b>prediction_validity_reason</b><div>{{ sim.prediction_validity_reason or sim_metrics.get('prediction_validity_reason') or '--' }}</div></div>
+      <div class="col-md-3"><b>alpha_mean_final</b><div>{% if alpha_mean_final is number %}{{ ('%.3f'|format(alpha_mean_final)).replace('.', ',') }}{% else %}--{% endif %}</div></div>
+      <div class="col-md-3"><b>process_state_final</b><div>{{ process_state_final or '--' }}</div></div>
+      <div class="col-md-6"><b>Observacao</b><div>{{ reliability_note or '--' }}</div></div>
+    </div>
+  </div>
+</div>
 {% set step_count = sim.times|length %}
 {% set step_last = (step_count - 1) if step_count > 0 else 0 %}
 {% set step_mid = (step_last // 2) if step_last > 0 else 0 %}

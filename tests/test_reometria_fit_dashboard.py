@@ -548,9 +548,9 @@ def test_reometria_fit_renders_history_section(monkeypatch):
     body = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Historico de Estudos Cineticos" in body
+    assert "Ultimos 5 fits executados" in body
     assert "20260310151515_new22222" in body
-    assert "Abrir Relatorio" in body
+    assert "Ver historico completo" in body
 
 
 def test_reometria_fit_form_lists_leroy_model_option(monkeypatch):
@@ -559,7 +559,7 @@ def test_reometria_fit_form_lists_leroy_model_option(monkeypatch):
     monkeypatch.setattr(rr, "list_fit_reports", lambda **_kwargs: [])
 
     client = app.test_client()
-    response = client.get("/reometria/fit")
+    response = client.get("/reometria/fit/new")
     body = response.get_data(as_text=True)
 
     assert response.status_code == 200
@@ -669,6 +669,7 @@ def test_reometria_simulate_export_returns_json_attachment(monkeypatch):
     monkeypatch.setattr(rr, "_load_simulation_with_engine", lambda _sim_id, engine_hint=None: (dict(sim_payload), rr.ENGINE_EMPIRICAL_V1))
     monkeypatch.setattr(rr, "normalize_simulation_output", lambda payload, engine: payload)
     monkeypatch.setattr(rr, "load_fit_payload", lambda _fit_id: dict(fit_payload))
+    monkeypatch.setattr(rr, "_build_engine_comparison_for_fit", lambda *_args, **_kwargs: {"rows": []})
 
     client = app.test_client()
     response = client.get("/reometria/simulate/export/20260317144831_ef9ca559")

@@ -62,6 +62,20 @@
     margin-bottom: 14px;
   }
 </style>
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit') }}">Reometria Fit</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_history') }}">Fits executados</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_result', fit_id=fit_id) }}">Fit {{ fit_id }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Nova simulacao</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('reometria.reometria_fit_result', fit_id=fit_id) }}">Voltar ao fit</a>
+  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('reometria.reometria_fit') }}">Hub reometria</a>
+</div>
 <h2>Simular {{ mode|capitalize }} (fit {{ fit_id }})</h2>
 
 <div class="alert alert-info mb-4">

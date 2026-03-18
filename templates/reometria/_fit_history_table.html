@@ -1,0 +1,50 @@
+{% if fits %}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Fit ID</th>
+          <th>Titulo</th>
+          <th>Data/Hora</th>
+          <th>Modelo</th>
+          <th>RMSE</th>
+          <th>Ensaios</th>
+          <th>Acoes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fit in fits %}
+          <tr>
+            <td><code>{{ fit.fit_id }}</code></td>
+            <td>{{ fit.titulo or '--' }}</td>
+            <td>{{ fit.created_at_display or '--' }}</td>
+            <td>
+              <div><code>{{ fit.model_family or '--' }}</code></div>
+              <small class="text-muted">{{ fit.fit_method or '--' }} / {{ fit.model_version or '--' }}</small>
+            </td>
+            <td>
+              {% if fit.rmse_alpha is number %}
+                {{ '%.5f'|format(fit.rmse_alpha) }}
+                {% if fit.rmse_torque is number %}
+                  <br><small class="text-muted">Torque: {{ '%.5f'|format(fit.rmse_torque) }}</small>
+                {% endif %}
+              {% else %}
+                --
+              {% endif %}
+            </td>
+            <td>{{ fit.ensaios_count }}</td>
+            <td>
+              <a class="btn btn-primary btn-sm" href="{{ url_for('reometria.reometria_fit_result', fit_id=fit.fit_id) }}">
+                Abrir relatorio
+              </a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="alert alert-light border mb-0">
+    Nenhum fit encontrado.
+  </div>
+{% endif %}

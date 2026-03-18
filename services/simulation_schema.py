@@ -1,6 +1,7 @@
 import numpy as np
 
 from services.engine_registry import get_engine_status, normalize_engine
+from services.simulation_diagnostics import extract_simulation_diagnostics
 
 
 SIMULATION_SCHEMA_VERSION = "simulation_output_v1"
@@ -43,6 +44,12 @@ OPTIONAL_FIELDS = (
     "induction_extrapolation_warning",
     "induction_model_regime",
     "quality_status",
+    "prediction_validity",
+    "prediction_validity_reason",
+    "degraded_mode",
+    "engine_type",
+    "engine_role",
+    "reliability_note",
     "clip_events_count",
     "nan_recovery_events",
     "numerical_warnings",
@@ -303,6 +310,46 @@ def normalize_simulation_output(raw_payload, *, engine):
         or metrics.get("quality_status")
         or "healthy"
     )
+    diagnostics_seed = dict(payload)
+    diagnostics_seed.update(
+        {
+            "times": times,
+            "t_snaps": t_snaps,
+            "alpha_snaps": alpha_snaps,
+            "process_state_final": process_state_final,
+            "quality_status": quality_status,
+            "induction_confidence": induction_confidence,
+            "induction_extrapolation_warning": bool(induction_extrapolation_warning),
+            "metrics": metrics,
+        }
+    )
+    diagnostics = extract_simulation_diagnostics(diagnostics_seed, engine=engine_key)
+    prediction_validity = str(
+        payload.get("prediction_validity")
+        or metrics.get("prediction_validity")
+        or diagnostics.get("prediction_validity")
+        or "low_confidence_exploratory"
+    )
+    prediction_validity_reason = str(
+        payload.get("prediction_validity_reason")
+        or metrics.get("prediction_validity_reason")
+        or diagnostics.get("prediction_validity_reason")
+        or "not_evaluated"
+    )
+    degraded_mode = str(
+        payload.get("degraded_mode")
+        or metrics.get("degraded_mode")
+        or diagnostics.get("degraded_mode")
+        or "none"
+    )
+    engine_type = str(diagnostics.get("engine_type") or "unknown")
+    engine_role = str(diagnostics.get("engine_role") or "unknown")
+    reliability_note = str(
+        payload.get("reliability_note")
+        or metrics.get("reliability_note")
+        or diagnostics.get("reliability_note")
+        or ""
+    )
 
     metrics.setdefault("clip_events_count", clip_events_count)
     metrics.setdefault("nan_recovery_events", nan_recovery_events)
@@ -315,6 +362,12 @@ def normalize_simulation_output(raw_payload, *, engine):
     metrics.setdefault("induction_extrapolation_warning", bool(induction_extrapolation_warning))
     metrics.setdefault("induction_model_regime", induction_model_regime)
     metrics.setdefault("quality_status", quality_status)
+    metrics.setdefault("prediction_validity", prediction_validity)
+    metrics.setdefault("prediction_validity_reason", prediction_validity_reason)
+    metrics.setdefault("degraded_mode", degraded_mode)
+    metrics.setdefault("engine_type", engine_type)
+    metrics.setdefault("engine_role", engine_role)
+    metrics.setdefault("reliability_note", reliability_note)
 
     shape = _to_int_tuple(payload.get("shape"))
     full_shape = _to_int_tuple(payload.get("full_shape")) or shape
@@ -356,6 +409,12 @@ def normalize_simulation_output(raw_payload, *, engine):
             "induction_extrapolation_warning": bool(induction_extrapolation_warning),
             "induction_model_regime": induction_model_regime,
             "quality_status": quality_status,
+            "prediction_validity": prediction_validity,
+            "prediction_validity_reason": prediction_validity_reason,
+            "degraded_mode": degraded_mode,
+            "engine_type": engine_type,
+            "engine_role": engine_role,
+            "reliability_note": reliability_note,
             "clip_events_count": clip_events_count,
             "nan_recovery_events": nan_recovery_events,
             "numerical_warnings": list(numerical_warnings),

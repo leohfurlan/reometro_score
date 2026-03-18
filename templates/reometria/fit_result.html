@@ -33,6 +33,19 @@
   }
 </style>
 
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit') }}">Reometria Fit</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('reometria.reometria_fit_history') }}">Fits executados</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Fit {{ payload.fit_id }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('reometria.reometria_fit_history') }}">Voltar para fits executados</a>
+  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('reometria.reometria_fit_new') }}">Novo fit</a>
+</div>
+
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
     <div class="row g-3 align-items-end">
@@ -346,9 +359,17 @@
             <tr>
               <th>ID Simulacao</th>
               <th>Engine</th>
+              <th>Tipo</th>
               <th>Modo</th>
               <th>Temp. Molde</th>
+              <th>Alpha medio final</th>
+              <th>Estado final</th>
+              <th>Quality</th>
+              <th>Prediction validity</th>
+              <th>Induction confidence</th>
+              <th>Extrapolation</th>
               <th>Status</th>
+              <th>Observacao</th>
               <th>Data/Hora</th>
               <th>Acoes</th>
             </tr>
@@ -362,6 +383,11 @@
                   <div>{{ sim.engine or '--' }}</div>
                   <small class="text-muted">{{ sim.engine_status or '--' }}</small>
                 </td>
+                <td>
+                  <span class="badge {% if (sim.engine_type or '') == 'operational' %}bg-success{% elif (sim.engine_type or '') == 'physical' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+                    {{ sim.engine_type or '--' }}
+                  </span>
+                </td>
                 <td>{{ sim.mode or '--' }}</td>
                 <td>
                   {% if sim.mold_temp_c is number %}
@@ -373,9 +399,40 @@
                   {% endif %}
                 </td>
                 <td>
+                  {% if sim.alpha_mean_final is number %}
+                    {{ ('%.3f'|format(sim.alpha_mean_final)).replace('.', ',') }}
+                  {% else %}
+                    --
+                  {% endif %}
+                </td>
+                <td>{{ sim.process_state_final or '--' }}</td>
+                <td>
+                  {% set quality = (sim.quality_status or '')|lower %}
+                  <span class="badge {% if quality == 'critical' %}bg-danger{% elif quality == 'warning' %}bg-warning text-dark{% elif quality == 'info' %}bg-secondary{% else %}bg-success{% endif %}">
+                    {{ sim.quality_status or '--' }}
+                  </span>
+                </td>
+                <td>
+                  {% set validity = (sim.prediction_validity or '')|lower %}
+                  <span class="badge {% if validity == 'invalid_for_prediction' %}bg-danger{% elif validity == 'low_confidence_exploratory' %}bg-warning text-dark{% elif validity == 'valid_for_prediction' %}bg-success{% elif validity == 'operational_baseline' %}bg-primary{% else %}bg-secondary{% endif %}">
+                    {{ sim.prediction_validity or '--' }}
+                  </span>
+                </td>
+                <td>{{ sim.induction_confidence or '--' }}</td>
+                <td>
+                  {% if sim.induction_extrapolation_warning %}
+                    <span class="badge bg-warning text-dark">true</span>
+                  {% else %}
+                    <span class="badge bg-success">false</span>
+                  {% endif %}
+                </td>
+                <td>
                   <span class="badge {% if status_lower in ['concluida', 'completed', 'ok', 'sucesso'] %}bg-success{% elif status_lower in ['falha', 'failed', 'erro', 'error'] %}bg-danger{% elif status_lower in ['running', 'executando'] %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
                     {{ sim.status or '--' }}
                   </span>
+                </td>
+                <td>
+                  <small>{{ sim.reliability_note or '--' }}</small>
                 </td>
                 <td>{{ sim.created_at_display or sim.created_at or '--' }}</td>
                 <td>

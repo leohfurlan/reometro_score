@@ -29,6 +29,7 @@ from services.kinetic_model_service import (
     extract_model_parameters,
     normalize_model_family,
 )
+from services.simulation_diagnostics import extract_simulation_diagnostics
 
 OUT_DIR = Path("data/out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -43,6 +44,9 @@ INDUCTION_MIN_SCORCH_REF_TEMP_C = 180.0
 INDUCTION_MIN_SCORCH_REF_TIME_S = 0.1
 INDUCTION_EXTRAPOLATION_MILD_DELTA_C = 5.0
 INDUCTION_EXTRAPOLATION_STRONG_DELTA_C = 15.0
+INDUCTION_ACTIVATION_MIN_TEMP_C = 95.0
+INDUCTION_ACTIVATION_RAMP_C = 12.0
+INDUCTION_LOW_EXTRAP_DECAY_C = 12.0
 CRITICAL_TRACE_KEEP_STEPS = 5
 MAX_SUBSTEPS_PER_STEP = 256
 QUALITY_THRESHOLDS = {
@@ -823,6 +827,67 @@ def _scorch_time_arrhenius(temp_k, a_ind, e_ind, *, diagnostics=None, step=None)
     return np.maximum(t_scorch, 1e-12)
 
 
+def _resolve_induction_activation_params(validity_range):
+    if isinstance(validity_range, dict):
+        min_c = _safe_float(validity_range.get("min_c"), default=None)
+    else:
+        min_c = None
+    if min_c is None:
+        activation_temp_c = float(INDUCTION_ACTIVATION_MIN_TEMP_C)
+    else:
+        activation_temp_c = float(max(INDUCTION_ACTIVATION_MIN_TEMP_C, min_c - INDUCTION_EXTRAPOLATION_MILD_DELTA_C))
+    return {
+        "activation_temp_c": activation_temp_c,
+        "activation_ramp_c": float(INDUCTION_ACTIVATION_RAMP_C),
+    }
+
+
+def _induction_activation_factor(temp_c, activation_temp_c, activation_ramp_c):
+    ramp = float(max(activation_ramp_c, 1e-6))
+    temp_arr = np.asarray(temp_c, dtype=float)
+    return np.clip((temp_arr - float(activation_temp_c)) / ramp, 0.0, 1.0)
+
+
+def _induction_low_extrapolation_penalty(temp_c, validity_range):
+    if not isinstance(validity_range, dict):
+        return np.ones_like(np.asarray(temp_c, dtype=float), dtype=float)
+
+    min_c = _safe_float(validity_range.get("min_c"), default=None)
+    if min_c is None:
+        return np.ones_like(np.asarray(temp_c, dtype=float), dtype=float)
+
+    temp_arr = np.asarray(temp_c, dtype=float)
+    low_delta = np.maximum(float(min_c) - temp_arr, 0.0)
+    decay = float(max(INDUCTION_LOW_EXTRAP_DECAY_C, 1e-6))
+    penalty = np.exp(-low_delta / decay)
+    # Strong low-side extrapolation should be strongly damped in induction stage.
+    penalty = np.where(low_delta >= INDUCTION_EXTRAPOLATION_STRONG_DELTA_C, penalty * 0.2, penalty)
+    return np.clip(penalty, 0.0, 1.0)
+
+
+def _resolve_degraded_mode(
+    *,
+    induction_extrapolation_level,
+    induction_confidence,
+    process_state_final,
+    alpha_mean_final,
+):
+    level_norm = str(induction_extrapolation_level or "").strip().lower()
+    confidence_norm = str(induction_confidence or "").strip().lower()
+    state_norm = str(process_state_final or "").strip().upper()
+    alpha_mean = _safe_float(alpha_mean_final, default=None)
+
+    low_confidence = confidence_norm in {"", "low", "unknown", "insufficient_data", "not_calibrated", "manual_override_blocked"}
+    low_cure = (alpha_mean is not None) and (alpha_mean <= 0.02)
+    stuck_heating = state_norm == "HEATING"
+
+    if level_norm == "strong" and low_confidence and stuck_heating and low_cure:
+        return "blocked_prediction"
+    if level_norm in {"mild", "strong"}:
+        return "limited_exploratory"
+    return "none"
+
+
 def _build_kinetics(fit_payload, kinetics_params):
     defaults = MechanisticKineticsParams()
     merged = asdict(defaults)
@@ -902,6 +967,10 @@ def save_simulation_v2(
     induction_extrapolation_warning=False,
     induction_model_regime="single_arrhenius",
     quality_status="healthy",
+    prediction_validity="low_confidence_exploratory",
+    prediction_validity_reason="not_evaluated",
+    degraded_mode="none",
+    reliability_note="",
     A_ind=DEFAULT_A_IND,
     E_ind=DEFAULT_E_IND,
     kinetics_params=None,
@@ -972,6 +1041,10 @@ def save_simulation_v2(
         induction_extrapolation_warning=np.array(bool(induction_extrapolation_warning), dtype=np.bool_),
         induction_model_regime=np.array(str(induction_model_regime or "single_arrhenius"), dtype="<U64"),
         quality_status=np.array(str(quality_status or "healthy"), dtype="<U16"),
+        prediction_validity=np.array(str(prediction_validity or "low_confidence_exploratory"), dtype="<U64"),
+        prediction_validity_reason=np.array(str(prediction_validity_reason or "not_evaluated"), dtype="<U128"),
+        degraded_mode=np.array(str(degraded_mode or "none"), dtype="<U64"),
+        reliability_note=np.array(str(reliability_note or ""), dtype="<U256"),
     )
     return str(sim_id), str(path)
 
@@ -1165,6 +1238,15 @@ def run_simulation_v2(
     induction_validity_range = induction_info.get("temperature_validity_range")
     induction_model_regime = str(induction_info.get("induction_model_regime") or "single_arrhenius")
     induction_confidence_runtime = str(induction_info.get("induction_confidence") or "low")
+    induction_activation = _resolve_induction_activation_params(induction_validity_range)
+    induction_activation_temp_c = float(induction_activation["activation_temp_c"])
+    induction_activation_ramp_c = float(induction_activation["activation_ramp_c"])
+    cure_activation_stage_counts = {
+        "HEATING": 0,
+        "INDUCTION": 0,
+        "ACTIVE_CURE": 0,
+    }
+    cure_activation_stage_final = "HEATING"
 
     progress_stride = max(1, steps // 120)
     store_pos = 0
@@ -1267,11 +1349,23 @@ def run_simulation_v2(
                     diagnostics=numerical_diagnostics,
                     step=step,
                 )
+                temp_local_c_before = np.asarray(t_field, dtype=float) - 273.15
                 induction_rate = (1.0 / np.maximum(np.asarray(t_scorch_local, dtype=float), 1e-12)).astype(float, copy=False)
-                induction_progress_increment = dt_inner * induction_rate
+                induction_activation_factor = _induction_activation_factor(
+                    temp_local_c_before,
+                    induction_activation_temp_c,
+                    induction_activation_ramp_c,
+                )
+                induction_low_penalty = _induction_low_extrapolation_penalty(
+                    temp_local_c_before,
+                    induction_validity_range,
+                )
+                induction_gate = np.clip(induction_activation_factor * induction_low_penalty, 0.0, 1.0)
+                induction_rate_effective = induction_rate * induction_gate
+                induction_progress_increment = dt_inner * induction_rate_effective
                 step_max_induction_progress_rate = max(
                     step_max_induction_progress_rate,
-                    float(np.max(np.asarray(induction_rate, dtype=float))),
+                    float(np.max(np.asarray(induction_rate_effective, dtype=float))),
                 )
                 induction_progress_field = induction_progress_field + induction_progress_increment
                 induction_progress_field = _nan_to_num_with_diagnostics(
@@ -1283,6 +1377,17 @@ def run_simulation_v2(
                     neginf=0.0,
                 ).astype(np.float32, copy=False)
                 induction_unlocked = np.asarray(induction_progress_field >= 1.0, dtype=bool)
+                mean_temp_c_before = float(np.mean(temp_local_c_before))
+                mean_induction_progress = float(np.mean(np.asarray(induction_progress_field, dtype=float)))
+                if mean_temp_c_before < induction_activation_temp_c:
+                    cure_activation_stage_final = "HEATING"
+                elif mean_induction_progress < 1.0:
+                    cure_activation_stage_final = "INDUCTION"
+                else:
+                    cure_activation_stage_final = "ACTIVE_CURE"
+                cure_activation_stage_counts[cure_activation_stage_final] = (
+                    cure_activation_stage_counts.get(cure_activation_stage_final, 0) + 1
+                )
 
                 # Semi-implicit damping for cure/reversion rates:
                 # explicit rates are divided by a local saturation factor tied to remaining capacity.
@@ -1498,6 +1603,7 @@ def run_simulation_v2(
                 "step_induction_progress_rate_s_inv": float(step_max_induction_progress_rate),
                 "step_induction_extrapolation_c": float(step_max_induction_extrapolation_c),
                 "process_state": str(process_sm.state.value),
+                "cure_activation_stage": str(cure_activation_stage_final),
                 "thermal_integration_mode": "imex_diffusion" if use_imex_diffusion else "explicit_split",
             }
             step_context["reason"] = _infer_critical_reason(step_context)
@@ -1510,6 +1616,7 @@ def run_simulation_v2(
                 stiffness_track["critical_reason"] = str(step_context["reason"])
                 stiffness_track["critical_context"] = {
                     "process_state": str(step_context["process_state"]),
+                    "cure_activation_stage": str(step_context["cure_activation_stage"]),
                     "substeps": int(step_context["substeps"]),
                     "thermal_integration_mode": str(step_context["thermal_integration_mode"]),
                 }
@@ -1621,6 +1728,70 @@ def run_simulation_v2(
         induction_extrapolation_level=str(induction_eval["induction_extrapolation_level"]),
         induction_extrapolation_c=float(induction_eval["max_extrapolation_c"]),
     )
+    alpha_mean_final = None
+    if len(alpha_snaps):
+        alpha_mean_final = float(np.mean(np.asarray(alpha_snaps[-1], dtype=float)))
+    degraded_mode = _resolve_degraded_mode(
+        induction_extrapolation_level=induction_eval["induction_extrapolation_level"],
+        induction_confidence=induction_confidence_runtime,
+        process_state_final=process_sm.state.value,
+        alpha_mean_final=alpha_mean_final,
+    )
+    if degraded_mode != "none":
+        degraded_severity = "critical" if degraded_mode == "blocked_prediction" else "warning"
+        quality_payload["quality_flags"].append(
+            {
+                "code": "degraded_mode",
+                "severity": degraded_severity,
+                "value": 1.0,
+                "thresholds": {"info": 0.0, "warning": 0.0, "critical": 1.0},
+                "message": f"Degraded mode active: {degraded_mode}.",
+            }
+        )
+        severity_breakdown = quality_payload.get("quality_severity_breakdown") or {}
+        for key in ("info", "warning", "critical"):
+            severity_breakdown.setdefault(key, 0)
+        severity_breakdown[degraded_severity] += 1
+        quality_payload["quality_severity_breakdown"] = severity_breakdown
+        if severity_breakdown["critical"] > 0:
+            quality_payload["quality_status"] = "critical"
+        elif severity_breakdown["warning"] > 0:
+            quality_payload["quality_status"] = "warning"
+        elif severity_breakdown["info"] > 0:
+            quality_payload["quality_status"] = "info"
+        else:
+            quality_payload["quality_status"] = "healthy"
+    diagnostics_preview = extract_simulation_diagnostics(
+        {
+            "engine": "thermo_kinetic_v2",
+            "times": times,
+            "t_snaps": t_snaps,
+            "alpha_snaps": alpha_snaps,
+            "process_state_final": process_sm.state.value,
+            "induction_confidence": induction_confidence_runtime,
+            "induction_extrapolation_warning": bool(induction_eval["induction_extrapolation_warning"]),
+            "degraded_mode": degraded_mode,
+            "quality_status": quality_payload["quality_status"],
+            "metrics": {
+                "induction_extrapolation_level": str(induction_eval["induction_extrapolation_level"]),
+            },
+        },
+        engine="thermo_kinetic_v2",
+    )
+    prediction_validity = str(diagnostics_preview.get("prediction_validity") or "low_confidence_exploratory")
+    prediction_validity_reason = str(diagnostics_preview.get("prediction_validity_reason") or "not_evaluated")
+    reliability_note = str(diagnostics_preview.get("reliability_note") or "")
+    if degraded_mode != "none":
+        _append_numerical_warning(
+            numerical_diagnostics,
+            code="degraded_mode",
+            message=(
+                f"Degraded mode active ({degraded_mode}) due to induction validity limits; "
+                f"prediction_validity={prediction_validity}."
+            ),
+            step=int(stiffness_track["critical_step_index"]),
+            severity="warning" if degraded_mode != "blocked_prediction" else "critical",
+        )
 
     metrics_payload = {
         "kinetic_model_family": model_family,
@@ -1662,11 +1833,19 @@ def run_simulation_v2(
         "temperature_max_seen_c": float(temp_seen_max_c),
         "induction_reference_temp_c": induction_info.get("reference_temp_c"),
         "induction_reference_t_scorch_s": induction_info.get("reference_t_scorch_s"),
+        "induction_activation_temp_c": float(induction_activation_temp_c),
+        "induction_activation_ramp_c": float(induction_activation_ramp_c),
+        "cure_activation_stage_final": str(cure_activation_stage_final),
+        "cure_activation_stage_counts": dict(cure_activation_stage_counts),
         "h_mold_w_m2k": float(process_config.h_mold),
         "h_air_w_m2k": float(process_config.h_air),
         "quality_flags": list(quality_payload["quality_flags"]),
         "quality_status": str(quality_payload["quality_status"]),
         "quality_severity_breakdown": dict(quality_payload["quality_severity_breakdown"]),
+        "prediction_validity": prediction_validity,
+        "prediction_validity_reason": prediction_validity_reason,
+        "degraded_mode": degraded_mode,
+        "reliability_note": reliability_note,
     }
 
     _check_cancel()
@@ -1713,6 +1892,10 @@ def run_simulation_v2(
         induction_extrapolation_warning=bool(induction_eval["induction_extrapolation_warning"]),
         induction_model_regime=induction_model_regime,
         quality_status=quality_payload["quality_status"],
+        prediction_validity=prediction_validity,
+        prediction_validity_reason=prediction_validity_reason,
+        degraded_mode=degraded_mode,
+        reliability_note=reliability_note,
         kinetics_params=asdict(kinetics.params),
     )
     _emit_progress("concluido", 100, "Simulacao v2 concluida.")
@@ -1826,6 +2009,26 @@ def load_simulation_v2(sim_id):
         if "quality_status" in files
         else str(metrics.get("quality_status") or "healthy")
     )
+    prediction_validity = (
+        str(d["prediction_validity"])
+        if "prediction_validity" in files
+        else str(metrics.get("prediction_validity") or "low_confidence_exploratory")
+    )
+    prediction_validity_reason = (
+        str(d["prediction_validity_reason"])
+        if "prediction_validity_reason" in files
+        else str(metrics.get("prediction_validity_reason") or "not_evaluated")
+    )
+    degraded_mode = (
+        str(d["degraded_mode"])
+        if "degraded_mode" in files
+        else str(metrics.get("degraded_mode") or "none")
+    )
+    reliability_note = (
+        str(d["reliability_note"])
+        if "reliability_note" in files
+        else str(metrics.get("reliability_note") or "")
+    )
     clip_events_count = int(metrics.get("clip_events_count", 0) or 0)
     nan_recovery_events = int(metrics.get("nan_recovery_events", 0) or 0)
 
@@ -1833,6 +2036,10 @@ def load_simulation_v2(sim_id):
     metrics.setdefault("induction_extrapolation_warning", bool(induction_extrapolation_warning))
     metrics.setdefault("induction_model_regime", str(induction_model_regime))
     metrics.setdefault("quality_status", str(quality_status))
+    metrics.setdefault("prediction_validity", str(prediction_validity))
+    metrics.setdefault("prediction_validity_reason", str(prediction_validity_reason))
+    metrics.setdefault("degraded_mode", str(degraded_mode))
+    metrics.setdefault("reliability_note", str(reliability_note))
 
     return {
         "sim_id": str(d["sim_id"]),
@@ -1882,6 +2089,10 @@ def load_simulation_v2(sim_id):
         "induction_extrapolation_warning": bool(induction_extrapolation_warning),
         "induction_model_regime": str(induction_model_regime),
         "quality_status": str(quality_status),
+        "prediction_validity": str(prediction_validity),
+        "prediction_validity_reason": str(prediction_validity_reason),
+        "degraded_mode": str(degraded_mode),
+        "reliability_note": str(reliability_note),
     }
 
 

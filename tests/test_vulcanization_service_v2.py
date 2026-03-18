@@ -540,6 +540,10 @@ def test_save_load_v2_round_trip_preserves_shapes_and_metadata(tmp_path, monkeyp
         induction_extrapolation_warning=True,
         induction_model_regime="single_arrhenius",
         quality_status="warning",
+        prediction_validity="invalid_for_prediction",
+        prediction_validity_reason="critical_extrapolation",
+        degraded_mode="blocked_prediction",
+        reliability_note="Resultado exploratorio.",
         kinetics_params={"Ac": 1.0e6, "Eac": 7.0e4},
     )
 
@@ -566,6 +570,10 @@ def test_save_load_v2_round_trip_preserves_shapes_and_metadata(tmp_path, monkeyp
     assert loaded["induction_extrapolation_warning"] is True
     assert loaded["induction_model_regime"] == "single_arrhenius"
     assert loaded["quality_status"] == "warning"
+    assert loaded["prediction_validity"] == "invalid_for_prediction"
+    assert loaded["prediction_validity_reason"] == "critical_extrapolation"
+    assert loaded["degraded_mode"] == "blocked_prediction"
+    assert loaded["reliability_note"] == "Resultado exploratorio."
     assert int(loaded["metrics"]["clip_events_count"]) == 2
     assert int(loaded["metrics"]["nan_recovery_events"]) == 1
     assert len(loaded["numerical_warnings"]) == 1
@@ -622,6 +630,9 @@ def test_load_v2_is_backward_compatible_with_missing_new_fields(tmp_path, monkey
     assert loaded["induction_extrapolation_warning"] is False
     assert loaded["induction_model_regime"] == "single_arrhenius"
     assert loaded["quality_status"] == "healthy"
+    assert loaded["prediction_validity"] == "low_confidence_exploratory"
+    assert loaded["prediction_validity_reason"] == "not_evaluated"
+    assert loaded["degraded_mode"] == "none"
     assert loaded["clip_events_count"] == 0
     assert loaded["nan_recovery_events"] == 0
 
@@ -645,6 +656,10 @@ def test_load_v2_normalized_exposes_unified_schema(tmp_path, monkeypatch):
     assert "induction_extrapolation_warning" in normalized
     assert "induction_model_regime" in normalized
     assert "quality_status" in normalized
+    assert "prediction_validity" in normalized
+    assert "prediction_validity_reason" in normalized
+    assert "degraded_mode" in normalized
+    assert "reliability_note" in normalized
     assert "clip_events_count" in normalized
     assert "nan_recovery_events" in normalized
 
@@ -734,6 +749,8 @@ def test_induction_extrapolation_levels_and_quality_status(tmp_path, monkeypatch
     assert bool(m_strong["induction_extrapolation_warning"]) is True
     assert m_strong["quality_status"] == "critical"
     assert sim_strong["induction_confidence"] in {"low", "medium"}
+    assert sim_strong["prediction_validity"] in {"invalid_for_prediction", "low_confidence_exploratory"}
+    assert sim_strong["degraded_mode"] in {"limited_exploratory", "blocked_prediction"}
 
 
 def test_critical_step_reason_tracks_dominant_mechanism(tmp_path, monkeypatch):
